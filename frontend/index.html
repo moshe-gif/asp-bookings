@@ -718,6 +718,35 @@ if(!CUSTOM_INVOICES){ CUSTOM_INVOICES = seedCustomInvoices(); saveCustomInvoices
 else { INVID = CUSTOM_INVOICES.reduce((max,i)=>{ const n=parseInt(String(i.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, INVID); }
 function getInvoice(id){ return CUSTOM_INVOICES.find(i=>i.id===id); }
 
+/* ============ OUTSIDE BOOKINGS (jobs that don't involve one of our own artists) ============ */
+let OBID = 1;
+function outsideBookingPayout(b){ return (b.totalAmount||0) - (b.aspCut||0); }
+function makeOutsideBooking(performerName, clientName, clientEmail, date, venue, city, state, totalAmount, aspCut, notes, status, daysAgo){
+  const created = addDays(new Date(), -daysAgo);
+  const log = [{ts:created.toISOString(), type:'system', text:`Outside booking created — ${performerName} for ${clientName}.`}];
+  const paid = status==='paid';
+  if(paid) log.push({ts:addDays(created, Math.max(1,Math.round(daysAgo/2))).toISOString(), type:'success', text:'Marked paid.'});
+  return {
+    id:'OB-'+(OBID++), performerName, performerContact:'', clientName, clientEmail: clientEmail||'',
+    date, venue: venue||'', city: city||'', state: state||'',
+    totalAmount, aspCut, notes: notes||'', status,
+    createdAt: fmtISO(created), log,
+  };
+}
+function seedOutsideBookings(){
+  return [
+    makeOutsideBooking('The Zemer Boys', 'Weiss Family', 'weiss.family@example.com', fmtISO(addDays(new Date(),18)), 'Prospect Hall', 'Brooklyn', 'NY', 4200, 500, 'Referred out — our roster was fully booked that night.', 'open', 6),
+    makeOutsideBooking('DJ Meir Spins', 'Continental Ballroom', 'events@continentalballroom.com', fmtISO(addDays(new Date(),-30)), 'Continental Ballroom', 'Chicago', 'IL', 1800, 1800, 'Coordination fee only — client paid the DJ directly.', 'paid', 35),
+  ];
+}
+const OUTSIDE_BOOKINGS_LS_KEY = 'asp_mock_outside_bookings_v1';
+function loadOutsideBookings(){ try{ const raw = localStorage.getItem(OUTSIDE_BOOKINGS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
+function saveOutsideBookings(){ try{ localStorage.setItem(OUTSIDE_BOOKINGS_LS_KEY, JSON.stringify(OUTSIDE_BOOKINGS)); }catch(e){} }
+let OUTSIDE_BOOKINGS = loadOutsideBookings();
+if(!OUTSIDE_BOOKINGS){ OUTSIDE_BOOKINGS = seedOutsideBookings(); saveOutsideBookings(); }
+else { OBID = OUTSIDE_BOOKINGS.reduce((max,b)=>{ const n=parseInt(String(b.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, OBID); }
+function getOutsideBooking(id){ return OUTSIDE_BOOKINGS.find(b=>b.id===id); }
+
 const ADMIN_USERS = [
   {id:'admin_bookings', name:'ASP Office — Bookings', email:'bookings@aspmanagement.com', initials:'AB'},
   {id:'admin_bookkeeping', name:'ASP Office — Bookkeeping', email:'bookkeeping@aspmanagement.com', initials:'AK'},
@@ -920,6 +949,8 @@ let S = {
   dressCodeForm:{},
   showNewInvoice:false,
   newInvoiceForm:{},
+  showNewOutsideBooking:false,
+  newOutsideBookingForm:{},
   showInvoiceDoc:false,
   invoiceDocId:null,
   showAskAI:false,
@@ -1137,7 +1168,7 @@ function closeAllOverlays(){
   S.eventId=null; S.projectId=null; S.showNewLead=false; S.showAddArtist=false; S.newArtistWelcome=null;
   S.dayListDate=null; S.showNewProject=false; S.showFlightForm=false; S.showContract=false;
   S.showTransportForm=false; S.showItinerary=false; S.itineraryEventId=null; S.showBlockTime=false; S.showAskAI=false; S.showDressCodeForm=false;
-  S.showNewInvoice=false; S.showInvoiceDoc=false; S.invoiceDocId=null;
+  S.showNewInvoice=false; S.showInvoiceDoc=false; S.invoiceDocId=null; S.showNewOutsideBooking=false;
   S.showAddCharge=false; S.showEventMenu=false; S.showDraftUpdate=false; S.projectTab='tasks'; S.showReminderPreview=false; S.showBookingConfirmation=false;
   S.showMobileMenu=false; S.showTypeForm=false; S.editingTypeName=null; S.typeForm=null;
 }
@@ -1216,6 +1247,7 @@ function render(){
     ${S.showBlockTime ? renderBlockTimeModal() : ''}
     ${S.showAskAI ? renderAskAIModal() : ''}
     ${S.showNewInvoice ? renderNewInvoiceModal() : ''}
+    ${S.showNewOutsideBooking ? renderNewOutsideBookingModal() : ''}
     ${S.showAddArtist ? renderAddArtistModal() : ''}
     ${S.newArtistWelcome ? renderWelcomeEmailPreview() : ''}
     ${S.dayListDate ? renderDayList() : ''}
@@ -1908,6 +1940,26 @@ function renderFinancialsPage(){
         <td data-label="Status"><span class="pill ${inv.status==='paid'?'pill-good':'pill-warn'}">${inv.status==='paid'?'Paid':'Open'}</span></td>
         <td data-label="">${inv.status==='open'? `<button class="btn btn-sm" data-action="mark-invoice-paid" data-id="${inv.id}">Mark Paid</button>` : ''}</td></tr>`;
     }).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--ink-3);padding:20px;">No custom invoices yet.</td></tr>`}
+    </tbody></table></div>
+
+  <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
+    <div class="card stat-tile"><span class="u-label">Outside Bookings Open</span><span class="val">${OUTSIDE_BOOKINGS.filter(b=>b.status==='open').length}</span><span class="sub">Not yet paid</span></div>
+    <div class="card stat-tile"><span class="u-label">ASP Earned (Outside)</span><span class="val">${money(OUTSIDE_BOOKINGS.reduce((s,b)=>s+b.aspCut,0))}</span><span class="sub">Across ${OUTSIDE_BOOKINGS.length} booking${OUTSIDE_BOOKINGS.length===1?'':'s'}</span></div>
+  </div>
+
+  <div class="section-head"><h2>Outside Bookings (${OUTSIDE_BOOKINGS.length})</h2><button class="btn btn-sm btn-primary" data-action="open-new-outside-booking">+ New Outside Booking</button></div>
+  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Jobs that don't involve one of our own roster artists — outside acts we coordinate or refer.</p>
+  <div class="card u-scroll-x table-cards" style="margin-bottom:22px;"><table>
+    <thead><tr><th>Performer</th><th>Client</th><th>Date</th><th>Total</th><th>ASP Cut</th><th>Payout to Performer</th><th>Status</th><th></th></tr></thead>
+    <tbody>${OUTSIDE_BOOKINGS.length? OUTSIDE_BOOKINGS.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(b=>{
+      return `<tr>
+        <td data-label="Performer">${esc(b.performerName)}</td><td data-label="Client">${esc(b.clientName)}</td>
+        <td data-label="Date" class="u-mono">${fmtDateShort(b.date)}</td><td data-label="Total" class="u-mono">${money(b.totalAmount)}</td>
+        <td data-label="ASP Cut" class="u-mono">${money(b.aspCut)}</td><td data-label="Payout to Performer" class="u-mono">${money(outsideBookingPayout(b))}</td>
+        <td data-label="Status"><span class="pill ${b.status==='paid'?'pill-good':'pill-warn'}">${b.status==='paid'?'Paid':'Open'}</span></td>
+        <td data-label="">${b.status==='open'? `<button class="btn btn-sm" data-action="mark-outside-booking-paid" data-id="${b.id}">Mark Paid</button>` : ''}</td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--ink-3);padding:20px;">No outside bookings yet.</td></tr>`}
     </tbody></table></div>
 
   <div class="section-head"><h2>All Jobs (${booked.length})</h2><button class="btn btn-sm" data-action="export-csv">${ICO.leads} Export CSV</button></div>
@@ -2972,6 +3024,40 @@ function renderNewInvoiceModal(){
   </div>`;
 }
 
+function renderNewOutsideBookingModal(){
+  const f = S.newOutsideBookingForm;
+  const total = Number(f.totalAmount)||0;
+  const cut = Number(f.aspCut)||0;
+  return `<div class="overlay center" data-action="overlay-close">
+    <div class="modal" data-stop data-form="newoutsidebooking" style="width:440px;">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">New Outside Booking</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <p style="font-size:12px;color:var(--ink-3);margin:0;">For jobs that don't involve one of our own roster artists — an outside act we're coordinating or referring.</p>
+        <div class="field"><label>Performer</label><input data-field="performerName" value="${esc(f.performerName||'')}" placeholder="Outside act's name"/></div>
+        <div class="field-row">
+          <div class="field"><label>Client</label><input data-field="clientName" value="${esc(f.clientName||'')}" placeholder="Client or venue"/></div>
+          <div class="field"><label>Client Email (optional)</label><input data-field="clientEmail" value="${esc(f.clientEmail||'')}" placeholder="name@example.com"/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Date</label><input type="date" data-field="date" value="${f.date||''}"/></div>
+          <div class="field"><label>Venue (optional)</label><input data-field="venue" value="${esc(f.venue||'')}" placeholder="Venue name"/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Total Booking Amount</label><input type="number" data-field="totalAmount" value="${f.totalAmount||''}" placeholder="4200"/></div>
+          <div class="field"><label>ASP's Cut</label><input type="number" data-field="aspCut" value="${f.aspCut||''}" placeholder="500"/></div>
+        </div>
+        <p style="font-size:11.5px;color:var(--ink-3);margin:-4px 0 0;">If ASP collects the full amount and pays the performer out, set the cut to what ASP keeps. If ASP only bills a coordination fee (client pays the performer directly), set the cut equal to the total.</p>
+        <div class="field"><label>Notes (optional)</label><input data-field="notes" value="${esc(f.notes||'')}" placeholder="How this booking works"/></div>
+        <div class="ledger" style="margin:4px 0 0;">
+          <div class="ledger-row"><span>Payout to Performer</span><span class="amt">${money(Math.max(0,total-cut))}</span></div>
+          <div class="ledger-row total"><span>ASP Keeps</span><span class="amt">${money(cut)}</span></div>
+        </div>
+        <button class="btn btn-primary btn-block" data-action="submit-outside-booking" style="margin-top:6px;">Create Booking</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderInvoiceDoc(){
   const inv = getInvoice(S.invoiceDocId); if(!inv) return '';
   const total = invoiceTotal(inv);
@@ -3246,6 +3332,30 @@ function doMarkInvoicePaid(id){
   inv.log.push({ts:new Date().toISOString(), type:'success', text:'Marked paid.'});
   saveCustomInvoices();
   toast('Invoice marked paid.', 'success');
+  render();
+}
+function doSubmitOutsideBooking(){
+  const f = S.newOutsideBookingForm;
+  const performerName = (f.performerName||'').trim();
+  const clientName = (f.clientName||'').trim();
+  const totalAmount = Number(f.totalAmount)||0;
+  const aspCut = Number(f.aspCut)||0;
+  if(!performerName){ toast('Enter the performer\'s name.', 'system'); return; }
+  if(!clientName){ toast('Enter who the client is.', 'system'); return; }
+  if(!f.date){ toast('Pick a date.', 'system'); return; }
+  if(!totalAmount){ toast('Enter the total booking amount.', 'system'); return; }
+  const booking = makeOutsideBooking(performerName, clientName, (f.clientEmail||'').trim(), f.date, (f.venue||'').trim(), '', '', totalAmount, aspCut, (f.notes||'').trim(), 'open', 0);
+  OUTSIDE_BOOKINGS.unshift(booking);
+  saveOutsideBookings();
+  toast(`Outside booking created for ${performerName}.`, 'success');
+  S.showNewOutsideBooking=false; S.newOutsideBookingForm={}; render();
+}
+function doMarkOutsideBookingPaid(id){
+  const b = getOutsideBooking(id); if(!b) return;
+  b.status = 'paid';
+  b.log.push({ts:new Date().toISOString(), type:'success', text:'Marked paid.'});
+  saveOutsideBookings();
+  toast('Outside booking marked paid.', 'success');
   render();
 }
 function doEmailItinerary(id){
@@ -3788,7 +3898,7 @@ function bindGlobal(){
       const form = el.closest('[data-form]')?.getAttribute('data-form');
       if(form==='task'){ S.newTaskText = el.value; return; }
       if(form==='comment'){ S.newCommentText = el.value; return; }
-      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, newinvoice:S.newInvoiceForm, typeform:S.typeForm, person:S.newPersonForm, finincome:S, finexpense:S };
+      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, typeform:S.typeForm, person:S.newPersonForm, finincome:S, finexpense:S };
       const target = formTargets[form] || S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
       if(el.type==='checkbox') render();
@@ -3925,6 +4035,9 @@ function bindGlobal(){
       case 'invoice-overlay-close': if(e.target===t) { S.showInvoiceDoc=false; S.invoiceDocId=null; render(); } break;
       case 'print-invoice': window.print(); break;
       case 'mark-invoice-paid': doMarkInvoicePaid(id); break;
+      case 'open-new-outside-booking': closeAllOverlays(); S.newOutsideBookingForm={}; S.showNewOutsideBooking=true; render(); break;
+      case 'submit-outside-booking': doSubmitOutsideBooking(); break;
+      case 'mark-outside-booking-paid': doMarkOutsideBookingPaid(id); break;
       case 'send-reminder': doSendReminder(id); break;
       case 'preview-reminder': S.showReminderPreview=true; render(); break;
       case 'close-reminder-preview': S.showReminderPreview=false; render(); break;
