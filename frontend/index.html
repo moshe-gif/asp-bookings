@@ -2522,13 +2522,18 @@ function renderAskAIModal(){
   </div>`;
 }
 
+const ARTIST_ROLES = ['Singer','Comedian','DJ'];
 function renderAddArtistModal(){
   const f = S.addArtistForm;
+  const role = f.role || 'Singer';
   return `<div class="overlay center" data-action="overlay-close-addartist">
     <div class="modal" data-stop data-form="addartist" style="width:420px;">
       <div class="sheet-head"><h2 style="font-size:1.3rem;">Add Artist</h2><button class="icon-btn" data-action="close-add-artist">${ICO.x}</button></div>
       <div class="sheet-body">
         <div class="field"><label>Full Name</label><input data-field="name" value="${esc(f.name||'')}" placeholder="Full name" autofocus/></div>
+        <div class="field"><label>Role</label>
+          <div class="chip-row">${ARTIST_ROLES.map(r=>`<button class="filter-chip ${role===r?'sel':''}" data-action="pick-artist-role" data-role="${r}">${r}</button>`).join('')}</div>
+        </div>
         <p style="font-size:12px;color:var(--ink-3);margin:0;">A login email and a "Welcome to ASP Management" message get generated automatically once you add them.</p>
         <button class="btn btn-primary btn-block" data-action="confirm-add-artist">Add Artist</button>
       </div>
@@ -3054,7 +3059,7 @@ function renderContractDoc(){
         </div>
 
         <div class="doc-section">
-          <p style="font-size:13px;margin:0 0 4px;"><strong>Artist shall provide:</strong><br/>${isComedian?'Live Comedy Performance':'Live Vocal Performance'}${hoursBetween(ev.time,ev.endTime)? ` for up to ${hoursBetween(ev.time,ev.endTime)} hours`:''}</p>
+          <p style="font-size:13px;margin:0 0 4px;"><strong>Artist shall provide:</strong><br/>${artist.role==='Comedian'?'Live Comedy Performance':artist.role==='DJ'?'DJ Performance':'Live Vocal Performance'}${hoursBetween(ev.time,ev.endTime)? ` for up to ${hoursBetween(ev.time,ev.endTime)} hours`:''}</p>
           <p style="font-size:13px;margin:0;"><strong>Client shall provide:</strong><br/>Payment</p>
         </div>
 
@@ -3370,7 +3375,8 @@ function doAddArtist(){
   const email = `${first}${last? '.'+last : ''}@aspmanagement.com`;
   const initials = (parts[0][0] + (parts[1]? parts[1][0] : '')).toUpperCase();
   const slot = (ARTISTS.length % 6) + 1;
-  const artist = {id, name, slot, initials, email, role:'Singer'};
+  const role = ARTIST_ROLES.includes(S.addArtistForm.role) ? S.addArtistForm.role : 'Singer';
+  const artist = {id, name, slot, initials, email, role};
   ARTISTS.push(artist); saveArtists();
   S.showAddArtist = false; S.addArtistForm = {};
   S.newArtistWelcome = {name, email};
@@ -3978,6 +3984,7 @@ function bindGlobal(){
       case 'close-add-artist': S.showAddArtist=false; render(); break;
       case 'overlay-close-addartist': if(e.target===t){ S.showAddArtist=false; render(); } break;
       case 'confirm-add-artist': doAddArtist(); break;
+      case 'pick-artist-role': S.addArtistForm.role = t.getAttribute('data-role'); render(); break;
       case 'close-welcome': S.newArtistWelcome=null; render(); break;
       case 'overlay-close-welcome': if(e.target===t){ S.newArtistWelcome=null; render(); } break;
       case 'toggle-event-menu': S.showEventMenu = !S.showEventMenu; render(); break;
