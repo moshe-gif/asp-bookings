@@ -1569,17 +1569,11 @@ function statTile(label, val, sub, view){
 function subpageBack(){
   return `<button class="icon-btn" data-action="nav" data-view="dashboard" title="Back to Dashboard" style="margin-bottom:14px;">${ICO.chev('l')}</button>`;
 }
-function buildDailyDigestWhatsAppText(openLeads, awaitingDeposit, awaitingBalance){
+function buildDailyDigestWhatsAppText(openLeads){
   const lines = [`Good morning! Here's today's follow-up list:`, ''];
   lines.push(`📋 Open Leads (${openLeads.length})`);
   if(openLeads.length) openLeads.forEach(e=>{ const a=artistById(e.artistId); lines.push(`• ${a.name} — ${e.clientName||e.type}, ${fmtDateShort(e.date)} (${-daysUntil(e.createdAt)}d old)`); });
   else lines.push('None — all caught up.');
-  lines.push('', `💰 Awaiting Down Payment (${awaitingDeposit.length})`);
-  if(awaitingDeposit.length) awaitingDeposit.forEach(e=>{ const a=artistById(e.artistId); lines.push(`• ${a.name} — ${e.clientName}, ${money(Math.round(e.price*0.15))}`); });
-  else lines.push('None.');
-  lines.push('', `💵 Awaiting Final Payment (${awaitingBalance.length})`);
-  if(awaitingBalance.length) awaitingBalance.forEach(e=>{ const a=artistById(e.artistId); lines.push(`• ${a.name} — ${e.clientName}, ${money(zelleBalance(e))}, due by ${fmtDateShort(e.date)}`); });
-  else lines.push('None.');
   lines.push('', `Let's follow up on these today!`);
   return lines.join('\n');
 }
@@ -1605,7 +1599,7 @@ function renderDailyDigestPage(){
   <div class="section-head"><h2>Awaiting Final Payment (${awaitingBalance.length})</h2></div>
   ${awaitingBalance.length? `<div class="card card-pad" style="margin-bottom:20px;">${awaitingBalance.map(e=>row(e, money(zelleBalance(e)))).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
 
-  <button class="btn btn-primary" data-action="copy-daily-digest">${ICO.share} Copy WhatsApp Message for Ilan</button>
+  <button class="btn btn-primary" data-action="copy-daily-digest">${ICO.share} Copy WhatsApp Message for Ilan (Open Leads)</button>
   `;
 }
 function renderInternationalPage(){
@@ -3453,9 +3447,7 @@ function doShareEvent(id){
 }
 function doCopyDailyDigest(){
   const openLeads = S.events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status));
-  const awaitingDeposit = S.events.filter(e=>e.status==='contract_sent');
-  const awaitingBalance = S.events.filter(e=>e.status==='booked' && !e.balanceReceived);
-  const text = buildDailyDigestWhatsAppText(openLeads, awaitingDeposit, awaitingBalance);
+  const text = buildDailyDigestWhatsAppText(openLeads);
   if(navigator.clipboard){
     navigator.clipboard.writeText(text).then(()=>toast('Copied — paste it to Ilan on WhatsApp.', 'success')).catch(()=>toast('Could not copy — try again.', 'system'));
   } else {
