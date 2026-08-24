@@ -8,6 +8,7 @@
 <link rel="manifest" href="manifest.json" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="icon" type="image/png" href="icon-192.png" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
 /* ============ TOKENS ============ */
 :root{
@@ -930,12 +931,28 @@ function seedAll(){
   return events;
 }
 
+/* ============ SUPABASE (real backend, not yet used for data -- auth only so far) ============ */
+// Publishable/anon key is meant to be public -- real access control lives in RLS policies,
+// not in keeping this secret. See supabase/migrations/ in the repo for the schema + policies.
+const SUPABASE_URL = 'https://psgpxbkncuavlnpplykf.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Orec7KI9Lwqd_ZfsKaEq9g__ewGiEiT';
+const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  auth: { experimental: { passkey: true } },
+}) : null;
+
 /* ============ STATE ============ */
 const LS_KEY='asp_mock_state_v1';
 let S = {
   user: null, // 'admin' or artist id
   view: 'dashboard',
   eventId: null,
+  realSession: null, // {supabaseUserId, email} once someone signs in for real (not Demo Mode)
+  showRealSignIn: false,
+  realSignInEmail: '',
+  realSignInSent: false,
+  realSignInNotFound: false, // true if a real session resolved to no matching artists/admin_users row
+  realPasskeys: null, // fetched async once a real session is active; null = not loaded yet
+  realPasskeyBusy: false,
   showNewLead:false,
   showFlightForm:false,
   checkingFlightId:null,
@@ -1004,6 +1021,64 @@ S.events = loadEvents();
 EVID = S.events.reduce((max,e)=>{ const n=parseInt(String(e.id).split('-')[1],10); return isNaN(n)? max : Math.max(max,n+1); }, EVID);
 
 function resetDemo(){ localStorage.removeItem(LS_KEY); S.events = seedAll(); saveEvents(); toast('Demo data reset.', 'system'); navigate('dashboard'); }
+
+/* ============ REAL AUTH (Supabase) ============ */
+// Separate from Demo Mode entirely: a real session never touches ARTISTS/ADMIN_USERS
+// mock data except to add exactly the one matching row for whoever just signed in, so the
+// rest of the app's isAdminUser()/artistById()/adminById() logic works completely unchanged.
+async function linkRealSessionToRoster(session){
+  S.realSession = { supabaseUserId: session.user.id, email: session.user.email };
+  const [{data: adminRow}, {data: artistRow}] = await Promise.all([
+    supabaseClient.from('admin_users').select('*').eq('user_id', session.user.id).maybeSingle(),
+    supabaseClient.from('artists').select('*').eq('user_id', session.user.id).maybeSingle(),
+  ]);
+  const row = adminRow || artistRow;
+  if(!row){
+    S.realSignInNotFound = true;
+    S.showRealSignIn = false; S.realSignInSent = false;
+    render();
+    return;
+  }
+  if(adminRow){
+    if(!ADMIN_USERS.some(u=>u.id===adminRow.id)) ADMIN_USERS.push({id:adminRow.id, name:adminRow.name, email:adminRow.email, initials:adminRow.initials});
+  } else {
+    if(!ARTISTS.some(a=>a.id===artistRow.id)) ARTISTS.push({id:artistRow.id, name:artistRow.name, slot:artistRow.slot, initials:artistRow.initials, email:artistRow.email, role:artistRow.role});
+  }
+  S.user = row.id;
+  S.view = adminRow ? 'dashboard' : 'a_dashboard';
+  S.showChooser = false; S.showRealSignIn = false; S.realSignInSent = false; S.realSignInNotFound = false;
+  S.realPasskeys = null;
+  pendingViewTransition = true;
+  render();
+}
+async function doSubmitMagicLink(){
+  const email = (S.realSignInEmail||'').trim();
+  if(!email){ toast('Enter your email.', 'system'); return; }
+  const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href.split('#')[0] } });
+  if(error){ toast('Could not send sign-in link: ' + error.message, 'system'); return; }
+  S.realSignInSent = true;
+  render();
+}
+async function doRealSignInPasskey(){
+  try{
+    const { error } = await supabaseClient.auth.signInWithPasskey();
+    if(error){ toast('Passkey sign-in failed: ' + error.message, 'system'); }
+    // On success, onAuthStateChange's SIGNED_IN handler takes over from here.
+  }catch(e){
+    toast('Passkey sign-in was cancelled or is not available on this device.', 'system');
+  }
+}
+async function doRealSignOut(){
+  if(supabaseClient) await supabaseClient.auth.signOut();
+  S.realSession = null; S.realSignInNotFound = false; S.user = null; S.realPasskeys = null;
+  render();
+}
+if(supabaseClient){
+  supabaseClient.auth.onAuthStateChange((event, session)=>{
+    if((event==='SIGNED_IN' || event==='INITIAL_SESSION') && session && !S.user) linkRealSessionToRoster(session);
+    if(event==='SIGNED_OUT'){ S.realSession = null; S.realPasskeys = null; }
+  });
+}
 
 /* ============ THEME PREF ============ */
 const THEME_LS_KEY = 'asp_theme_pref';
@@ -1487,10 +1562,45 @@ function renderSettingsPage(){
 /* ============ LOGIN ============ */
 function renderLogin(){
   if(S.showChooser) return renderAccountChooser();
+  if(S.showRealSignIn) return renderRealSignIn();
+  if(S.realSignInNotFound) return renderRealSignInNotFound();
   return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
     <div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP<small>Bookings</small></div>
     <p style="color:var(--ink-2);font-size:13.5px;margin:16px 0 26px;">Sign in to view your schedule and bookings.</p>
-    <button class="btn btn-primary btn-block" data-action="show-chooser">Sign In</button>
+    <button class="btn btn-primary btn-block" data-action="show-chooser">Sign In (Demo Mode)</button>
+    ${supabaseClient ? `
+    <div style="display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--ink-3);font-size:11px;">
+      <div style="flex:1;height:1px;background:var(--border);"></div>or<div style="flex:1;height:1px;background:var(--border);"></div>
+    </div>
+    <button class="btn btn-block" data-action="real-signin-passkey">${ICO.key} Sign in with Passkey</button>
+    <button class="btn btn-block btn-ghost" style="margin-top:8px;" data-action="open-real-signin">Sign in with email</button>
+    ` : ''}
+  </div></div>`;
+}
+function renderRealSignIn(){
+  const f = S.realSignInEmail;
+  if(S.realSignInSent){
+    return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
+      <div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP<small>Bookings</small></div>
+      <h2 style="font-size:1.05rem;margin:16px 0 6px;">Check your email</h2>
+      <p style="color:var(--ink-2);font-size:13px;margin:0 0 22px;">We sent a sign-in link to <strong>${esc(f)}</strong>. Click it to continue.</p>
+      <button class="btn btn-block btn-ghost" data-action="close-real-signin">Use a different email</button>
+    </div></div>`;
+  }
+  return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
+    <button class="icon-btn chooser-back" data-action="close-real-signin">${ICO.chev('l')}</button>
+    <div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP<small>Bookings</small></div>
+    <p style="color:var(--ink-2);font-size:13.5px;margin:16px 0 20px;">Enter your email and we'll send you a sign-in link.</p>
+    <div class="field" data-form="realsignin" style="text-align:left;"><input id="realSignInEmailInput" type="email" data-field="realSignInEmail" value="${esc(f)}" placeholder="you@aspmanagement.com" autofocus/></div>
+    <button class="btn btn-primary btn-block" style="margin-top:10px;" data-action="submit-magic-link">Send Sign-In Link</button>
+  </div></div>`;
+}
+function renderRealSignInNotFound(){
+  return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
+    <div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP<small>Bookings</small></div>
+    <h2 style="font-size:1.05rem;margin:16px 0 6px;">No account set up yet</h2>
+    <p style="color:var(--ink-2);font-size:13px;margin:0 0 22px;">You're signed in as <strong>${esc(S.realSession?.email||'')}</strong>, but the office hasn't added you to ASP Bookings yet. Contact the office to get set up.</p>
+    <button class="btn btn-block btn-ghost" data-action="real-signout">Sign Out</button>
   </div></div>`;
 }
 function renderAccountChooser(){
@@ -3890,7 +4000,7 @@ function bindGlobal(){
       const form = el.closest('[data-form]')?.getAttribute('data-form');
       if(form==='task'){ S.newTaskText = el.value; return; }
       if(form==='comment'){ S.newCommentText = el.value; return; }
-      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, typeform:S.typeForm, person:S.newPersonForm, finincome:S, finexpense:S };
+      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, typeform:S.typeForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S };
       const target = formTargets[form] || S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
       if(el.type==='checkbox') render();
@@ -3902,6 +4012,8 @@ function bindGlobal(){
     askAIInput.focus();
     const v = askAIInput.value; askAIInput.value=''; askAIInput.value=v;
   }
+  const realSignInEmailInput = document.getElementById('realSignInEmailInput');
+  if(realSignInEmailInput) realSignInEmailInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doSubmitMagicLink(); } });
   document.body.onclick = (e)=>{
     const t = e.target.closest('[data-action]');
     if(S.showEventMenu && !e.target.closest('.kebab-menu-wrap')){
@@ -3915,9 +4027,14 @@ function bindGlobal(){
     if(action==='overlay-close') return;
     switch(action){
       case 'login': S.user = t.getAttribute('data-user'); S.view = isAdminUser(S.user)?'dashboard':'a_dashboard'; S.showChooser=false; S.showMobileMenu=false; pendingViewTransition=true; render(); break;
-      case 'logout': S.user=null; S.eventId=null; S.showNewLead=false; S.showChooser=false; S.showMobileMenu=false; render(); break;
+      case 'logout': if(S.realSession && supabaseClient) supabaseClient.auth.signOut(); S.user=null; S.realSession=null; S.realPasskeys=null; S.eventId=null; S.showNewLead=false; S.showChooser=false; S.showMobileMenu=false; render(); break;
       case 'show-chooser': S.showChooser=true; render(); break;
       case 'hide-chooser': S.showChooser=false; render(); break;
+      case 'open-real-signin': S.showRealSignIn=true; S.realSignInSent=false; render(); break;
+      case 'close-real-signin': S.showRealSignIn=false; S.realSignInSent=false; S.realSignInEmail=''; render(); break;
+      case 'submit-magic-link': doSubmitMagicLink(); break;
+      case 'real-signin-passkey': doRealSignInPasskey(); break;
+      case 'real-signout': doRealSignOut(); break;
       case 'open-mobile-menu': S.showMobileMenu=true; render(); break;
       case 'close-mobile-menu': S.showMobileMenu=false; render(); break;
       case 'mobilemenu-close': if(e.target===t){ S.showMobileMenu=false; render(); } break;
