@@ -1073,6 +1073,35 @@ async function doRealSignOut(){
   S.realSession = null; S.realSignInNotFound = false; S.user = null; S.realPasskeys = null;
   render();
 }
+// Passkey field names (friendly_name/created_at) are a best guess -- Supabase's passkey API is
+// experimental/BETA and its exact response shape isn't fully documented; adjust here if it
+// turns out to differ once tested against a real registered passkey on the live domain.
+async function loadRealPasskeys(){
+  S.realPasskeyBusy = true;
+  try{
+    const { data, error } = await supabaseClient.auth.passkey.list();
+    if(error){ toast('Could not load passkeys: ' + error.message, 'system'); S.realPasskeys = []; }
+    else S.realPasskeys = (data||[]).map(p=>({ id: p.id, label: p.friendly_name || p.name || 'Passkey', addedAt: p.created_at }));
+  }catch(e){
+    S.realPasskeys = [];
+  }
+  S.realPasskeyBusy = false;
+  render();
+}
+async function doAddRealPasskey(){
+  const { error } = await supabaseClient.auth.registerPasskey();
+  if(error){ toast('Could not add passkey: ' + error.message, 'system'); return; }
+  toast('Passkey added.', 'success');
+  S.realPasskeys = null;
+  render();
+}
+async function doRemoveRealPasskey(id){
+  const { error } = await supabaseClient.auth.passkey.delete({ id });
+  if(error){ toast('Could not remove passkey: ' + error.message, 'system'); return; }
+  toast('Passkey removed.', 'system');
+  S.realPasskeys = null;
+  render();
+}
 if(supabaseClient){
   supabaseClient.auth.onAuthStateChange((event, session)=>{
     if((event==='SIGNED_IN' || event==='INITIAL_SESSION') && session && !S.user) linkRealSessionToRoster(session);
@@ -1494,20 +1523,38 @@ const NOTIFY_ITEMS = [
   ['weeklyGigDigest', 'Weekly gig digest', '', 'A weekly email listing your gigs for the coming week', true],
   ['dayOfReminder', 'Day-of reminder', '', "A reminder email the morning of each gig", true],
 ];
+function renderRealPasskeySection(){
+  if(S.realPasskeyBusy || S.realPasskeys===null){
+    return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0 10px;color:var(--ink-3);font-size:12.5px;">${markLoader(16)} Loading passkeys…</div>`;
+  }
+  const list = S.realPasskeys;
+  return `
+    ${list.length===0 ? `<p style="color:var(--ink-3);font-size:12.5px;margin:0 0 12px;">No passkeys yet on this account.</p>` : list.map(pk=>`<div class="passkey-row">
+      <div class="passkey-ico">${ICO.key}</div>
+      <div style="flex:1;min-width:0;"><strong style="font-size:13px;">${esc(pk.label)}</strong><br/><span style="font-size:11.5px;color:var(--ink-3);">${pk.addedAt?'Added '+fmtDateShort(pk.addedAt):''}</span></div>
+      <button class="icon-btn" data-action="remove-real-passkey" data-id="${esc(pk.id)}" title="Remove">${ICO.x}</button>
+    </div>`).join('')}
+    <button class="btn btn-sm" style="margin-top:12px;" data-action="add-real-passkey">${ICO.plus} Add a passkey</button>
+  `;
+}
 function renderSettingsPage(){
   const isAdmin = isAdminUser(S.user);
   const who = isAdmin ? adminById(S.user) : artistById(S.user);
   const st = getUserSettings(S.user);
   const themeIdx = THEME_OPTIONS.findIndex(([k])=>k===THEME_PREF);
+  const isReal = !!S.realSession;
+  if(isReal && S.realPasskeys===null && !S.realPasskeyBusy) loadRealPasskeys();
   return `
   <div class="card card-pad" style="margin-bottom:20px;">
     <h3 style="margin-bottom:12px;">Sign-in &amp; Security</h3>
+    ${isReal ? renderRealPasskeySection() : `
     ${st.passkeys.map(pk=>`<div class="passkey-row">
       <div class="passkey-ico">${ICO.key}</div>
       <div style="flex:1;min-width:0;"><strong style="font-size:13px;">${esc(pk.label)}</strong><br/><span style="font-size:11.5px;color:var(--ink-3);">Added ${fmtDateShort(pk.addedAt)}</span></div>
       ${st.passkeys.length>1 ? `<button class="icon-btn" data-action="remove-passkey" data-id="${pk.id}" title="Remove">${ICO.x}</button>` : ''}
     </div>`).join('')}
     <button class="btn btn-sm" style="margin-top:12px;" data-action="add-passkey">${ICO.plus} Add a passkey</button>
+    `}
   </div>
 
   <div class="card card-pad" style="margin-bottom:20px;">
@@ -4163,6 +4210,8 @@ function bindGlobal(){
       case 'toggle-notif': { const st=getUserSettings(S.user); const key=t.getAttribute('data-key'); const channel=t.getAttribute('data-channel')||'inApp'; st.notify[key][channel]=!st.notify[key][channel]; saveAllSettings(); render(); break; }
       case 'add-passkey': { const st=getUserSettings(S.user); const n=st.passkeys.length+1; st.passkeys.push({id:'pk-'+randInt(1,999999), label:`Passkey ${n}`, addedAt: fmtISO(new Date())}); saveAllSettings(); toast('Passkey added.', 'success'); render(); break; }
       case 'remove-passkey': { const st=getUserSettings(S.user); if(st.passkeys.length>1){ st.passkeys = st.passkeys.filter(pk=>pk.id!==id); saveAllSettings(); toast('Passkey removed.', 'system'); render(); } break; }
+      case 'add-real-passkey': doAddRealPasskey(); break;
+      case 'remove-real-passkey': doRemoveRealPasskey(id); break;
       case 'connect-calendar': { const st=getUserSettings(S.user); const who=isAdminUser(S.user)?adminById(S.user):artistById(S.user); st.calendarConnected=true; st.calendarEmail=who.email; saveAllSettings(); toast('Google Calendar connected.', 'success'); render(); break; }
       case 'disconnect-calendar': { const st=getUserSettings(S.user); st.calendarConnected=false; saveAllSettings(); toast('Google Calendar disconnected.', 'system'); render(); break; }
       case 'export-csv': exportCSV(); break;
