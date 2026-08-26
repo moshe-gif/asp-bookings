@@ -1034,6 +1034,7 @@ let S = {
   calDate: (()=>{const d=new Date(); d.setHours(0,0,0,0); return d;})(),
   calArtistFilter: [],
   finArtistFilter: 'all',
+  leadsArtistFilter: 'all',
   newLeadForm: {},
   flightForm: {},
 };
@@ -1971,9 +1972,15 @@ function renderEventTable(events, opts={}){
     </tbody></table></div>`;
 }
 function renderLeadsPage(){
-  const open = S.events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status)).sort((a,b)=>a.date.localeCompare(b.date));
-  const pending = S.events.filter(e=>e.status==='booked' && !e.balanceReceived).sort((a,b)=>a.date.localeCompare(b.date));
+  const artistFilter = S.leadsArtistFilter||'all';
+  const base = artistFilter==='all' ? S.events : S.events.filter(e=>e.artistId===artistFilter);
+  const open = base.filter(e=>['lead','negotiating','contract_sent'].includes(e.status)).sort((a,b)=>a.date.localeCompare(b.date));
+  const pending = base.filter(e=>e.status==='booked' && !e.balanceReceived).sort((a,b)=>a.date.localeCompare(b.date));
   return `
+    <div class="chip-row" style="margin-bottom:16px;">
+      <button class="filter-chip ${artistFilter==='all'?'sel':''}" data-action="filter-leads-artist" data-id="all">All Artists</button>
+      ${ARTISTS.map(a=>`<button class="filter-chip ${artistFilter===a.id?'sel':''}" data-action="filter-leads-artist" data-id="${a.id}"><span class="dot" data-slot="${a.slot}"></span>${a.name.split(' ')[0]}</button>`).join('')}
+    </div>
     <div class="section-head"><h2>Pipeline (${open.length})</h2></div>
     ${renderEventTable(open, {showArtist:true})}
     <div class="section-head" style="margin-top:26px;"><h2>Booked — Balance Pending (${pending.length})</h2></div>
@@ -4264,6 +4271,7 @@ function bindGlobal(){
         render(); break;
       }
       case 'fin-filter': S.finArtistFilter = id; render(); break;
+      case 'filter-leads-artist': S.leadsArtistFilter = id; render(); break;
       case 'pricing-artist': S.pricingArtist = id; render(); break;
       case 'send-contract': doSendContract(id); break;
       case 'mark-deposit': doMarkDeposit(id); break;
