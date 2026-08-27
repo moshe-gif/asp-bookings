@@ -217,9 +217,11 @@ tr.row-link:hover td{ background:var(--surface-2); }
 .sheet{ position:relative; width:560px; max-width:100%; height:100%; background:var(--page); box-shadow:var(--shadow-md); overflow-y:auto; animation:slidein .2s ease; }
 .kebab-scrim{ position:absolute; inset:0; background:rgba(20,16,8,.28); z-index:9; }
 @keyframes slidein{ from{transform:translateX(24px); opacity:0;} to{transform:translateX(0); opacity:1;} }
-@keyframes contentEnter{ from{opacity:0; transform:translateX(14px);} to{opacity:1; transform:translateX(0);} }
-.content.view-enter{ animation:contentEnter .26s cubic-bezier(.16,1,.3,1); }
-@media (prefers-reduced-motion: reduce){ .content.view-enter{ animation:none; } }
+@keyframes contentEnterRight{ from{opacity:0; transform:translateX(14px);} to{opacity:1; transform:translateX(0);} }
+@keyframes contentEnterLeft{ from{opacity:0; transform:translateX(-14px);} to{opacity:1; transform:translateX(0);} }
+.content.view-enter-right{ animation:contentEnterRight .26s cubic-bezier(.16,1,.3,1); }
+.content.view-enter-left{ animation:contentEnterLeft .26s cubic-bezier(.16,1,.3,1); }
+@media (prefers-reduced-motion: reduce){ .content.view-enter-right, .content.view-enter-left{ animation:none; } }
 .modal{ width:520px; max-width:100%; max-height:90vh; overflow-y:auto; background:var(--surface); border-radius:var(--r-lg); box-shadow:var(--shadow-md); animation:pop .16s ease; }
 @keyframes pop{ from{transform:scale(.97); opacity:0;} to{transform:scale(1); opacity:1;} }
 .sheet-head{ display:flex; align-items:flex-start; justify-content:space-between; padding:20px 22px; padding-top:max(20px, env(safe-area-inset-top)); border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:15; }
@@ -447,7 +449,7 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
   .bn-item.active{ color:var(--accent-ink); font-weight:700; }
   .bn-item.active .ico{ color:var(--accent-ink); }
   .bn-slider{ position:absolute; top:5px; bottom:5px; border-radius:999px; background:color-mix(in srgb, var(--accent) 55%, transparent); backdrop-filter:blur(8px) saturate(160%); -webkit-backdrop-filter:blur(8px) saturate(160%); border:1px solid color-mix(in srgb, var(--accent) 70%, transparent); box-shadow:0 1px 2px rgba(20,20,26,.12),0 4px 14px -4px var(--accent), inset 0 1px 0 rgba(255,255,255,.35); z-index:0; transition:left .22s cubic-bezier(.2,.7,.3,1), width .22s cubic-bezier(.2,.7,.3,1); }
-  .bn-item[data-view="artists"], .bn-item[data-view="travel"], .bn-item[data-view="pricing"], .bn-item[data-view="financials"], .bn-item[data-view="messages"]{ display:none; }
+  .bn-item[data-view="artists"], .bn-item[data-view="travel"], .bn-item[data-view="pricing"], .bn-item[data-view="messages"]{ display:none; }
   /* No horizontal scrolling anywhere on mobile: wrap instead of scroll, and swap
      any wide chip-row/tabbar for a single-line dropdown. */
   .tabbar{ flex-wrap:wrap; overflow-x:visible; row-gap:4px; }
@@ -1108,6 +1110,7 @@ async function linkRealSessionToRoster(session){
   S.showChooser = false; S.showRealSignIn = false; S.realSignInSent = false; S.realSignInNotFound = false;
   S.realPasskeys = null;
   pendingViewTransition = true;
+  pendingViewDirection = 'right';
   syncURL();
   render();
 }
@@ -1337,6 +1340,11 @@ function closeAllOverlays(){
   S.showMobileMenu=false; S.showTypeForm=false; S.editingTypeName=null; S.typeForm=null;
 }
 let pendingViewTransition = false;
+let pendingViewDirection = 'right';
+function slideDirection(oldView, newView){
+  const oldIdx = navOrderIndex(oldView), newIdx = navOrderIndex(newView);
+  return (oldIdx!==-1 && newIdx!==-1 && newIdx<oldIdx) ? 'left' : 'right';
+}
 /* ============ URL ROUTING (hash-based -- works on static hosting with no server config) ============ */
 function pathForState(){
   let seg = S.view;
@@ -1357,12 +1365,25 @@ function applyHashToState(){
   else { S.view = view; }
 }
 window.addEventListener('popstate', ()=>{
+  const oldView = S.view;
   closeAllOverlays();
   applyHashToState();
   pendingViewTransition = true;
+  pendingViewDirection = slideDirection(oldView, S.view);
   render();
 });
-function navigate(view, opts={}){ closeAllOverlays(); const changed = S.view!==view; S.view=view; Object.assign(S, opts); if(changed) pendingViewTransition = true; markSeen(view); syncURL(); render(); window.scrollTo({top:0}); }
+function navigate(view, opts={}){
+  const oldView = S.view;
+  closeAllOverlays();
+  const changed = oldView!==view;
+  S.view=view;
+  Object.assign(S, opts);
+  if(changed){ pendingViewTransition = true; pendingViewDirection = slideDirection(oldView, view); }
+  markSeen(view);
+  syncURL();
+  render();
+  window.scrollTo({top:0});
+}
 function openEvent(id){ closeAllOverlays(); S.eventId=id; render(); }
 function closeSheet(){ closeAllOverlays(); render(); }
 
@@ -1464,7 +1485,7 @@ function render(){
             ${renderUserChip()}
           </div>
         </div>
-        <div class="content${pendingViewTransition?' view-enter':''}">${renderView()}</div>
+        <div class="content${pendingViewTransition?(' view-enter-'+pendingViewDirection):''}">${renderView()}</div>
       </div>
     </div>
     ${renderBottomNav(isAdmin)}
@@ -1581,6 +1602,10 @@ const ARTIST_NAV_ITEMS = [
 ];
 const APP_VERSION = 'v1.0.0';
 const OVERTIME_PER_HALF_HOUR = 250;
+function navOrderIndex(v){
+  const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
+  return list.findIndex(([x])=>x===v);
+}
 function isNavActive(v){ return S.view===v || (v==='artists' && S.view==='artist_detail') || ((v==='projects'||v==='a_projects') && S.view==='project_detail'); }
 
 function renderRail(){
@@ -4322,7 +4347,7 @@ function bindGlobal(){
     if(action==='overlay-close' && e.target===t){ closeSheet(); return; }
     if(action==='overlay-close') return;
     switch(action){
-      case 'login': S.user = t.getAttribute('data-user'); S.view = isAdminUser(S.user)?'dashboard':'a_dashboard'; S.showChooser=false; S.showMobileMenu=false; pendingViewTransition=true; syncURL(); render(); break;
+      case 'login': S.user = t.getAttribute('data-user'); S.view = isAdminUser(S.user)?'dashboard':'a_dashboard'; S.showChooser=false; S.showMobileMenu=false; pendingViewTransition=true; pendingViewDirection='right'; syncURL(); render(); break;
       case 'logout': if(S.realSession && supabaseClient) supabaseClient.auth.signOut(); S.user=null; S.realSession=null; S.realPasskeys=null; S.eventId=null; S.showNewLead=false; S.showChooser=false; S.showMobileMenu=false; history.pushState(null,'',location.pathname+location.search); render(); break;
       case 'show-chooser': S.showChooser=true; render(); break;
       case 'hide-chooser': S.showChooser=false; render(); break;
