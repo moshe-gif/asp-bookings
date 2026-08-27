@@ -1105,6 +1105,7 @@ async function linkRealSessionToRoster(session){
   S.showChooser = false; S.showRealSignIn = false; S.realSignInSent = false; S.realSignInNotFound = false;
   S.realPasskeys = null;
   pendingViewTransition = true;
+  syncURL();
   render();
 }
 async function doSubmitMagicLink(){
@@ -1333,7 +1334,32 @@ function closeAllOverlays(){
   S.showMobileMenu=false; S.showTypeForm=false; S.editingTypeName=null; S.typeForm=null;
 }
 let pendingViewTransition = false;
-function navigate(view, opts={}){ closeAllOverlays(); const changed = S.view!==view; S.view=view; Object.assign(S, opts); if(changed) pendingViewTransition = true; markSeen(view); render(); window.scrollTo({top:0}); }
+/* ============ URL ROUTING (hash-based -- works on static hosting with no server config) ============ */
+function pathForState(){
+  let seg = S.view;
+  if(S.view==='artist_detail' && S.artistDetailId) seg += '/'+S.artistDetailId;
+  if(S.view==='project_detail' && S.projectId) seg += '/'+S.projectId;
+  return '#/'+seg;
+}
+function syncURL(){
+  const path = pathForState();
+  if(location.hash !== path) history.pushState(null, '', path);
+}
+function applyHashToState(){
+  const hash = location.hash.replace(/^#\/?/, '');
+  if(!hash) return;
+  const [view, id] = hash.split('/');
+  if(view==='artist_detail'){ S.view='artist_detail'; S.artistDetailId=id; }
+  else if(view==='project_detail'){ S.view='project_detail'; S.projectId=id; }
+  else { S.view = view; }
+}
+window.addEventListener('popstate', ()=>{
+  closeAllOverlays();
+  applyHashToState();
+  pendingViewTransition = true;
+  render();
+});
+function navigate(view, opts={}){ closeAllOverlays(); const changed = S.view!==view; S.view=view; Object.assign(S, opts); if(changed) pendingViewTransition = true; markSeen(view); syncURL(); render(); window.scrollTo({top:0}); }
 function openEvent(id){ closeAllOverlays(); S.eventId=id; render(); }
 function closeSheet(){ closeAllOverlays(); render(); }
 
@@ -1450,7 +1476,6 @@ function render(){
     ${S.dayListDate ? renderDayList() : ''}
     ${S.showNewProject ? renderNewProjectModal() : ''}
     ${S.showTypeForm ? renderProjectTypeFormModal() : ''}
-    ${S.projectId ? renderProjectDetail() : ''}
     ${S.eventId ? renderEventSheet(getEvent(S.eventId)) : ''}
     ${S.showReminderPreview ? renderReminderPreview() : ''}
     ${S.showBookingConfirmation ? renderBookingConfirmationPreview() : ''}
@@ -1492,6 +1517,7 @@ function renderDayList(){
 function pageTitle(){
   if(S.showNewLead) return (S.newLeadForm.kind==='internal') ? 'New Internal Day' : 'New Lead';
   if(S.eventId){ const ev=getEvent(S.eventId); return ev ? artistById(ev.artistId).name : ''; }
+  if(S.view==='project_detail'){ const p=getProject(S.projectId); return p ? p.title : 'Project'; }
   const t = {
     dashboard:'Dashboard', calendar:'Calendar', leads:'Open Leads', artists:'Artists', financials:'Financials', projects:'Projects', pricing:'Pricing',
     travel:'Travel', international:'International Opportunities', manage_project_types:'Project Types', daily_digest:'Daily Digest', messages:'Messages',
@@ -1552,7 +1578,7 @@ const ARTIST_NAV_ITEMS = [
 ];
 const APP_VERSION = 'v1.0.0';
 const OVERTIME_PER_HALF_HOUR = 250;
-function isNavActive(v){ return S.view===v || (v==='artists' && S.view==='artist_detail'); }
+function isNavActive(v){ return S.view===v || (v==='artists' && S.view==='artist_detail') || ((v==='projects'||v==='a_projects') && S.view==='project_detail'); }
 
 function renderRail(){
   return `<div class="rail">
@@ -1613,6 +1639,7 @@ function renderMobileMenu(isAdmin){
 
 function renderView(){
   if(S.view==='settings') return renderSettingsPage();
+  if(S.view==='project_detail') return renderProjectDetail();
   if(isAdminUser(S.user)){
     if(S.view==='dashboard') return renderMgmtDashboard();
     if(S.view==='calendar') return renderCalendarPage(S.events, {showFilter:true});
@@ -2445,7 +2472,7 @@ function renderBoardCard(pid, c){
   </div>`;
 }
 function renderProjectDetail(){
-  const p = getProject(S.projectId); if(!p) return '';
+  const p = getProject(S.projectId); if(!p) return `<div class="card empty">Project not found. <a href="#" data-action="nav" data-view="${isAdminUser(S.user)?'projects':'a_projects'}" style="color:var(--accent);">Back to Projects</a></div>`;
   const a = artistById(p.artistId);
   const isAdmin = isAdminUser(S.user);
   const pt = getProjectType(p.type);
@@ -2456,20 +2483,18 @@ function renderProjectDetail(){
   const fin = projectFinancials(p);
   const recordingSiblings = p.recordingEventId ? PROJECTS.filter(x=>x.recordingEventId===p.recordingEventId && x.id!==p.id) : [];
   const recordingEvent = p.recordingEventId ? getEvent(p.recordingEventId) : null;
+  const backView = isAdmin ? 'projects' : 'a_projects';
 
-  return `<div class="overlay" data-action="overlay-close-project">
-    <div class="sheet" data-stop>
-      <div class="sheet-head">
-        <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1;">
-          <span class="avatar" data-slot="${a.slot}" style="width:38px;height:38px;flex:none;">${a.initials}</span>
-          <div style="min-width:0;flex:1;">
-          ${isAdmin? `<input class="blend-input" data-action="set-project-title" data-id="${p.id}" value="${esc(p.title)}" placeholder="Project name…" style="font-family:var(--font-display);font-size:1.2rem;font-weight:600;padding:0;"/>`
-            : `<strong style="font-family:var(--font-display);font-size:1.2rem;display:block;">${esc(p.title)}</strong>`}
-          <span class="pill pill-accent">${p.type!=='General'? esc(p.type)+' · ':''}${esc(a.name)}</span></div>
-        </div>
-        <button class="icon-btn" data-action="close-project" style="flex:none;">${ICO.x}</button>
-      </div>
-      <div class="sheet-body">
+  return `
+    <button class="icon-btn" data-action="nav" data-view="${backView}" title="Back to Projects" style="margin-bottom:14px;">${ICO.chev('l')}</button>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+      <span class="avatar" data-slot="${a.slot}" style="width:44px;height:44px;flex:none;">${a.initials}</span>
+      <div style="min-width:0;flex:1;">
+      ${isAdmin? `<input class="blend-input" data-action="set-project-title" data-id="${p.id}" value="${esc(p.title)}" placeholder="Project name…" style="font-family:var(--font-display);font-size:1.3rem;font-weight:600;padding:0;"/>`
+        : `<strong style="font-family:var(--font-display);font-size:1.3rem;display:block;">${esc(p.title)}</strong>`}
+      <span class="pill pill-accent">${p.type!=='General'? esc(p.type)+' · ':''}${esc(a.name)}</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:18px;">
         <div class="card card-pad">
           <div class="u-label" style="margin-bottom:10px;">Project Info</div>
           <div style="display:flex;flex-direction:column;gap:10px;font-size:12.5px;">
@@ -2649,9 +2674,8 @@ function renderProjectDetail(){
           </div>`).join('')}</div>
           ` : ''}
         </div>
-      </div>
     </div>
-  </div>`;
+  `;
 }
 function renderNewProjectModal(){
   const f = S.newProjectForm;
@@ -3862,21 +3886,19 @@ function doAddProject(){
     }
     saveProjects();
     toast(`Recording Day booked — ${count} episode project${count===1?'':'s'} created.`, 'success');
-    S.showNewProject=false; S.newProjectForm={};
+    S.newProjectForm={};
     S.projectArtistFilter = artist.id;
-    S.projectId = created[0].id;
-    render();
+    navigate('project_detail', {projectId: created[0].id});
     return;
   }
 
   if(!(f.title||'').trim()){ toast('Enter a title.', 'system'); return; }
   const proj = makeProject(artist, type, f.title.trim(), 0, 0, f.dueDate||null, {subtitle:(f.whoFor||'').trim()});
   PROJECTS.unshift(proj); saveProjects();
-  S.showNewProject=false; S.newProjectForm={};
+  S.newProjectForm={};
   toast(`Project created for ${artist.name}.`, 'success');
   S.projectArtistFilter = artist.id;
-  S.projectId = proj.id;
-  render();
+  navigate('project_detail', {projectId: proj.id});
 }
 function doAddPerson(id){
   const f = S.newPersonForm;
@@ -4287,13 +4309,14 @@ function bindGlobal(){
       render();
     }
     if(!t) return;
+    if(t.tagName==='A' && t.getAttribute('href')==='#') e.preventDefault();
     const action = t.getAttribute('data-action');
     const id = t.getAttribute('data-id');
     if(action==='overlay-close' && e.target===t){ closeSheet(); return; }
     if(action==='overlay-close') return;
     switch(action){
-      case 'login': S.user = t.getAttribute('data-user'); S.view = isAdminUser(S.user)?'dashboard':'a_dashboard'; S.showChooser=false; S.showMobileMenu=false; pendingViewTransition=true; render(); break;
-      case 'logout': if(S.realSession && supabaseClient) supabaseClient.auth.signOut(); S.user=null; S.realSession=null; S.realPasskeys=null; S.eventId=null; S.showNewLead=false; S.showChooser=false; S.showMobileMenu=false; render(); break;
+      case 'login': S.user = t.getAttribute('data-user'); S.view = isAdminUser(S.user)?'dashboard':'a_dashboard'; S.showChooser=false; S.showMobileMenu=false; pendingViewTransition=true; syncURL(); render(); break;
+      case 'logout': if(S.realSession && supabaseClient) supabaseClient.auth.signOut(); S.user=null; S.realSession=null; S.realPasskeys=null; S.eventId=null; S.showNewLead=false; S.showChooser=false; S.showMobileMenu=false; history.pushState(null,'',location.pathname+location.search); render(); break;
       case 'show-chooser': S.showChooser=true; render(); break;
       case 'hide-chooser': S.showChooser=false; render(); break;
       case 'open-real-signin': S.showRealSignIn=true; S.realSignInSent=false; render(); break;
@@ -4436,9 +4459,7 @@ function bindGlobal(){
       case 'disconnect-calendar': { const st=getUserSettings(S.user); st.calendarConnected=false; saveAllSettings(); toast('Google Calendar disconnected.', 'system'); render(); break; }
       case 'export-csv': exportCSV(); break;
       case 'filter-project-artist': S.projectArtistFilter = t.getAttribute('data-id'); render(); break;
-      case 'open-project': closeAllOverlays(); S.projectId = id; render(); break;
-      case 'close-project': S.projectId = null; S.showDraftUpdate=false; S.projectTab='tasks'; render(); break;
-      case 'overlay-close-project': if(e.target===t){ S.projectId=null; S.showDraftUpdate=false; S.projectTab='tasks'; render(); } break;
+      case 'open-project': navigate('project_detail', {projectId:id}); break;
       case 'set-project-stage': doSetProjectStage(id, t.getAttribute('data-stage')); break;
       case 'toggle-task': doToggleTask(id, t.getAttribute('data-taskid')); break;
       case 'remove-task': doRemoveTask(id, t.getAttribute('data-taskid')); break;
@@ -4550,6 +4571,7 @@ function bindGlobal(){
   });
 }
 
+applyHashToState();
 render();
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
