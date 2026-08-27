@@ -133,6 +133,8 @@ input,select,textarea{font-family:inherit; font-size:inherit;}
 .rail-nav{ display:flex; flex-direction:column; gap:2px; position:relative; }
 .rail-link{ display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:var(--r-md); color:var(--ink-2); font-size:13.5px; font-weight:600; transition:.16s cubic-bezier(.2,.7,.3,1); position:relative; z-index:1; }
 .rail-link .ico{ width:17px; height:17px; flex:none; transition:transform .16s ease; }
+.nav-icon-wrap{ position:relative; display:inline-flex; flex:none; }
+.nav-badge{ position:absolute; top:-5px; right:-7px; background:var(--crit); color:#fff; font-size:9.5px; font-weight:700; line-height:1; min-width:14px; height:14px; border-radius:999px; display:flex; align-items:center; justify-content:center; padding:0 3px; box-shadow:0 0 0 2px var(--surface); }
 .rail-link:hover{ background:var(--surface-3); color:var(--ink); }
 .rail-link:hover .ico{ transform:scale(1.08); }
 .rail-link.active{ color:#fff; }
@@ -1331,7 +1333,7 @@ function closeAllOverlays(){
   S.showMobileMenu=false; S.showTypeForm=false; S.editingTypeName=null; S.typeForm=null;
 }
 let pendingViewTransition = false;
-function navigate(view, opts={}){ closeAllOverlays(); const changed = S.view!==view; S.view=view; Object.assign(S, opts); if(changed) pendingViewTransition = true; render(); window.scrollTo({top:0}); }
+function navigate(view, opts={}){ closeAllOverlays(); const changed = S.view!==view; S.view=view; Object.assign(S, opts); if(changed) pendingViewTransition = true; markSeen(view); render(); window.scrollTo({top:0}); }
 function openEvent(id){ closeAllOverlays(); S.eventId=id; render(); }
 function closeSheet(){ closeAllOverlays(); render(); }
 
@@ -1492,7 +1494,7 @@ function pageTitle(){
   if(S.eventId){ const ev=getEvent(S.eventId); return ev ? artistById(ev.artistId).name : ''; }
   const t = {
     dashboard:'Dashboard', calendar:'Calendar', leads:'Open Leads', artists:'Artists', financials:'Financials', projects:'Projects', pricing:'Pricing',
-    travel:'Travel', international:'International Opportunities', manage_project_types:'Project Types', daily_digest:'Daily Digest',
+    travel:'Travel', international:'International Opportunities', manage_project_types:'Project Types', daily_digest:'Daily Digest', messages:'Messages',
     artist_detail: artistById(S.artistDetailId)?.name || '',
     a_dashboard:'My Dashboard', a_calendar:'Calendar', a_gigs:'My Gigs', a_travel:'Travel', a_financials:'Financials', a_projects:'My Projects', settings:'Settings',
   };
@@ -1513,7 +1515,38 @@ function renderUserChip(){
 const MGMT_NAV_ITEMS = [
   ['dashboard','Dashboard',ICO.dash], ['calendar','Calendar',ICO.cal], ['leads','Leads',ICO.leads],
   ['artists','Artists',ICO.artists], ['travel','Travel',ICO.suitcase], ['projects','Projects',ICO.kanban], ['pricing','Pricing',ICO.tag], ['financials','Financials',ICO.money],
+  ['messages','Messages',ICO.sms],
 ];
+/* ============ "NEW SINCE YOU LAST LOOKED" BADGES ============ */
+// Per-section last-visited date (YYYY-MM-DD), persisted so the badge survives a reload.
+// A key with no stored date is seeded to today on first load, rather than treating all
+// existing history as "new" the moment this feature ships.
+const LAST_SEEN_LS_KEY = 'asp_mock_lastseen_v1';
+function loadLastSeen(){ try{ const raw = localStorage.getItem(LAST_SEEN_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
+function saveLastSeen(){ try{ localStorage.setItem(LAST_SEEN_LS_KEY, JSON.stringify(LAST_SEEN)); }catch(e){} }
+let LAST_SEEN = loadLastSeen() || {};
+['leads','financials','messages'].forEach(k=>{ if(!LAST_SEEN[k]) LAST_SEEN[k] = fmtISO(new Date()); });
+saveLastSeen();
+function markSeen(key){ if(LAST_SEEN[key]===undefined) return; LAST_SEEN[key] = fmtISO(new Date()); saveLastSeen(); }
+function newLeadsCount(){
+  const since = LAST_SEEN.leads;
+  return S.events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status) && e.createdAt && e.createdAt>since).length;
+}
+function newPaymentsCount(){
+  const since = LAST_SEEN.financials;
+  return S.events.filter(e=>(e.depositReceivedDate && e.depositReceivedDate>since) || (e.balanceReceivedDate && e.balanceReceivedDate>since)).length;
+}
+function newMessagesCount(){ return 0; } // WhatsApp isn't connected yet -- nothing to count.
+function navBadgeCount(v){
+  if(v==='leads') return newLeadsCount();
+  if(v==='financials') return newPaymentsCount();
+  if(v==='messages') return newMessagesCount();
+  return 0;
+}
+function navBadge(v){
+  const n = navBadgeCount(v);
+  return n>0 ? `<span class="nav-badge">${n>9?'9+':n}</span>` : '';
+}
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',ICO.mic], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
@@ -1525,7 +1558,7 @@ function renderRail(){
   return `<div class="rail">
     <div class="wordmark"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
     <div class="rail-nav">
-      ${MGMT_NAV_ITEMS.map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}">${ic}${l}</a>`).join('')}
+      ${MGMT_NAV_ITEMS.map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span>${l}</a>`).join('')}
       <a href="#" class="rail-link ${isNavActive('settings')?'active':''}" data-action="nav" data-view="settings">${ICO.settings}Settings</a>
     </div>
     <div class="rail-foot">
@@ -1551,7 +1584,7 @@ function renderArtistTopTabs(){
 function renderBottomNav(isAdmin){
   const items = isAdmin ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS;
   return `<div class="bottom-nav">
-    ${items.map(([v,l,ic])=>`<a href="#" class="bn-item ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}">${ic}<span>${l}</span></a>`).join('')}
+    ${items.map(([v,l,ic])=>`<a href="#" class="bn-item ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span><span>${l}</span></a>`).join('')}
   </div>`;
 }
 function renderMobileMenu(isAdmin){
@@ -1563,7 +1596,7 @@ function renderMobileMenu(isAdmin){
         <button class="icon-btn" data-action="close-mobile-menu">${ICO.x}</button>
       </div>
       <div class="rail-nav">
-        ${isAdmin ? MGMT_NAV_ITEMS.map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}">${ic}${l}</a>`).join('') : ''}
+        ${isAdmin ? MGMT_NAV_ITEMS.map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span>${l}</a>`).join('') : ''}
         <a href="#" class="rail-link ${isNavActive('settings')?'active':''}" data-action="nav" data-view="settings">${ICO.settings}Settings</a>
       </div>
       <div class="rail-foot">
@@ -1587,6 +1620,7 @@ function renderView(){
     if(S.view==='artists') return renderArtistsPage();
     if(S.view==='artist_detail') return renderArtistDetailPage(S.artistDetailId);
     if(S.view==='financials') return renderFinancialsPage();
+    if(S.view==='messages') return renderMessagesPage();
     if(S.view==='projects') return renderProjectsBoard();
     if(S.view==='manage_project_types') return renderManageProjectTypesPage();
     if(S.view==='pricing') return renderPricingPage();
@@ -1790,10 +1824,11 @@ function renderMgmtDashboard(){
     <div class="card stat-tile" style="cursor:pointer;" data-action="nav" data-view="leads"><span class="u-label">Open Leads</span><span class="val">${open.length}</span><span class="sub">Awaiting contract / deposit</span></div>
     <div class="card stat-tile" style="cursor:pointer;" data-action="nav" data-view="leads"><span class="u-label">Awaiting Balance</span><span class="val">${awaitingBalance.length}</span><span class="sub">Booked, balance not yet in</span></div>
   </div>
-  <div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:20px;">
+  <div class="grid stat-row" style="margin-bottom:20px;">
     ${statTile('International Opportunities', intlTrips.length, 'Artist traveling — worth adding nearby bookings', 'international')}
     ${statTile('Travel To Arrange', needsTravel.length, 'Flights or drivers still needed', 'travel')}
     ${statTile('Daily Digest', open.length + awaitingBalance.length, 'Leads to follow up + payments due', 'daily_digest')}
+    ${statTile('Open Messages', '—', 'Not connected yet', 'messages')}
   </div>
 
   ${(!isCEO && conflictPairs.length) ? `
@@ -2076,6 +2111,16 @@ function renderArtistDetailPage(artistId){
 }
 
 /* ============ FINANCIALS ============ */
+function renderMessagesPage(){
+  return `
+  <div class="section-head"><h2>Messages</h2></div>
+  <div class="card empty" style="padding:48px 24px;">
+    <div style="font-size:15px;font-weight:700;color:var(--ink);margin-bottom:6px;">WhatsApp isn't connected yet</div>
+    <p style="max-width:420px;margin:0 auto 18px;color:var(--ink-3);font-size:13px;line-height:1.6;">Once it's connected, client and lead conversations will show up here — reply without leaving the app, and open threads will count toward the badge on this tab.</p>
+    <button class="btn btn-primary" disabled style="opacity:.55;cursor:not-allowed;">${ICO.sms} Connect WhatsApp</button>
+  </div>
+  `;
+}
 function renderPricingPage(){
   const artistId = S.pricingArtist || ARTISTS[0].id;
   const artist = artistById(artistId);
