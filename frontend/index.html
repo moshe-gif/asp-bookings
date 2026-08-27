@@ -1082,6 +1082,51 @@ S.events = loadEvents();
 EVID = S.events.reduce((max,e)=>{ const n=parseInt(String(e.id).split('-')[1],10); return isNaN(n)? max : Math.max(max,n+1); }, EVID);
 
 function resetDemo(){ localStorage.removeItem(LS_KEY); S.events = seedAll(); saveEvents(); toast('Demo data reset.', 'system'); navigate('dashboard'); }
+// One-tap migration helper: this app has no shared backend yet, so every distinct
+// browser/installed-PWA has its own separate localStorage. This lets Moshe pull the
+// real projects (from the Excel import, 2026-08-27) onto any device/install that only
+// has the original seeded demo data -- safe to run more than once, it skips anything
+// that already matches by title+artist.
+const OLD_SEED_PROJECT_TITLES = ['Unreleased','Fall Tour','Lead Single','Charity Gala','Episode — Rabbi Dovid Orlofsky','Episode — Yossi Green'];
+function doLoadRealProjects(){
+  if(!ARTISTS.some(a=>a.id==='shmili')){
+    ARTISTS.push({id:'shmili', name:'Shmili Landau', slot:5, initials:'SL', email:'shmili@aspmanagement.com', role:'DJ'});
+    saveArtists();
+  }
+  const before = PROJECTS.length;
+  PROJECTS = PROJECTS.filter(p=>!OLD_SEED_PROJECT_TITLES.includes(p.title));
+  const removed = before - PROJECTS.length;
+
+  function addIfMissing(artistId, title, cards){
+    if(PROJECTS.some(p=>p.title===title && p.artistId===artistId)) return false;
+    const artist = artistById(artistId);
+    const proj = makeProject(artist, 'General', title, 0, 0, null, {});
+    proj.boardCards = cards.map(c=>({
+      id:'BC-'+Math.random().toString(36).slice(2,9), header:c.header,
+      items:c.items.map(text=>({id:'BI-'+Math.random().toString(36).slice(2,9), text, done:false})),
+    }));
+    PROJECTS.unshift(proj);
+    return true;
+  }
+  let added = 0;
+  const add = (...args)=>{ if(addIfMissing(...args)) added++; };
+  add('benny', 'Bennys Podcast', [{header:'Notes', items:['Tishrei Guest — Swekey??','Tuesday','Eitan','Pulse','Sruly Green','Follow up with Yerachmiel in 2027','Binyomin Miller — Purim guest']}]);
+  add('benny', 'Benny Game', [{header:'Notes', items:['Concept and rules created']}]);
+  add('benny', 'Benny Merch', [{header:'Notes', items:['Reached out to LNS']}]);
+  add('eli', '30 Piece Videos', [{header:'Notes', items:['Gershon has music','Shulem Heiman has video']}]);
+  add('eli', 'Job with Panski', []);
+  add('eli', 'DC Project', [{header:'Notes', items:['Yitzy Schwartz has the music','Shalom Kirstein has the video']}]);
+  add('yaakov', "Yaakov's Album", [
+    {header:'To Do', items:['Cover Photo Shoot']},
+    {header:'Song List', items:['Mayim Rabim (slow)','All I need is you','Becoming','Bridge','Adon','Abba','Kol Zman','Ani Maamin','Heart is on fire']},
+  ]);
+  add('shmili', 'Shmueli Landau Concert', [{header:'Notes', items:['Harass Ilan about date','Spoke to Eli — need to find out if this should be a money maker','Shmili is interested right after Succos']}]);
+  add('eli', 'Galei', [{header:'Notes', items:['Harass Schlisselfeld for track']}]);
+  add('baruch', 'Galei', [{header:'Notes', items:['Harass Schlisselfeld for track']}]);
+  saveProjects();
+  toast(`Loaded ${added} real project${added===1?'':'s'}${removed?`, removed ${removed} old demo project${removed===1?'':'s'}`:''}.`, 'success');
+  navigate('projects');
+}
 
 /* ============ REAL AUTH (Supabase) ============ */
 // Separate from Demo Mode entirely: a real session never touches ARTISTS/ADMIN_USERS
@@ -1616,6 +1661,7 @@ function renderRail(){
       <a href="#" class="rail-link ${isNavActive('settings')?'active':''}" data-action="nav" data-view="settings">${ICO.settings}Settings</a>
     </div>
     <div class="rail-foot">
+      <button class="btn btn-ghost btn-block" data-action="load-real-projects" style="justify-content:flex-start;font-weight:600;color:var(--ink-3);">Load real projects</button>
       <button class="btn btn-ghost btn-block" data-action="reset-demo" style="justify-content:flex-start;font-weight:600;color:var(--ink-3);">Reset demo data</button>
       <div style="padding:10px 10px 0;font-size:11px;color:var(--ink-3);">${APP_VERSION}</div>
     </div>
@@ -1658,6 +1704,7 @@ function renderMobileMenu(isAdmin){
           <span class="avatar" data-slot="${isAdmin?'0':who.slot}" style="width:32px;height:32px;font-size:11px;${isAdmin?'background:var(--ink);color:var(--page);':''}">${who.initials}</span>
           <span style="font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(who.name)}</span>
         </div>
+        ${isAdmin? `<a href="#" class="rail-link" data-action="load-real-projects">${ICO.plus} Load real projects</a>`:''}
         <a href="#" class="rail-link" data-action="logout" style="color:var(--crit);">${ICO.logout} Log Out</a>
         <div style="padding:10px 10px 0;font-size:11px;color:var(--ink-3);">${APP_VERSION}</div>
       </div>
@@ -4482,6 +4529,7 @@ function bindGlobal(){
       case 'ics': downloadIcs(getEvent(id)); break;
       case 'dismiss-intl': { const ev=getEvent(id); ev.intlOpportunityDismissed=true; saveEvents(); toast('Dismissed.', 'system'); render(); break; }
       case 'reset-demo': if(confirm('Reset all demo data back to the seeded example set?')) resetDemo(); break;
+      case 'load-real-projects': S.showMobileMenu=false; doLoadRealProjects(); break;
       case 'set-theme': setThemePref(t.getAttribute('data-theme-pref')); break;
       case 'toggle-notif': { const st=getUserSettings(S.user); const key=t.getAttribute('data-key'); const channel=t.getAttribute('data-channel')||'inApp'; st.notify[key][channel]=!st.notify[key][channel]; saveAllSettings(); render(); break; }
       case 'add-passkey': { const st=getUserSettings(S.user); const n=st.passkeys.length+1; st.passkeys.push({id:'pk-'+randInt(1,999999), label:`Passkey ${n}`, addedAt: fmtISO(new Date())}); saveAllSettings(); toast('Passkey added.', 'success'); render(); break; }
