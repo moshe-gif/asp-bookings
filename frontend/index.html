@@ -193,9 +193,9 @@ tr.row-link:hover td{ background:var(--surface-2); }
 .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:8px; }
 .cal-dow{ font-size:10.5px; text-transform:uppercase; letter-spacing:.09em; color:var(--ink-3); font-weight:700; text-align:center; padding-bottom:6px; }
 .cal-cell{ position:relative; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); box-shadow:var(--shadow-sm); min-height:92px; padding:8px; display:flex; flex-direction:column; gap:4px; transition:.16s cubic-bezier(.2,.7,.3,1); }
-.cal-add-btn{ position:absolute; top:3px; right:3px; width:18px; height:18px; border-radius:50%; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .12s ease; z-index:2; }
+.cal-add-btn{ position:absolute; top:3px; right:3px; width:18px; height:18px; padding:0; border:none; background:transparent; color:var(--accent); display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .12s ease; z-index:2; }
 .cal-cell:hover .cal-add-btn{ opacity:1; }
-.cal-add-btn .ico{ width:11px; height:11px; }
+.cal-add-btn svg{ width:14px; height:14px; stroke-width:2.6; }
 .cal-cell:hover{ transform:translateY(-1px); box-shadow:var(--shadow-md); }
 .cal-cell.out{ opacity:.4; box-shadow:none; }
 .cal-cell.today{ border-color:var(--accent); background:var(--accent-wash); }
