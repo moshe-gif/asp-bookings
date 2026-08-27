@@ -1342,6 +1342,8 @@ window.addEventListener('popstate', ()=>{
   pendingViewDirection = slideDirection(oldView, S.view);
   render();
 });
+window.addEventListener('resize', repositionNavSliders);
+window.addEventListener('orientationchange', ()=> setTimeout(repositionNavSliders, 60));
 function navigate(view, opts={}){
   const oldView = S.view;
   closeAllOverlays();
@@ -1428,6 +1430,30 @@ function captureNavRects(containerSel, axis){
     const active = container.querySelector('.active');
     if(!active) return null;
     return axis==='vertical' ? {top:active.offsetTop, height:active.offsetHeight} : {left:active.offsetLeft, width:active.offsetWidth};
+  });
+}
+// Viewport size changes (phone rotation, window resize) don't go through render(), but the
+// nav sliders' position/size is inline-styled pixels captured at the last render -- so a
+// container that resizes via CSS (e.g. .bottom-nav's safe-area-driven left/right insets)
+// leaves the slider stale. Re-measure the *existing* slider elements in place (no new
+// element, no animation) rather than reusing positionNavSlider, which always inserts a
+// fresh slider div and would double them up here.
+function repositionNavSliders(){
+  document.querySelectorAll('.rail-nav').forEach(container=>{
+    const active = container.querySelector('.active'), slider = container.querySelector('.rail-slider');
+    if(!active || !slider) return;
+    slider.style.transition = 'none';
+    slider.style.top = active.offsetTop+'px'; slider.style.height = active.offsetHeight+'px';
+    void slider.offsetHeight;
+    slider.style.transition = '';
+  });
+  document.querySelectorAll('.bottom-nav').forEach(container=>{
+    const active = container.querySelector('.active'), slider = container.querySelector('.bn-slider');
+    if(!active || !slider) return;
+    slider.style.transition = 'none';
+    slider.style.left = active.offsetLeft+'px'; slider.style.width = active.offsetWidth+'px';
+    void slider.offsetHeight;
+    slider.style.transition = '';
   });
 }
 /* ============ RENDER: SHELL ============ */
