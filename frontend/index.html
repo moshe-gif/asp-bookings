@@ -192,7 +192,10 @@ tr.row-link:hover td{ background:var(--surface-2); }
 .cal-nav{ display:flex; align-items:center; gap:6px; }
 .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:8px; }
 .cal-dow{ font-size:10.5px; text-transform:uppercase; letter-spacing:.09em; color:var(--ink-3); font-weight:700; text-align:center; padding-bottom:6px; }
-.cal-cell{ background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); box-shadow:var(--shadow-sm); min-height:92px; padding:8px; display:flex; flex-direction:column; gap:4px; transition:.16s cubic-bezier(.2,.7,.3,1); }
+.cal-cell{ position:relative; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); box-shadow:var(--shadow-sm); min-height:92px; padding:8px; display:flex; flex-direction:column; gap:4px; transition:.16s cubic-bezier(.2,.7,.3,1); }
+.cal-add-btn{ position:absolute; top:3px; right:3px; width:18px; height:18px; border-radius:50%; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .12s ease; z-index:2; }
+.cal-cell:hover .cal-add-btn{ opacity:1; }
+.cal-add-btn .ico{ width:11px; height:11px; }
 .cal-cell:hover{ transform:translateY(-1px); box-shadow:var(--shadow-md); }
 .cal-cell.out{ opacity:.4; box-shadow:none; }
 .cal-cell.today{ border-color:var(--accent); background:var(--accent-wash); }
@@ -2007,6 +2010,7 @@ function renderCalendarPage(events, opts={}){
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:${evs.length?'6px':'0'};">
             <strong style="font-family:var(--font-display);">${d.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})}</strong>
             ${iso===todayIso?'<span class="pill pill-accent">Today</span>':''}
+            ${isAdmin? `<button class="icon-btn" data-action="quick-add-event" data-date="${iso}" title="Add event" style="margin-left:auto;width:26px;height:26px;">${ICO.plus}</button>`:''}
           </div>
           ${evs.length? evs.map(e=>renderDayEventRow(e, isAdmin, 'open-event')).join('') : `<p style="color:var(--ink-3);font-size:12.5px;margin:0;">Nothing scheduled.</p>`}
         </div>`;
@@ -2017,7 +2021,9 @@ function renderCalendarPage(events, opts={}){
   if(mode==='day'){
     const iso = fmtISO(S.calDate);
     const evs = filtered.filter(e=>e.date===iso).sort((a,b)=>a.time.localeCompare(b.time));
-    return head(S.calDate.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})) + `<div class="card card-pad">
+    return head(S.calDate.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})) + `
+      ${isAdmin? `<button class="btn btn-sm btn-primary" data-action="quick-add-event" data-date="${iso}" style="margin-bottom:12px;">${ICO.plus} Add Event</button>` : ''}
+      <div class="card card-pad">
       ${evs.length? evs.map(e=>renderDayEventRow(e, isAdmin, 'open-event')).join('') : `<p style="color:var(--ink-3);font-size:13px;margin:0;">Nothing scheduled today.</p>`}
     </div>`;
   }
@@ -2043,6 +2049,7 @@ function renderCalendarPage(events, opts={}){
         const evs = (byDate[c.iso]||[]).sort((a,b)=>a.time.localeCompare(b.time));
         const max = 3;
         return `<div class="cal-cell ${c.iso===todayIso?'today':''}" data-action="open-day-view" data-date="${c.iso}" style="cursor:pointer;">
+          ${isAdmin? `<button class="cal-add-btn" data-action="quick-add-event" data-date="${c.iso}" title="Add event">${ICO.plus}</button>`:''}
           <span class="cal-date">${c.d}</span>
           ${evs.slice(0,max).map(e=>{const a=artistById(e.artistId); const label = opts.singleArtist? (e.clientName||e.type).split(' ')[0] : a.name.split(' ')[0]; const timePrefix = e.time==='00:00' ? '' : fmtTime(e.time).replace(':00','')+' '; return `<div class="cal-evt" data-action="open-event" data-id="${e.id}"><span class="dot" data-slot="${a.slot}"></span><span>${timePrefix}${esc(label)}</span></div>`;}).join('')}
           ${evs.length>max? `<span class="cal-more" data-action="open-day" data-date="${c.iso}">+${evs.length-max} more</span>`:''}
@@ -4336,6 +4343,7 @@ function bindGlobal(){
       case 'open-event-from-day': S.dayListDate = null; openEvent(id); break;
       case 'open-artist': navigate('artist_detail', {artistDetailId:id}); break;
       case 'open-new-lead': closeAllOverlays(); S.newLeadForm={date:'',time:'19:00'}; S.showNewLead=true; render(); break;
+      case 'quick-add-event': closeAllOverlays(); S.newLeadForm={date:t.getAttribute('data-date'),time:'19:00'}; S.showNewLead=true; render(); break;
       case 'open-block-time': closeAllOverlays(); S.blockTimeForm={}; S.showBlockTime=true; render(); break;
       case 'submit-block-time': doSubmitBlockTime(); break;
       case 'open-ask-ai': closeAllOverlays(); S.showAskAI=true; render(); break;
