@@ -20,7 +20,7 @@
   --good:#1F8A54; --good-wash:#E5F5EC; --good-ink:#146B3F;
   --warn:#C6860B; --warn-wash:#FFF2D6; --warn-ink:#8F5E0A;
   --crit:#D64444; --crit-wash:#FDE9E9; --crit-ink:#A32E2E;
-  --cat-1:#2a78d6; --cat-2:#1a8a1a; --cat-3:#e87ba4; --cat-4:#c98100; --cat-5:#1baf7a; --cat-6:#eb6834; --cat-7:#4a3aa7;
+  --cat-1:#5B7FA6; --cat-2:#5C8A6B; --cat-3:#B87F94; --cat-4:#AD8B57; --cat-5:#4F9488; --cat-6:#BC7355; --cat-7:#7A6FA0;
   --shadow-sm:0 1px 3px rgba(20,20,26,.05),0 1px 1px rgba(20,20,26,.04);
   --shadow-md:0 16px 40px rgba(20,20,26,.10),0 2px 8px rgba(20,20,26,.05);
   --shadow-lg:0 24px 64px rgba(20,20,26,.16),0 4px 14px rgba(20,20,26,.06);
@@ -40,7 +40,7 @@
     --good:#3CC989; --good-wash:#173420; --good-ink:#8CEBB8;
     --warn:#F0B94A; --warn-wash:#3F2F10; --warn-ink:#F5CE7E;
     --crit:#F07A7A; --crit-wash:#3F1C1C; --crit-ink:#F5A8A8;
-    --cat-1:#3987e5; --cat-2:#2fa32f; --cat-3:#d55181; --cat-4:#c98500; --cat-5:#199e70; --cat-6:#d95926; --cat-7:#9085e9;
+    --cat-1:#7B9BC2; --cat-2:#7FAF8E; --cat-3:#D4A0B3; --cat-4:#D0AC7E; --cat-5:#74B3A7; --cat-6:#D19477; --cat-7:#9C90C0;
     --shadow-sm:0 1px 3px rgba(0,0,0,.32); --shadow-md:0 16px 40px rgba(0,0,0,.42); --shadow-lg:0 24px 64px rgba(0,0,0,.5);
     --glass-sheen:rgba(255,255,255,.06); --glass-edge:rgba(255,255,255,.14);
   }
@@ -54,7 +54,7 @@
   --good:#3CC989; --good-wash:#173420; --good-ink:#8CEBB8;
   --warn:#F0B94A; --warn-wash:#3F2F10; --warn-ink:#F5CE7E;
   --crit:#F07A7A; --crit-wash:#3F1C1C; --crit-ink:#F5A8A8;
-  --cat-1:#3987e5; --cat-2:#2fa32f; --cat-3:#d55181; --cat-4:#c98500; --cat-5:#199e70; --cat-6:#d95926; --cat-7:#9085e9;
+  --cat-1:#7B9BC2; --cat-2:#7FAF8E; --cat-3:#D4A0B3; --cat-4:#D0AC7E; --cat-5:#74B3A7; --cat-6:#D19477; --cat-7:#9C90C0;
   --shadow-sm:0 1px 3px rgba(0,0,0,.32); --shadow-md:0 16px 40px rgba(0,0,0,.42); --shadow-lg:0 24px 64px rgba(0,0,0,.5);
   --glass-sheen:rgba(255,255,255,.06); --glass-edge:rgba(255,255,255,.14);
 }
@@ -67,7 +67,7 @@
   --good:#1F8A54; --good-wash:#E5F5EC; --good-ink:#146B3F;
   --warn:#C6860B; --warn-wash:#FFF2D6; --warn-ink:#8F5E0A;
   --crit:#D64444; --crit-wash:#FDE9E9; --crit-ink:#A32E2E;
-  --cat-1:#2a78d6; --cat-2:#1a8a1a; --cat-3:#e87ba4; --cat-4:#c98100; --cat-5:#1baf7a; --cat-6:#eb6834; --cat-7:#4a3aa7;
+  --cat-1:#5B7FA6; --cat-2:#5C8A6B; --cat-3:#B87F94; --cat-4:#AD8B57; --cat-5:#4F9488; --cat-6:#BC7355; --cat-7:#7A6FA0;
   --shadow-sm:0 1px 3px rgba(20,20,26,.05),0 1px 1px rgba(20,20,26,.04);
   --shadow-md:0 16px 40px rgba(20,20,26,.10),0 2px 8px rgba(20,20,26,.05);
   --shadow-lg:0 24px 64px rgba(20,20,26,.16),0 4px 14px rgba(20,20,26,.06);
@@ -139,10 +139,10 @@ input,select,textarea{font-family:inherit; font-size:inherit;}
 .rail-link.active:hover{ background:transparent; }
 .rail-slider{ position:absolute; left:0; right:0; border-radius:var(--r-md); background:var(--accent); box-shadow:0 1px 2px rgba(20,20,26,.12),0 6px 16px -6px var(--accent); z-index:0; transition:top .22s cubic-bezier(.2,.7,.3,1), height .22s cubic-bezier(.2,.7,.3,1); }
 .rail-foot{ margin-top:auto; border-top:1px solid var(--border); padding-top:12px; }
-.mobile-menu-panel{ width:250px; max-width:80vw; height:100%; height:100dvh; background:var(--surface); display:flex; flex-direction:column; padding:18px 14px max(18px, env(safe-area-inset-bottom)); gap:22px; animation:slideinleft .2s ease; overflow-y:auto; }
+.mobile-menu-panel{ width:250px; max-width:80vw; height:100%; height:100dvh; background:var(--surface); display:flex; flex-direction:column; padding:max(18px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom)); gap:22px; animation:slideinleft .2s ease; overflow-y:auto; }
 @keyframes slideinleft{ from{ transform:translateX(-100%); } to{ transform:translateX(0); } }
 .main{ flex:1; min-width:0; display:flex; flex-direction:column; }
-.topbar{ display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 28px; border-bottom:1px solid var(--border); background:color-mix(in srgb, var(--page) 78%, transparent); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); position:sticky; top:0; z-index:5; }
+.topbar{ display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 28px; padding-top:max(16px, env(safe-area-inset-top)); border-bottom:1px solid var(--border); background:color-mix(in srgb, var(--page) 78%, transparent); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); position:sticky; top:0; z-index:5; }
 .topbar h1{ font-size:1.5rem; }
 .content{ padding:24px 28px 80px; flex:1; }
 .user-chip{ display:flex; align-items:center; gap:8px; padding:5px 8px 5px 5px; border-radius:999px; border:1px solid var(--border); background:var(--surface); font-size:12.5px; font-weight:600; }
@@ -217,7 +217,7 @@ tr.row-link:hover td{ background:var(--surface-2); }
 @media (prefers-reduced-motion: reduce){ .content.view-enter{ animation:none; } }
 .modal{ width:520px; max-width:100%; max-height:90vh; overflow-y:auto; background:var(--surface); border-radius:var(--r-lg); box-shadow:var(--shadow-md); animation:pop .16s ease; }
 @keyframes pop{ from{transform:scale(.97); opacity:0;} to{transform:scale(1); opacity:1;} }
-.sheet-head{ display:flex; align-items:flex-start; justify-content:space-between; padding:20px 22px; border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:15; }
+.sheet-head{ display:flex; align-items:flex-start; justify-content:space-between; padding:20px 22px; padding-top:max(20px, env(safe-area-inset-top)); border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:15; }
 .sheet-body{ padding:20px 22px 40px; display:flex; flex-direction:column; gap:18px; }
 
 /* ============ FORM ============ */
@@ -392,7 +392,7 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
   body{ font-size:14px; }
   .rail{ display:none; }
   .content{ padding:12px 12px 100px; }
-  .topbar{ padding:8px 10px; gap:6px; }
+  .topbar{ padding:8px 10px; padding-top:max(8px, env(safe-area-inset-top)); gap:6px; }
   .topbar h1{ font-size:1.1rem; }
   .hamburger-btn{ display:inline-flex; }
   .artist-top-tabs{ display:none; }
