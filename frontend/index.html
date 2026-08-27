@@ -2903,11 +2903,11 @@ function renderNewLeadModal(){
         <div class="chip-row">
           <button class="filter-chip ${!isInternal?'sel':''}" data-action="pick-booking-kind" data-kind="client">Client Booking</button>
           <button class="filter-chip ${isInternal?'sel':''}" data-action="pick-booking-kind" data-kind="internal">Internal Day</button>
+          <button class="filter-chip" data-action="switch-to-outside-booking">Outside Act</button>
         </div>
         <p style="font-size:12px;color:var(--ink-3);margin:0;">${isInternal? 'For recording days, filming days, rehearsals — no client, no payment, just pencils the artist’s time in.' : "Only the artist, client name, and date are required — everything else can be filled in once it's known."}</p>
         <div class="field"><label>Artist</label>
-          <div class="artist-pick">${ARTISTS.map(a=>`<div class="artist-opt ${f.artistId===a.id?'sel':''}" data-action="pick-artist" data-id="${a.id}">
-            <span class="avatar" data-slot="${a.slot}" style="width:34px;height:34px;font-size:12px;">${a.initials}</span><span>${a.name}</span></div>`).join('')}</div>
+          <div class="chip-row">${ARTISTS.map(a=>`<button type="button" class="filter-chip ${f.artistId===a.id?'sel':''}" data-action="pick-artist" data-id="${a.id}"><span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${a.initials}</span>${esc(a.name.split(' ')[0])}</button>`).join('')}</div>
         </div>
         <div class="field-row">
           ${!isInternal? `<div class="field"><label>Client Name</label><input data-field="clientName" value="${esc(f.clientName||'')}" placeholder="Full name"/></div>` : ''}
@@ -4424,6 +4424,7 @@ function bindGlobal(){
       case 'close-sheet': closeSheet(); break;
       case 'pick-artist': S.newLeadForm.artistId = id; applyStandardPricing(); render(); break;
       case 'pick-booking-kind': { const kind = t.getAttribute('data-kind'); S.newLeadForm.kind = kind; S.newLeadForm.type = null; render(); break; }
+      case 'switch-to-outside-booking': { const carryDate = S.newLeadForm.date; closeAllOverlays(); S.newOutsideBookingForm={date:carryDate||''}; S.showNewOutsideBooking=true; render(); break; }
       case 'submit-lead': doSubmitLead(); break;
       case 'add-lead-charge': {
         const f = S.newLeadForm;
