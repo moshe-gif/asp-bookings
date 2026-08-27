@@ -333,6 +333,7 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
 .chip-row{ display:flex; flex-wrap:wrap; gap:8px; }
 .filter-chip{ padding:6px 12px; border-radius:999px; border:1px solid var(--border-strong); background:var(--surface); font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px; }
 .filter-chip.sel{ background:var(--ink); color:var(--page); border-color:var(--ink); }
+.artist-filter-select, .tab-select{ display:none; width:100%; padding:10px 12px; border-radius:var(--r-sm); border:1px solid var(--border-strong); background:var(--surface); font-size:14px; font-weight:600; color:var(--ink); margin-bottom:14px; }
 .tabbar{ display:flex; gap:4px; border-bottom:1px solid var(--border); }
 .tab{ padding:10px 4px; margin-right:18px; font-size:13.5px; font-weight:700; color:var(--ink-3); border-bottom:2px solid transparent; }
 .tab.active{ color:var(--ink); border-color:var(--accent); }
@@ -384,64 +385,72 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
   #contractPrintHost .sheet-head, #itineraryPrintHost .sheet-head, #invoicePrintHost .sheet-head{ display:none; }
 }
 @media (max-width: 860px){
+  body{ font-size:14px; }
   .rail{ display:none; }
-  .content{ padding:14px 12px 104px; }
-  .topbar{ padding:10px 12px; gap:8px; }
-  .topbar h1{ font-size:1.2rem; }
+  .content{ padding:12px 12px 100px; }
+  .topbar{ padding:8px 10px; gap:6px; }
+  .topbar h1{ font-size:1.1rem; }
   .hamburger-btn{ display:inline-flex; }
   .artist-top-tabs{ display:none; }
   .user-chip{ display:none; }
-  .stat-row{ display:flex; flex-direction:column; grid-template-columns:none; gap:10px; }
-  .stat-row > *{ width:100%; min-width:0; }
+  .stat-row{ display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+  .stat-row > *{ min-width:0; }
   .table-cards{ overflow-x:visible; }
   .timeline{ overflow-x:visible; gap:0; }
   .tl-step{ min-width:0; flex:1; gap:4px; }
-  .tl-dot{ width:20px; height:20px; font-size:9.5px; }
+  .tl-dot{ width:19px; height:19px; font-size:9px; }
   .tl-line{ left:calc(-50% + 10px); width:calc(100% - 20px); }
-  .tl-label{ font-size:8.5px; }
-  .sticky-board{ grid-template-columns:1fr; }
+  .tl-label{ font-size:8px; }
+  .sticky-board{ grid-template-columns:1fr; gap:10px; }
+  .sticky-card{ padding:8px 10px 10px; }
   .fin-chart{ gap:6px !important; }
   .table-cards table, .table-cards tbody, .table-cards tr, .table-cards td{ display:block; width:100%; }
   .table-cards thead{ display:none; }
-  .table-cards tr{ padding:12px 14px; border-bottom:1px solid var(--border); }
+  .table-cards tr{ padding:10px 12px; border-bottom:1px solid var(--border); }
   .table-cards tr:last-child{ border-bottom:none; }
-  .table-cards td{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:4px 0; border-bottom:none; }
-  .table-cards td::before{ content:attr(data-label); font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-3); font-weight:700; flex:none; }
+  .table-cards td{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:3px 0; border-bottom:none; font-size:12px; }
+  .table-cards td::before{ content:attr(data-label); font-size:9.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-3); font-weight:700; flex:none; }
   .grid-3{ grid-template-columns:repeat(2,1fr); }
   .field-row{ grid-template-columns:1fr; }
   .artist-pick{ grid-template-columns:repeat(2,1fr); }
   .sheet{ width:100%; }
-  .doc-body{ padding:22px 18px 30px; }
-  .doc-parties, .doc-facts, .doc-sign{ grid-template-columns:1fr; gap:14px; }
-  .doc-title{ font-size:1.4rem; }
+  .doc-body{ padding:18px 14px 24px; }
+  .doc-parties, .doc-facts, .doc-sign{ grid-template-columns:1fr; gap:12px; }
+  .doc-title{ font-size:1.25rem; }
   .cal-nav{ flex-wrap:wrap; row-gap:8px; }
-  .cal-nav strong{ min-width:0 !important; flex:1 1 auto; font-size:.95rem !important; }
+  .cal-nav strong{ min-width:0 !important; flex:1 1 auto; font-size:.9rem !important; }
   .cal-nav .chip-row{ margin-left:0 !important; width:100%; }
   .cal-grid{ gap:3px; }
   .cal-cell{ aspect-ratio:1; padding:4px 3px; gap:2px; overflow:hidden; min-height:0; }
-  .cal-date{ font-size:10.5px; }
-  .cal-evt{ font-size:9px; padding:1px 3px; }
-  .cal-dow{ font-size:9px; }
-  .card-pad{ padding:14px 16px; }
-  .stat-tile{ padding:14px 16px; gap:4px; }
-  .stat-tile .val{ font-size:1.5rem; }
+  .cal-date{ font-size:10px; }
+  .cal-evt{ font-size:8.5px; padding:1px 3px; }
+  .cal-dow{ font-size:8.5px; }
+  .card-pad{ padding:11px 13px; }
+  .stat-tile{ padding:11px 13px; gap:3px; }
+  .stat-tile .val{ font-size:1.25rem; }
+  .stat-tile .sub{ font-size:10px; }
   .section-head{ margin-bottom:8px; }
-  .section-head h2{ font-size:1.05rem; }
+  .section-head h2{ font-size:.95rem; }
   .bottom-nav{ display:flex; position:fixed; left:max(12px, env(safe-area-inset-left)); right:max(12px, env(safe-area-inset-right)); bottom:max(12px, env(safe-area-inset-bottom)); border-radius:28px; background:color-mix(in srgb, var(--page) 78%, transparent); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); border:1px solid var(--border); box-shadow:0 10px 30px -10px rgba(20,20,26,.28), 0 2px 10px rgba(20,20,26,.08); padding:5px 6px; justify-content:space-around; z-index:30; box-sizing:border-box; }
-  .bn-item{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; font-size:10.5px; font-weight:600; color:var(--ink-3); padding:6px 4px; min-height:54px; border-radius:999px; flex:1; min-width:0; position:relative; z-index:1; }
-  .bn-item .ico{ width:19px; height:19px; }
+  .bn-item{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; font-size:10px; font-weight:600; color:var(--ink-3); padding:6px 4px; min-height:52px; border-radius:999px; flex:1; min-width:0; position:relative; z-index:1; }
+  .bn-item .ico{ width:18px; height:18px; }
   .bn-item span{ max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .bn-item.active{ color:var(--ink); font-weight:700; }
   .bn-item.active .ico{ color:var(--ink-3); }
   .bn-slider{ position:absolute; top:5px; bottom:5px; border-radius:999px; background:var(--surface); box-shadow:var(--shadow-sm); z-index:0; transition:left .22s cubic-bezier(.2,.7,.3,1), width .22s cubic-bezier(.2,.7,.3,1); }
   .bn-item[data-view="pricing"], .bn-item[data-view="financials"]{ display:none; }
-  .tabbar{ overflow-x:auto; flex-wrap:nowrap; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
-  .tabbar::-webkit-scrollbar{ display:none; }
-  .tab{ white-space:nowrap; flex:none; }
-  .sheet-body{ padding:16px 14px 30px; gap:14px; }
-  .grid-folders{ grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; }
-  .project-folder-cover{ aspect-ratio:16/9; }
-  .sticky-board{ gap:12px; }
+  /* No horizontal scrolling anywhere on mobile: wrap instead of scroll, and swap
+     any wide chip-row/tabbar for a single-line dropdown. */
+  .tabbar{ flex-wrap:wrap; overflow-x:visible; row-gap:4px; }
+  .tab{ white-space:nowrap; margin-right:14px; }
+  .tabbar-row, .artist-filter-chips{ display:none; }
+  .artist-filter-select, .tab-select{ display:block; }
+  .sheet-body{ padding:14px 12px 26px; gap:12px; }
+  .grid-folders{ grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; }
+  .project-folder-cover{ aspect-ratio:2/1; }
+  .project-folder-cover-fallback{ font-size:1.6rem; }
+  .project-folder-body{ padding:9px 11px 11px; }
+  .project-folder-body strong{ font-size:13px !important; }
 }
 @media (max-width: 480px){
   .grid-3{ grid-template-columns:1fr 1fr; }
@@ -451,10 +460,11 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
   .user-chip{ padding:4px; }
   .cal-cell{ aspect-ratio:1; padding:3px 2px; }
   .cal-evt span{ max-width:34px; }
-  .stat-tile .val{ font-size:1.3rem; }
-  .bn-item span{ font-size:9px; }
-  .bn-item .ico{ width:20px; height:20px; }
-  .bn-item{ padding:8px 2px; min-height:48px; }
+  .stat-tile .val{ font-size:1.15rem; }
+  .bn-item span{ font-size:8.5px; }
+  .bn-item .ico{ width:19px; height:19px; }
+  .bn-item{ padding:6px 2px; min-height:46px; }
+  .grid-folders{ grid-template-columns:1fr 1fr; }
 }
 
 /* ============ OPENER ============ */
@@ -1359,9 +1369,7 @@ function exportCSV(){
   toast('CSV exported.', 'system');
 }
 
-function positionNavSlider(containerSel, sliderClass, oldRect, axis){
-  const container = document.querySelector(containerSel);
-  if(!container) return;
+function positionOneNavSlider(container, sliderClass, oldRect, axis){
   const active = container.querySelector('.active');
   if(!active) return;
   const slider = document.createElement('div');
@@ -1380,15 +1388,29 @@ function positionNavSlider(containerSel, sliderClass, oldRect, axis){
   if(axis==='vertical'){ slider.style.top = newRect.top+'px'; slider.style.height = newRect.height+'px'; }
   else { slider.style.left = newRect.left+'px'; slider.style.width = newRect.width+'px'; }
 }
+// containerSel can match more than one element at once (e.g. the desktop rail's
+// .rail-nav is still in the DOM, just hidden, while the mobile slide-out menu
+// renders its own .rail-nav) -- every match needs its own slider, paired with the
+// old rect captured from the same position in DOM order.
+function positionNavSlider(containerSel, sliderClass, oldRects, axis){
+  document.querySelectorAll(containerSel).forEach((container, i)=>{
+    positionOneNavSlider(container, sliderClass, (oldRects||[])[i]||null, axis);
+  });
+}
+function captureNavRects(containerSel, axis){
+  return Array.from(document.querySelectorAll(containerSel)).map(container=>{
+    const active = container.querySelector('.active');
+    if(!active) return null;
+    return axis==='vertical' ? {top:active.offsetTop, height:active.offsetHeight} : {left:active.offsetLeft, width:active.offsetWidth};
+  });
+}
 /* ============ RENDER: SHELL ============ */
 function render(){
   const app = document.getElementById('app');
   const prevScroll = { sheet: document.querySelector('.sheet')?.scrollTop, modal: document.querySelector('.modal')?.scrollTop };
   const hadOverlay = !!document.querySelector('.overlay');
-  const oldRailActive = document.querySelector('.rail-nav .active');
-  const oldRailRect = oldRailActive ? {top:oldRailActive.offsetTop, height:oldRailActive.offsetHeight} : null;
-  const oldBnActive = document.querySelector('.bottom-nav .active');
-  const oldBnRect = oldBnActive ? {left:oldBnActive.offsetLeft, width:oldBnActive.offsetWidth} : null;
+  const oldRailRects = captureNavRects('.rail-nav', 'vertical');
+  const oldBnRects = captureNavRects('.bottom-nav', 'horizontal');
   if(!S.user){ app.innerHTML = renderLogin() + renderInstallBanner(); bindGlobal(); return; }
   const isAdmin = isAdminUser(S.user);
   app.innerHTML = `
@@ -1430,8 +1452,8 @@ function render(){
   `;
   pendingViewTransition = false;
   bindGlobal();
-  positionNavSlider('.rail-nav', 'rail-slider', oldRailRect, 'vertical');
-  positionNavSlider('.bottom-nav', 'bn-slider', oldBnRect, 'horizontal');
+  positionNavSlider('.rail-nav', 'rail-slider', oldRailRects, 'vertical');
+  positionNavSlider('.bottom-nav', 'bn-slider', oldBnRects, 'horizontal');
   if(hadOverlay){
     document.querySelectorAll('.overlay, .modal, .sheet, .doc').forEach(el=>{ el.style.animationDuration='0.001ms'; });
   }
@@ -1985,16 +2007,28 @@ function renderEventTable(events, opts={}){
       }).join('')}
     </tbody></table></div>`;
 }
+function renderArtistFilterRow(current, action, opts={}){
+  const dotOrAvatar = a => opts.avatar
+    ? `<span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${a.initials}</span>`
+    : `<span class="dot" data-slot="${a.slot}"></span>`;
+  return `
+    <div class="chip-row artist-filter-chips" style="margin-bottom:16px;">
+      ${opts.noAll ? '' : `<button class="filter-chip ${current==='all'?'sel':''}" data-action="${action}" data-id="all">All Artists</button>`}
+      ${ARTISTS.map(a=>`<button class="filter-chip ${current===a.id?'sel':''}" data-action="${action}" data-id="${a.id}">${dotOrAvatar(a)}${esc(a.name.split(' ')[0])}</button>`).join('')}
+    </div>
+    <select class="artist-filter-select" data-action="${action}">
+      ${opts.noAll ? '' : `<option value="all" ${current==='all'?'selected':''}>All Artists</option>`}
+      ${ARTISTS.map(a=>`<option value="${a.id}" ${current===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
+    </select>
+  `;
+}
 function renderLeadsPage(){
   const artistFilter = S.leadsArtistFilter||'all';
   const base = artistFilter==='all' ? S.events : S.events.filter(e=>e.artistId===artistFilter);
   const open = base.filter(e=>['lead','negotiating','contract_sent'].includes(e.status)).sort((a,b)=>a.date.localeCompare(b.date));
   const pending = base.filter(e=>e.status==='booked' && !e.balanceReceived).sort((a,b)=>a.date.localeCompare(b.date));
   return `
-    <div class="chip-row" style="margin-bottom:16px;">
-      <button class="filter-chip ${artistFilter==='all'?'sel':''}" data-action="filter-leads-artist" data-id="all">All Artists</button>
-      ${ARTISTS.map(a=>`<button class="filter-chip ${artistFilter===a.id?'sel':''}" data-action="filter-leads-artist" data-id="${a.id}"><span class="dot" data-slot="${a.slot}"></span>${a.name.split(' ')[0]}</button>`).join('')}
-    </div>
+    ${renderArtistFilterRow(artistFilter, 'filter-leads-artist')}
     <div class="section-head"><h2>Pipeline (${open.length})</h2></div>
     ${renderEventTable(open, {showArtist:true})}
     <div class="section-head" style="margin-top:26px;"><h2>Booked — Balance Pending (${pending.length})</h2></div>
@@ -2043,9 +2077,7 @@ function renderPricingPage(){
   const artist = artistById(artistId);
   return `
   <p style="font-size:12.5px;color:var(--ink-3);margin:0 0 16px;max-width:640px;">Standard hourly rates by artist and event type — the reference bookkeeping quotes from before negotiating a final flat price. Overtime is always time-and-a-half (1.5×), prorated to the minute past the included hours, not a separately set rate.</p>
-  <div class="chip-row" style="margin-bottom:16px;">
-    ${ARTISTS.map(a=>`<button class="filter-chip ${artistId===a.id?'sel':''}" data-action="pricing-artist" data-id="${a.id}"><span class="dot" data-slot="${a.slot}"></span>${a.name.split(' ')[0]}</button>`).join('')}
-  </div>
+  ${renderArtistFilterRow(artistId, 'pricing-artist', {noAll:true})}
   <div class="card u-scroll-x table-cards">
     <table>
       <thead><tr><th>Event Type</th><th>Hourly Rate</th><th>Included Hours</th><th>Overtime (1.5×/hr, prorated)</th></tr></thead>
@@ -2087,10 +2119,7 @@ function renderFinancialsPage(){
   const maxMonthly = Math.max(...monthlyGross.map(m=>m.val),1);
 
   return `
-  <div class="chip-row" style="margin-bottom:16px;">
-    <button class="filter-chip ${S.finArtistFilter==='all'?'sel':''}" data-action="fin-filter" data-id="all">All Artists</button>
-    ${ARTISTS.map(a=>`<button class="filter-chip ${S.finArtistFilter===a.id?'sel':''}" data-action="fin-filter" data-id="${a.id}"><span class="dot" data-slot="${a.slot}"></span>${a.name.split(' ')[0]}</button>`).join('')}
-  </div>
+  ${renderArtistFilterRow(S.finArtistFilter, 'fin-filter')}
   <div class="grid stat-row" style="margin-bottom:20px;">
     <div class="card stat-tile"><span class="u-label">Gross Booked</span><span class="val">${money(gross)}</span><span class="sub">${booked.length} jobs</span></div>
     <div class="card stat-tile"><span class="u-label">ASP Commission</span><span class="val">${money(commission)}</span><span class="sub">15% of gross</span></div>
@@ -2234,10 +2263,7 @@ function renderProjectsBoard(){
   const artistFilter = S.projectArtistFilter||'all';
   const projects = artistFilter==='all' ? PROJECTS : PROJECTS.filter(p=>p.artistId===artistFilter);
   return `
-  <div class="chip-row" style="margin-bottom:16px;">
-    <button class="filter-chip ${artistFilter==='all'?'sel':''}" data-action="filter-project-artist" data-id="all">All Artists</button>
-    ${ARTISTS.map(a=>`<button class="filter-chip ${artistFilter===a.id?'sel':''}" data-action="filter-project-artist" data-id="${a.id}"><span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${a.initials}</span>${esc(a.name.split(' ')[0])}</button>`).join('')}
-  </div>
+  ${renderArtistFilterRow(artistFilter, 'filter-project-artist', {avatar:true})}
   <div class="section-head">
     <h2>${artistFilter==='all'? 'All Projects' : esc(artistById(artistFilter).name)+`’s Projects`} (${projects.length})</h2>
     <div style="display:flex;gap:6px;">
@@ -2461,13 +2487,20 @@ function renderProjectDetail(){
         ${S.showDraftUpdate? renderDraftUpdate(p) : ''}
 
         <div>
-          <div class="tabbar" style="margin-bottom:14px;">
+          <div class="tabbar tabbar-row" style="margin-bottom:14px;">
             <a href="#" class="tab ${S.projectTab==='tasks'?'active':''}" data-action="set-project-tab" data-tab="tasks">Tasks</a>
             <a href="#" class="tab ${S.projectTab==='conversation'?'active':''}" data-action="set-project-tab" data-tab="conversation">Conversation</a>
             <a href="#" class="tab ${S.projectTab==='media'?'active':''}" data-action="set-project-tab" data-tab="media">Media</a>
             <a href="#" class="tab ${S.projectTab==='financials'?'active':''}" data-action="set-project-tab" data-tab="financials">Financials</a>
             <a href="#" class="tab ${S.projectTab==='activity'?'active':''}" data-action="set-project-tab" data-tab="activity">Activity</a>
           </div>
+          <select class="tab-select" data-action="set-project-tab-select">
+            <option value="tasks" ${S.projectTab==='tasks'?'selected':''}>Tasks</option>
+            <option value="conversation" ${S.projectTab==='conversation'?'selected':''}>Conversation</option>
+            <option value="media" ${S.projectTab==='media'?'selected':''}>Media</option>
+            <option value="financials" ${S.projectTab==='financials'?'selected':''}>Financials</option>
+            <option value="activity" ${S.projectTab==='activity'?'selected':''}>Activity</option>
+          </select>
 
           ${S.projectTab==='tasks' ? `
           <div class="log">
@@ -4452,6 +4485,19 @@ function bindGlobal(){
   document.querySelectorAll('.board-item-input').forEach(inp=>{
     inp.addEventListener('input', ()=>{ S.newBoardItemText[inp.getAttribute('data-cardid')] = inp.value; });
     inp.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doAddBoardItem(inp.getAttribute('data-projectid'), inp.getAttribute('data-cardid')); } });
+  });
+  document.querySelectorAll('.artist-filter-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const action = sel.getAttribute('data-action'), id = sel.value;
+      if(action==='filter-project-artist') S.projectArtistFilter = id;
+      else if(action==='fin-filter') S.finArtistFilter = id;
+      else if(action==='filter-leads-artist') S.leadsArtistFilter = id;
+      else if(action==='pricing-artist') S.pricingArtist = id;
+      render();
+    });
+  });
+  document.querySelectorAll('.tab-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.projectTab = sel.value; render(); });
   });
 }
 
