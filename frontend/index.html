@@ -565,6 +565,7 @@ function saveArtists(){ try{ localStorage.setItem(ARTISTS_LS_KEY, JSON.stringify
 // starter set. `name` is the stable key project records reference via `project.type`, so renaming
 // a type in-app must cascade to existing projects (see doSaveProjectType) rather than being edited here.
 const DEFAULT_PROJECT_TYPES = [
+  { name:'General', recurring:false, batchWithRecordingDay:false, suggestedRoles:[], stages:['Active'], checklist:{} },
   { name:'Album', recurring:false, batchWithRecordingDay:false, suggestedRoles:['Producer','Mixer'],
     stages:['Writing','Recording','Mixing & Mastering','Artwork','Release'],
     checklist:{
@@ -637,6 +638,7 @@ function loadProjectTypes(){ try{ const raw = localStorage.getItem(PROJECT_TYPES
 function saveProjectTypes(){ try{ localStorage.setItem(PROJECT_TYPES_LS_KEY, JSON.stringify(PROJECT_TYPES)); }catch(e){} }
 let PROJECT_TYPES = loadProjectTypes();
 if(!PROJECT_TYPES){ PROJECT_TYPES = DEFAULT_PROJECT_TYPES; saveProjectTypes(); }
+else if(!PROJECT_TYPES.some(t=>t.name==='General')){ PROJECT_TYPES.unshift(DEFAULT_PROJECT_TYPES[0]); saveProjectTypes(); }
 function getProjectType(name){ return PROJECT_TYPES.find(t=>t.name===name) || PROJECT_TYPES[0]; }
 
 function buildProjectTasks(type){
@@ -2216,10 +2218,10 @@ function renderProjectFolderCard(p, opts={}){
       ${opts.showArtist? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;"><span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${a.initials}</span><span style="font-size:11px;color:var(--ink-2);">${esc(a.name)}</span></div>`:''}
       <strong style="font-family:var(--font-display);font-size:14px;display:block;">${esc(p.title)}</strong>
       ${p.subtitle? `<div style="font-size:11.5px;color:var(--ink-2);margin-top:2px;">${esc(p.subtitle)}</div>`:''}
-      <div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;">
-        <span class="pill pill-neutral">${esc(p.type)}</span>
+      ${p.type!=='General' || p.dueDate? `<div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;">
+        ${p.type!=='General'? `<span class="pill pill-neutral">${esc(p.type)}</span>`:''}
         ${p.dueDate? `<span class="pill ${overdue?'pill-crit':'pill-neutral'}">${overdue?'Overdue · ':''}${fmtDateShort(p.dueDate)}</span>`:''}
-      </div>
+      </div>`:''}
       <div style="display:flex;align-items:center;gap:6px;margin-top:10px;">
         <div style="flex:1;height:4px;border-radius:2px;background:var(--surface-3);overflow:hidden;"><div style="height:100%;width:${total?Math.round(done/total*100):0}%;background:var(--accent);"></div></div>
         <span class="u-label" style="font-size:10px;">${done}/${total}</span>
@@ -2388,7 +2390,7 @@ function renderProjectDetail(){
           <div style="min-width:0;flex:1;">
           ${isAdmin? `<input class="blend-input" data-action="set-project-title" data-id="${p.id}" value="${esc(p.title)}" placeholder="Project name…" style="font-family:var(--font-display);font-size:1.2rem;font-weight:600;padding:0;"/>`
             : `<strong style="font-family:var(--font-display);font-size:1.2rem;display:block;">${esc(p.title)}</strong>`}
-          <span class="pill pill-accent">${esc(p.type)} · ${esc(a.name)}</span></div>
+          <span class="pill pill-accent">${p.type!=='General'? esc(p.type)+' · ':''}${esc(a.name)}</span></div>
         </div>
         <button class="icon-btn" data-action="close-project" style="flex:none;">${ICO.x}</button>
       </div>
@@ -2398,7 +2400,6 @@ function renderProjectDetail(){
           <div style="display:flex;flex-direction:column;gap:10px;font-size:12.5px;">
             <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Artist</span>
               <span style="display:flex;align-items:center;gap:6px;font-weight:600;${isAdmin?'cursor:pointer;':''}" ${isAdmin?`data-action="open-artist" data-id="${a.id}"`:''}><span class="avatar" data-slot="${a.slot}" style="width:20px;height:20px;font-size:8px;">${a.initials}</span>${esc(a.name)}</span></div>
-            <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Type</span><span class="pill pill-neutral">${esc(p.type)}</span></div>
             <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Who it's for</span>
               ${isAdmin? `<input data-action="set-project-subtitle" data-id="${p.id}" value="${esc(p.subtitle||'')}" placeholder="e.g. client / label" style="padding:5px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;text-align:right;max-width:160px;"/>`
                 : (p.subtitle? `<span>${esc(p.subtitle)}</span>` : `<span style="color:var(--ink-3);">Not set</span>`)}
@@ -2434,6 +2435,7 @@ function renderProjectDetail(){
           </div>` : ''}
         </div>
 
+        ${p.type!=='General' ? `
         <div class="timeline">
           ${stages.map((s,i)=>`<div class="tl-step ${i<curIdx?'done':''} ${i===curIdx?'current':''} ${isAdmin?'clickable':''}" ${isAdmin?`data-action="set-project-stage" data-id="${p.id}" data-stage="${esc(s)}"`:''}><span class="tl-line"></span>
             <span class="tl-dot">${i<curIdx?ICO.check:i+1}</span><span class="tl-label">${esc(s)}</span></div>`).join('')}
@@ -2454,6 +2456,7 @@ function renderProjectDetail(){
           </div>` : `<p style="font-size:12.5px;color:var(--accent-ink);margin:8px 0 0;">All ${esc(p.stage)} tasks are done — ready to move to the next stage.</p>`}
           ${isAdmin? `<button class="btn btn-sm" style="margin-top:10px;background:var(--surface);" data-action="draft-update" data-id="${p.id}">Draft update for ${esc(a.name.split(' ')[0])}</button>`:''}
         </div>
+        ` : ''}
 
         ${S.showDraftUpdate? renderDraftUpdate(p) : ''}
 
@@ -2570,9 +2573,7 @@ function renderProjectDetail(){
 }
 function renderNewProjectModal(){
   const f = S.newProjectForm;
-  const type = f.type || (PROJECT_TYPES[0]||{}).name;
-  const pt = getProjectType(type);
-  const isBatch = !!pt.batchWithRecordingDay;
+  const isBatch = f.mode==='recordingday';
   const count = f.episodeCount || 2;
   return `<div class="overlay center" data-action="overlay-close-newproject">
     <div class="modal" data-stop data-form="newproject">
@@ -2582,11 +2583,8 @@ function renderNewProjectModal(){
           <div class="artist-pick">${ARTISTS.map(a=>`<div class="artist-opt ${f.artistId===a.id?'sel':''}" data-action="pick-project-artist" data-id="${a.id}">
             <span class="avatar" data-slot="${a.slot}" style="width:34px;height:34px;font-size:12px;">${a.initials}</span><span>${a.name}</span></div>`).join('')}</div>
         </div>
-        <div class="field"><label>Type</label>
-          <div class="chip-row">${PROJECT_TYPES.map(t=>`<button class="filter-chip ${type===t.name?'sel':''}" data-action="pick-project-type" data-type="${esc(t.name)}">${esc(t.name)}</button>`).join('')}</div>
-        </div>
         ${isBatch ? `
-        <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 14px;">Book the shared studio day once, then track each guest's episode as its own project with its own release date.</p>
+        <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 14px;">Book the shared studio day once, then track each guest's episode as its own project with its own release date. <a href="#" data-action="new-project-mode" data-mode="simple" style="color:var(--accent);">Back to a plain project →</a></p>
         <div class="field"><label>Recording Date</label><input type="date" data-field="recordingDate" value="${f.recordingDate||''}"/></div>
         <div class="field"><label>How many episodes that day?</label>
           <div class="chip-row">${[2,3].map(n=>`<button class="filter-chip ${count===n?'sel':''}" data-action="pick-episode-count" data-count="${n}">${n}</button>`).join('')}</div>
@@ -2600,6 +2598,7 @@ function renderNewProjectModal(){
         <div class="field"><label>Who it's for (optional)</label><input data-field="whoFor" value="${esc(f.whoFor||'')}" placeholder="e.g. client / label / event name"/></div>
         <div class="field"><label>Target Date (optional)</label><input type="date" data-field="dueDate" value="${f.dueDate||''}"/></div>
         <button class="btn btn-primary btn-block" data-action="confirm-add-project" style="margin-top:6px;">Create Project</button>
+        <a href="#" data-action="new-project-mode" data-mode="recordingday" style="display:block;text-align:center;font-size:12px;color:var(--ink-3);margin-top:10px;">Booking multiple podcast episodes on one recording day? →</a>
         `}
       </div>
     </div>
@@ -3744,12 +3743,12 @@ function doAddArtist(){
 function logProjectEvent(p, type, text){ p.log.push({ts:new Date().toISOString(), type, text}); }
 function doAddProject(){
   const f = S.newProjectForm;
-  const type = f.type || (PROJECT_TYPES[0]||{}).name;
-  const pt = getProjectType(type);
+  const isBatch = f.mode==='recordingday';
+  const type = isBatch ? 'Podcast Episode' : 'General';
   if(!f.artistId){ toast('Pick an artist.', 'system'); return; }
   const artist = artistById(f.artistId);
 
-  if(pt.batchWithRecordingDay){
+  if(isBatch){
     if(!f.recordingDate){ toast('Pick a recording date.', 'system'); return; }
     const count = f.episodeCount || 2;
     const ev = {
@@ -3792,7 +3791,7 @@ function doAddProject(){
   const proj = makeProject(artist, type, f.title.trim(), 0, 0, f.dueDate||null, {subtitle:(f.whoFor||'').trim()});
   PROJECTS.unshift(proj); saveProjects();
   S.showNewProject=false; S.newProjectForm={};
-  toast(`Project created — starter checklist generated for ${artist.name}.`, 'success');
+  toast(`Project created for ${artist.name}.`, 'success');
   S.projectArtistFilter = artist.id;
   S.projectId = proj.id;
   render();
@@ -4380,11 +4379,11 @@ function bindGlobal(){
       case 'remove-board-item': doRemoveBoardItem(id, t.getAttribute('data-cardid'), t.getAttribute('data-itemid')); break;
       case 'add-board-item': doAddBoardItem(id, t.getAttribute('data-cardid')); break;
       case 'remove-project-cover': { const p=getProject(id); p.coverImage=null; saveProjects(); toast('Cover removed.', 'system'); render(); break; }
-      case 'open-new-project': { const presetArtist = S.projectArtistFilter!=='all'? S.projectArtistFilter : null; closeAllOverlays(); S.newProjectForm={type:(PROJECT_TYPES[0]||{}).name, artistId: presetArtist}; S.showNewProject=true; render(); break; }
+      case 'open-new-project': { const presetArtist = S.projectArtistFilter!=='all'? S.projectArtistFilter : null; closeAllOverlays(); S.newProjectForm={artistId: presetArtist}; S.showNewProject=true; render(); break; }
       case 'close-new-project': S.showNewProject=false; render(); break;
       case 'overlay-close-newproject': if(e.target===t){ S.showNewProject=false; render(); } break;
       case 'pick-project-artist': S.newProjectForm.artistId = id; render(); break;
-      case 'pick-project-type': S.newProjectForm.type = t.getAttribute('data-type'); render(); break;
+      case 'new-project-mode': S.newProjectForm.mode = t.getAttribute('data-mode'); render(); break;
       case 'pick-episode-count': S.newProjectForm.episodeCount = Number(t.getAttribute('data-count')); render(); break;
       case 'confirm-add-project': doAddProject(); break;
       case 'open-new-type': doOpenNewType(); break;
