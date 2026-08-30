@@ -596,7 +596,7 @@ function buildProjectTasks(type){
   const pt = getProjectType(type);
   const tasks = [];
   Object.entries(pt.checklist||{}).forEach(([stage, items])=>{
-    items.forEach(text=> tasks.push({id:'T-'+Math.random().toString(36).slice(2,9), stage, text, done:false}));
+    items.forEach(text=> tasks.push({id:'T-'+Math.random().toString(36).slice(2,9), stage, text, done:false, assignedTo:null}));
   });
   return tasks;
 }
@@ -664,11 +664,18 @@ else {
     if(p.dueDate === undefined){ p.dueDate = null; migrated = true; }
     if(p.type==='Video'){ p.type='Music Video'; migrated = true; }
     if(!p.people){ p.people = []; migrated = true; }
+    p.people.forEach(person=>{
+      if(person.kind===undefined){ person.kind = 'external'; migrated = true; }
+      if(person.email===undefined){ person.email = ''; migrated = true; }
+      if(person.phone===undefined){ person.phone = ''; migrated = true; }
+      if(person.refId===undefined){ person.refId = null; migrated = true; }
+    });
     if(!p.financials){ p.financials = {income:[], expenses:[]}; migrated = true; }
     if(p.recordingEventId===undefined){ p.recordingEventId = null; migrated = true; }
     if(p.subtitle===undefined){ p.subtitle = ''; migrated = true; }
     if(p.coverImage===undefined){ p.coverImage = null; migrated = true; }
     if(!p.boardCards){ p.boardCards = buildDefaultBoardCards(); migrated = true; }
+    (p.tasks||[]).forEach(t=>{ if(t.assignedTo===undefined){ t.assignedTo = null; migrated = true; } });
   });
   if(migrated) saveProjects();
 }
@@ -979,6 +986,8 @@ let S = {
   showNewProject:false,
   newProjectForm:{},
   newTaskText:'',
+  newTaskAssignee:'',
+  taskAssigneeFilter:null,
   newBoardItemText:{},
   showReminderPreview:false,
   showBookingConfirmation:false,
@@ -986,7 +995,7 @@ let S = {
   projectTab:'tasks',
   newCommentText:'',
   newLinkForm:{},
-  newPersonForm:{},
+  newPersonForm:{kind:'internal'},
   newFinIncomeLabel:'', newFinIncomeAmount:'',
   newFinExpenseLabel:'', newFinExpenseAmount:'',
   calMonth: (()=>{const d=new Date(); d.setDate(1); return d;})(),
@@ -1306,7 +1315,7 @@ function closeAllOverlays(){
   S.dayListDate=null; S.showNewProject=false; S.showFlightForm=false; S.showContract=false;
   S.showTransportForm=false; S.showItinerary=false; S.itineraryEventId=null; S.showBlockTime=false; S.showAskAI=false; S.showDressCodeForm=false;
   S.showNewInvoice=false; S.showInvoiceDoc=false; S.invoiceDocId=null; S.showNewOutsideBooking=false;
-  S.showAddCharge=false; S.showEventMenu=false; S.projectTab='tasks'; S.showReminderPreview=false; S.showBookingConfirmation=false;
+  S.showAddCharge=false; S.showEventMenu=false; S.projectTab='tasks'; S.taskAssigneeFilter=null; S.showReminderPreview=false; S.showBookingConfirmation=false;
   S.showMobileMenu=false;
 }
 let pendingViewTransition = false;
@@ -2397,6 +2406,51 @@ function renderArtistProjects(artistId){
     ${projects.length? `<div class="grid grid-folders">${projects.map(p=>renderProjectFolderCard(p)).join('')}</div>` : `<div class="card empty">No projects yet.</div>`}
   `;
 }
+function personInitials(name){
+  return (name||'?').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase() || '?';
+}
+function renderPersonAvatar(person, size){
+  size = size||16;
+  const artist = person.kind==='internal' ? artistById(person.refId) : null;
+  if(artist) return `<span class="avatar" data-slot="${artist.slot}" style="width:${size}px;height:${size}px;font-size:${Math.round(size*0.44)}px;flex:none;">${esc(artist.initials)}</span>`;
+  return `<span class="avatar" style="width:${size}px;height:${size}px;font-size:${Math.round(size*0.44)}px;flex:none;background:var(--ink);color:var(--page);">${esc(personInitials(person.name))}</span>`;
+}
+function renderAssigneeChip(p, personId){
+  const person = personId ? (p.people||[]).find(x=>x.id===personId) : null;
+  if(!person) return `<span style="font-size:11px;color:var(--ink-3);">Unassigned</span>`;
+  const isMe = person.kind==='internal' && person.refId===S.user;
+  return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;${isMe?'font-weight:700;color:var(--accent-ink);':'color:var(--ink-2);'}">${renderPersonAvatar(person,16)}${isMe?'You':esc(person.name)}</span>`;
+}
+function renderTaskAssigneeSelect(p, t){
+  return `<select class="task-assignee-select" data-id="${p.id}" data-taskid="${t.id}" style="font-size:11px;padding:3px 5px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);max-width:120px;color:var(--ink);">
+    <option value="">Unassigned</option>
+    ${(p.people||[]).map(person=>`<option value="${person.id}" ${t.assignedTo===person.id?'selected':''}>${esc(person.name)}</option>`).join('')}
+  </select>`;
+}
+function taskAssigneeCounts(p){
+  const counts = {};
+  (p.tasks||[]).filter(t=>!t.done).forEach(t=>{
+    const key = t.assignedTo || '__unassigned';
+    counts[key] = (counts[key]||0)+1;
+  });
+  return counts;
+}
+function renderWaitingOnStrip(p){
+  const counts = taskAssigneeCounts(p);
+  const entries = Object.entries(counts);
+  if(!entries.length) return '';
+  const chips = entries.map(([key,n])=>{
+    if(key==='__unassigned') return `<button class="filter-chip ${S.taskAssigneeFilter==='__unassigned'?'sel':''}" data-action="filter-tasks-by-assignee" data-pid="__unassigned">Unassigned (${n})</button>`;
+    const person = (p.people||[]).find(x=>x.id===key);
+    if(!person) return '';
+    const isMe = person.kind==='internal' && person.refId===S.user;
+    return `<button class="filter-chip ${S.taskAssigneeFilter===key?'sel':''}" data-action="filter-tasks-by-assignee" data-pid="${key}">${isMe?'You':esc(person.name)} (${n})</button>`;
+  }).join('');
+  return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:12px;">
+    <span class="u-label" style="margin-right:2px;">Waiting on</span>${chips}
+    ${S.taskAssigneeFilter? `<button class="filter-chip" data-action="filter-tasks-by-assignee" data-pid="">Show all</button>`:''}
+  </div>`;
+}
 function renderBoardCard(pid, c){
   const isAdmin = isAdminUser(S.user);
   const items = c.items||[];
@@ -2456,13 +2510,32 @@ function renderProjectDetail(){
           <div style="margin-top:16px;">
             <div class="u-label" style="margin-bottom:8px;">Who's Involved</div>
             <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:${isAdmin?'10px':'0'};">
-              ${(p.people||[]).length? p.people.map(person=>`<span class="pill pill-neutral" style="display:inline-flex;align-items:center;gap:6px;">${esc(person.role)}: ${esc(person.name)}${isAdmin?`<button data-action="remove-person" data-id="${p.id}" data-pid="${person.id}" style="border:none;background:none;cursor:pointer;color:var(--ink-3);padding:0;display:flex;">${ICO.x}</button>`:''}</span>`).join('') : `<span style="font-size:12px;color:var(--ink-3);">Nobody added yet.</span>`}
+              ${(p.people||[]).length? p.people.map(person=>`<span class="pill pill-neutral" style="display:inline-flex;align-items:center;gap:6px;">${renderPersonAvatar(person,15)}${esc(person.role)}: ${esc(person.name)}${isAdmin?`<button data-action="remove-person" data-id="${p.id}" data-pid="${person.id}" style="border:none;background:none;cursor:pointer;color:var(--ink-3);padding:0;display:flex;">${ICO.x}</button>`:''}</span>`).join('') : `<span style="font-size:12px;color:var(--ink-3);">Nobody added yet.</span>`}
             </div>
-            ${isAdmin? `<div data-form="person" style="display:flex;gap:6px;flex-wrap:wrap;">
-              <input data-field="role" placeholder="Role (e.g. Guest)" style="flex:1;min-width:90px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.role||'')}"/>
-              <input data-field="name" placeholder="Name" style="flex:1;min-width:110px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.name||'')}"/>
+            ${isAdmin? `
+            <div class="chip-row" style="margin-bottom:8px;">
+              <button class="filter-chip ${(S.newPersonForm.kind||'internal')==='internal'?'sel':''}" data-action="set-person-kind" data-kind="internal">Internal</button>
+              <button class="filter-chip ${S.newPersonForm.kind==='external'?'sel':''}" data-action="set-person-kind" data-kind="external">External</button>
+            </div>
+            ${(S.newPersonForm.kind||'internal')==='internal' ? `
+            <div data-form="person" style="display:flex;gap:6px;flex-wrap:wrap;">
+              <select class="person-refid-select" style="flex:1;min-width:140px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;color:var(--ink);">
+                <option value="">Pick a person…</option>
+                <optgroup label="ASP Office">${ADMIN_USERS.map(u=>`<option value="${u.id}" ${S.newPersonForm.refId===u.id?'selected':''}>${esc(u.name)}</option>`).join('')}</optgroup>
+                <optgroup label="Artists">${ARTISTS.map(a=>`<option value="${a.id}" ${S.newPersonForm.refId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</optgroup>
+              </select>
+              <input data-field="role" placeholder="Role (e.g. Point of Contact)" style="flex:1;min-width:110px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.role||'')}"/>
               <button class="btn btn-sm" data-action="add-person" data-id="${p.id}">Add</button>
-            </div>` : ''}
+            </div>
+            ` : `
+            <div data-form="person" style="display:flex;gap:6px;flex-wrap:wrap;">
+              <input data-field="name" placeholder="Name" style="flex:1;min-width:100px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.name||'')}"/>
+              <input data-field="email" placeholder="Email (optional)" style="flex:1;min-width:130px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.email||'')}"/>
+              <input data-field="role" placeholder="Role (e.g. Guest)" style="flex:1;min-width:90px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.role||'')}"/>
+              <button class="btn btn-sm" data-action="add-person" data-id="${p.id}">Add</button>
+            </div>
+            `}
+            ` : ''}
           </div>
         </div>
 
@@ -2492,15 +2565,25 @@ function renderProjectDetail(){
           </select>
 
           ${S.projectTab==='tasks' ? `
+          ${renderWaitingOnStrip(p)}
           <div class="log">
-            ${p.tasks.map(t=>`<div class="log-item" style="align-items:center;">
+            ${p.tasks.filter(t=> !S.taskAssigneeFilter || (S.taskAssigneeFilter==='__unassigned'? !t.assignedTo : t.assignedTo===S.taskAssigneeFilter)).map(t=>{
+              const assignedPerson = t.assignedTo ? (p.people||[]).find(x=>x.id===t.assignedTo) : null;
+              const isMine = assignedPerson && assignedPerson.kind==='internal' && assignedPerson.refId===S.user;
+              return `<div class="log-item" style="align-items:center;flex-wrap:wrap;gap:8px;${isMine&&!t.done?'background:var(--accent-wash);border-radius:8px;':''}">
               <input type="checkbox" ${t.done?'checked':''} data-action="toggle-task" data-id="${p.id}" data-taskid="${t.id}" style="width:16px;height:16px;flex:none;"/>
-              <span style="flex:1;${t.done?'text-decoration:line-through;color:var(--ink-3);':''}">${esc(t.text)}<div class="log-time">${esc(t.stage)}</div></span>
+              <span style="flex:1;min-width:120px;${t.done?'text-decoration:line-through;color:var(--ink-3);':''}">${esc(t.text)}</span>
+              ${isAdmin? renderTaskAssigneeSelect(p,t) : renderAssigneeChip(p, t.assignedTo)}
               ${isAdmin?`<button class="icon-btn" data-action="remove-task" data-id="${p.id}" data-taskid="${t.id}" style="width:24px;height:24px;">${ICO.x}</button>`:''}
-            </div>`).join('')}
+            </div>`;
+            }).join('') || `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">${S.taskAssigneeFilter? 'No tasks match this filter.' : 'No tasks yet.'}</p>`}
           </div>
-          ${isAdmin? `<div data-form="task" style="display:flex;gap:6px;margin-top:10px;">
-            <input data-field="newTaskText" placeholder="Add a task…" style="flex:1;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newTaskText||'')}"/>
+          ${isAdmin? `<div data-form="task" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
+            <input data-field="newTaskText" placeholder="Add a task…" style="flex:1;min-width:140px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newTaskText||'')}"/>
+            <select class="new-task-assignee-select" style="padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;color:var(--ink);">
+              <option value="">Unassigned</option>
+              ${(p.people||[]).map(person=>`<option value="${person.id}" ${S.newTaskAssignee===person.id?'selected':''}>${esc(person.name)}</option>`).join('')}
+            </select>
             <button class="btn btn-sm" data-action="add-task" data-id="${p.id}">Add</button>
           </div>`:''}
           <p style="font-size:11.5px;color:var(--ink-3);margin:10px 0 0;">Checking off a task doesn't capture details — post the actual decision (which cities, which venue, etc.) in Conversation.</p>
@@ -3817,17 +3900,29 @@ function doAddProject(){
 }
 function doAddPerson(id){
   const f = S.newPersonForm;
-  const role = (f.role||'').trim(), name = (f.name||'').trim();
-  if(!role || !name){ toast('Enter a role and a name.', 'system'); return; }
+  const kind = f.kind || 'internal';
+  const role = (f.role||'').trim();
+  if(!role){ toast('Enter a role.', 'system'); return; }
   const p = getProject(id);
   p.people = p.people || [];
-  p.people.push({id:'PPL-'+Math.random().toString(36).slice(2,7), role, name});
+  let name, refId=null, email='';
+  if(kind==='internal'){
+    const person = adminById(f.refId) || artistById(f.refId);
+    if(!person){ toast('Pick a person.', 'system'); return; }
+    name = person.name; refId = f.refId; email = person.email || '';
+  } else {
+    name = (f.name||'').trim();
+    if(!name){ toast('Enter a name.', 'system'); return; }
+    email = (f.email||'').trim();
+  }
+  p.people.push({id:'PPL-'+Math.random().toString(36).slice(2,7), role, name, kind, refId, email, phone:''});
   logProjectEvent(p,'system', `${role} added: ${name}`);
-  S.newPersonForm = {}; saveProjects(); render();
+  S.newPersonForm = {kind}; saveProjects(); render();
 }
 function doRemovePerson(id, personId){
   const p = getProject(id);
   p.people = (p.people||[]).filter(x=>x.id!==personId);
+  (p.tasks||[]).forEach(t=>{ if(t.assignedTo===personId) t.assignedTo = null; });
   saveProjects(); render();
 }
 function doAddFinItem(id, kind){
@@ -3858,9 +3953,29 @@ function doRemoveTask(id, taskId){
 function doAddTask(id){
   const text = (S.newTaskText||'').trim(); if(!text) return;
   const p = getProject(id);
-  p.tasks.push({id:'T-'+Math.random().toString(36).slice(2,9), stage:p.stage, text, done:false});
-  logProjectEvent(p,'system',`Task added: ${text}`);
-  S.newTaskText=''; saveProjects(); render();
+  const assignedTo = S.newTaskAssignee || null;
+  p.tasks.push({id:'T-'+Math.random().toString(36).slice(2,9), stage:p.stage, text, done:false, assignedTo});
+  const person = assignedTo ? (p.people||[]).find(x=>x.id===assignedTo) : null;
+  logProjectEvent(p,'system', person? `Task added: ${text} (assigned to ${person.name})` : `Task added: ${text}`);
+  if(person && person.email) logProjectEvent(p,'email', `Notified ${person.name} by email — new task assigned: "${text}".`);
+  S.newTaskText=''; S.newTaskAssignee=''; saveProjects(); render();
+}
+function doAssignTask(id, taskId, personId){
+  const p = getProject(id);
+  const t = (p.tasks||[]).find(x=>x.id===taskId);
+  if(!t) return;
+  const newId = personId || null;
+  if(t.assignedTo===newId) return;
+  t.assignedTo = newId;
+  if(newId){
+    const person = (p.people||[]).find(x=>x.id===newId);
+    if(person){
+      logProjectEvent(p, person.email?'email':'system', `Task "${t.text}" assigned to ${person.name}.${person.email? ' Notified by email.' : ''}`);
+    }
+  } else {
+    logProjectEvent(p,'system', `Task "${t.text}" unassigned.`);
+  }
+  saveProjects(); render();
 }
 function doUploadProjectImage(id, files){
   const p = getProject(id);
@@ -4290,6 +4405,8 @@ function bindGlobal(){
       case 'remove-project-link': doRemoveProjectLink(id, t.getAttribute('data-linkid')); break;
       case 'add-person': doAddPerson(id); break;
       case 'remove-person': doRemovePerson(id, t.getAttribute('data-pid')); break;
+      case 'set-person-kind': S.newPersonForm = {kind: t.getAttribute('data-kind')}; render(); break;
+      case 'filter-tasks-by-assignee': { const pid = t.getAttribute('data-pid'); S.taskAssigneeFilter = (pid && pid!==S.taskAssigneeFilter) ? pid : null; render(); break; }
       case 'add-fin-item': doAddFinItem(id, t.getAttribute('data-kind')); break;
       case 'remove-fin-item': doRemoveFinItem(id, t.getAttribute('data-kind'), t.getAttribute('data-itemid')); break;
       case 'add-board-card': doAddBoardCard(id, t.getAttribute('data-preset')); break;
@@ -4375,6 +4492,15 @@ function bindGlobal(){
   });
   document.querySelectorAll('.tab-select').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.projectTab = sel.value; render(); });
+  });
+  document.querySelectorAll('.person-refid-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.newPersonForm.refId = sel.value; });
+  });
+  document.querySelectorAll('.new-task-assignee-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.newTaskAssignee = sel.value; });
+  });
+  document.querySelectorAll('.task-assignee-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ doAssignTask(sel.getAttribute('data-id'), sel.getAttribute('data-taskid'), sel.value); });
   });
 }
 
