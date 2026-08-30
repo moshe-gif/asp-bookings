@@ -406,7 +406,7 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
   .hamburger-btn{ display:inline-flex; }
   .artist-top-tabs{ display:none; }
   .user-chip{ display:none; }
-  .stat-row{ display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+  .stat-row{ display:flex; flex-direction:column; gap:8px; }
   .stat-row > *{ min-width:0; }
   .table-cards{ overflow-x:visible; }
   .timeline{ overflow-x:visible; gap:0; }
@@ -1884,6 +1884,13 @@ function renderWelcomeHeader(name){
   </div>`;
 }
 function renderMgmtDashboard(){
+  const isCEO = S.user==='admin_ceo';
+  if(isCEO){
+    return `
+    ${renderWelcomeHeader(adminById(S.user).name)}
+    ${renderUpcomingGigsCard(S.events, {days:7, showArtist:true})}
+    `;
+  }
   const open = S.events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status));
   const awaitingDeposit = S.events.filter(e=>e.status==='contract_sent');
   const awaitingBalance = S.events.filter(e=>e.status==='booked' && !e.balanceReceived);
@@ -1892,7 +1899,6 @@ function renderMgmtDashboard(){
   const intlTrips = S.events.filter(e=>isInternational(e) && !e.intlOpportunityDismissed && !isPast(e.date) && ['booked','paid'].includes(e.status)).sort((a,b)=>a.date.localeCompare(b.date));
   const needsTravel = S.events.filter(e=>!isPast(e.date) && ((e.flightNeeded && !e.flightBooked) || (e.groundTransportNeeded && !e.groundTransportBooked)));
   const todayGigs = S.events.filter(e=>e.date===fmtISO(new Date()) && ['booked','paid'].includes(e.status));
-  const isCEO = S.user==='admin_ceo';
 
   return `
   ${renderWelcomeHeader(adminById(S.user).name)}
@@ -1909,7 +1915,7 @@ function renderMgmtDashboard(){
     ${statTile('Open Messages', '—', 'Not connected yet', 'messages')}
   </div>
 
-  ${(!isCEO && conflictPairs.length) ? `
+  ${conflictPairs.length ? `
   <div class="card card-pad" style="margin-bottom:20px;border-color:var(--crit);background:var(--crit-wash);">
     <div style="display:flex;align-items:center;gap:8px;color:var(--crit-ink);font-weight:700;font-size:13px;">${ICO.alert} Scheduling conflicts (${conflictPairs.length})</div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px;">
@@ -1928,6 +1934,16 @@ function statTile(label, val, sub, view){
   const clickable = view ? `style="cursor:pointer;" data-action="nav" data-view="${view}"` : '';
   return `<div class="card stat-tile" ${clickable}>
     <span class="u-label">${label}</span><span class="val">${val}</span><span class="sub">${sub}</span></div>`;
+}
+function renderUpcomingGigsCard(events, opts={}){
+  const days = opts.days || 7;
+  const upcoming = events.filter(e=>!isPast(e.date) && daysUntil(e.date)<days && ['booked','paid'].includes(e.status))
+    .sort((a,b)=> a.date===b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date));
+  return `
+  <div class="section-head"><h2>Upcoming — Next ${days} Days</h2></div>
+  ${upcoming.length? `<div class="card">${upcoming.map(e=>renderDayEventRow(e, !!opts.showArtist, 'open-event')).join('')}</div>`
+    : `<div class="card empty">Nothing coming up in the next ${days} days.</div>`}
+  `;
 }
 function subpageBack(){
   return `<button class="icon-btn" data-action="nav" data-view="dashboard" title="Back to Dashboard" style="margin-bottom:14px;">${ICO.chev('l')}</button>`;
@@ -2713,9 +2729,6 @@ function renderNewProjectModal(){
 function renderArtistDashboard(artistId){
   const a = artistById(artistId);
   const evs = eventsFor(artistId);
-  const upcoming = evs.filter(e=>!isPast(e.date) && ['booked','paid'].includes(e.status)).sort((x,y)=>x.date.localeCompare(y.date));
-  const next = upcoming[0];
-  const ytd = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+e.balance,0);
   const todayGig = evs.find(e=>e.date===fmtISO(new Date()) && ['booked','paid'].includes(e.status));
   return `
   ${renderWelcomeHeader(a.name.split(' ')[0])}
@@ -2729,12 +2742,7 @@ function renderArtistDashboard(artistId){
       <a href="${wazeUrl(todayGig)}" target="_blank" rel="noopener" class="btn" style="flex:1;background:var(--surface);">${ICO.pin} Waze</a>
     </div>` : ''}
   </div>` : ''}
-  <div class="grid stat-row" style="margin-bottom:20px;">
-    ${statTile('Upcoming Gigs', upcoming.length, 'Booked & confirmed', 'a_calendar')}
-    ${statTile('Next Gig', next? `${daysUntil(next.date)}d`: '—', next? fmtDateShort(next.date): 'Nothing scheduled', 'a_calendar')}
-    ${statTile('YTD Payout', money(ytd), 'Received via Zelle', 'a_financials')}
-    ${statTile('Flights Pending', evs.filter(e=>e.flightNeeded&&!e.flightBooked&&!isPast(e.date)).length, 'Awaiting bookkeeping')}
-  </div>
+  ${renderUpcomingGigsCard(evs, {days:7, showArtist:false})}
   `;
 }
 function renderArtistFinancials(artistId){
