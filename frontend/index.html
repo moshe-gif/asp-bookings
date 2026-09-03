@@ -759,9 +759,9 @@ else { OBID = OUTSIDE_BOOKINGS.reduce((max,b)=>{ const n=parseInt(String(b.id).s
 function getOutsideBooking(id){ return OUTSIDE_BOOKINGS.find(b=>b.id===id); }
 
 const ADMIN_USERS = [
-  {id:'admin_bookings', name:'ASP Office — Bookings', email:'bookings@aspmanagement.com', initials:'AB'},
-  {id:'admin_bookkeeping', name:'ASP Office — Bookkeeping', email:'bookkeeping@aspmanagement.com', initials:'AK'},
-  {id:'admin_ceo', name:'ASP Office — CEO', email:'ilan@aspmanagement.com', initials:'CEO'},
+  {id:'admin_bookings', name:'ASP Office — Bookings', displayName:'Bookings', email:'bookings@aspmanagement.com', initials:'AB'},
+  {id:'admin_bookkeeping', name:'ASP Office — Bookkeeping', displayName:'Bookkeeping', email:'bookkeeping@aspmanagement.com', initials:'AK'},
+  {id:'admin_ceo', name:'ASP Office — CEO', displayName:'Ilan', email:'ilan@aspmanagement.com', initials:'CEO'},
 ];
 const isAdminUser = (id)=>ADMIN_USERS.some(u=>u.id===id);
 const adminById = (id)=>ADMIN_USERS.find(u=>u.id===id);
@@ -1900,7 +1900,7 @@ function renderMgmtDashboard(){
   const isCEO = S.user==='admin_ceo';
   if(isCEO){
     return `
-    ${renderWelcomeHeader(adminById(S.user).name)}
+    ${renderWelcomeHeader(adminById(S.user).displayName)}
     ${renderUpcomingGigsCard(S.events, {days:7, showArtist:true})}
     ${renderOpenLeadsCard(S.events)}
     `;
@@ -1915,7 +1915,7 @@ function renderMgmtDashboard(){
   const todayGigs = S.events.filter(e=>e.date===fmtISO(new Date()) && ['booked','paid'].includes(e.status));
 
   return `
-  ${renderWelcomeHeader(adminById(S.user).name)}
+  ${renderWelcomeHeader(adminById(S.user).displayName)}
   <div class="grid stat-row" style="margin-bottom:20px;">
     <div class="card stat-tile" style="cursor:pointer;" data-action="nav-today-gigs"><span class="u-label">Gigs Today</span><span class="val">${todayGigs.length}</span><span class="sub">${fmtDateShort(fmtISO(new Date()))}</span></div>
     <div class="card stat-tile" style="cursor:pointer;" data-action="nav" data-view="calendar"><span class="u-label">Upcoming Gigs · 30 days</span><span class="val">${upcoming30.length}</span><span class="sub">Booked or paid, next 30 days</span></div>
