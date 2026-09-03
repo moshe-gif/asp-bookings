@@ -557,7 +557,7 @@ const ICO = {
   settings:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>',
   menu:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
   key:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>',
-  mic:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7.5" y="2" width="9" height="13" rx="4.5"/><path d="M9.5 6h5M9.5 9.5h5"/><path d="M12 15v7"/></svg>',
+  mic:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="7.5" r="4.5"/><path d="M9 6.2h6M9 8.8h6"/><path d="M12 12v9"/></svg>',
   car:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 17h-.5a1.5 1.5 0 0 1-1.5-1.5v-2a2 2 0 0 1 .15-.76l1.7-4A2 2 0 0 1 6.7 7.5h10.6a2 2 0 0 1 1.85 1.24l1.7 4c.1.24.15.5.15.76v2a1.5 1.5 0 0 1-1.5 1.5H19"/><path d="M5 17h9"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>',
   suitcase:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><path d="M2 13h20"/></svg>',
   checkSquare:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/></svg>',
@@ -1210,6 +1210,7 @@ function eventsFor(artistId){ return S.events.filter(e=>e.artistId===artistId); 
 function getEvent(id){ return S.events.find(e=>e.id===id); }
 function fmtDate(iso){ const d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{weekday:'short', month:'short', day:'numeric', year:'numeric'}); }
 function fmtDateShort(iso){ const d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short', day:'numeric'}); }
+function fmtDateWeekday(iso){ const d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{weekday:'short', month:'short', day:'numeric'}); }
 function fmtTime(t){ const [h,m]=t.split(':').map(Number); const ap=h>=12?'PM':'AM'; const hh=((h+11)%12)+1; return `${hh}:${String(m).padStart(2,'0')} ${ap}`; }
 function fmtTimeRange(start, end){ if(start==='00:00' && !end) return 'All day'; return end? `${fmtTime(start)} – ${fmtTime(end)}` : fmtTime(start); }
 function hoursBetween(start, end){
@@ -1551,11 +1552,28 @@ function render(){
   if(prevScroll.modal){ const m=document.querySelector('.modal'); if(m) m.scrollTop = prevScroll.modal; }
 }
 
-function renderDayEventRow(e, isAdmin, action){
+function renderDayEventRow(e, isAdmin, action, opts={}){
   const a = artistById(e.artistId); const sm = statusMeta(e);
+  const timeLabel = e.time==='00:00'?'All day':fmtTime(e.time);
+  let primary, secondary;
+  if(opts.showDate){
+    // Multi-day lists (dashboard "upcoming"/"open leads") need the date on the row —
+    // single-day contexts (day-list popover, week/day calendar) already show the date
+    // as their own heading, so they keep the original time-led layout below.
+    if(isAdmin){
+      primary = `${esc(a.name)} — ${fmtDateWeekday(e.date)}`;
+      secondary = `${timeLabel} &middot; ${esc(e.clientName||e.type)}`;
+    } else {
+      primary = `${fmtDateWeekday(e.date)} &middot; ${timeLabel}`;
+      secondary = `${esc(e.venue||'Location TBD')} <span style="font-size:10px;opacity:.7;">&middot; ${esc(e.clientName||e.type)}</span>`;
+    }
+  } else {
+    primary = `${timeLabel} — ${isAdmin?esc(a.name):esc(e.clientName||e.type)}`;
+    secondary = `${isAdmin?esc(e.clientName||e.type):esc(e.venue)} &middot; ${esc(e.type)}`;
+  }
   return `<button class="chooser-row" data-action="${action}" data-id="${e.id}">
     <span class="avatar" data-slot="${a.slot}" style="width:32px;height:32px;font-size:11px;">${a.initials}</span>
-    <span style="flex:1;min-width:0;"><strong>${e.time==='00:00'?'All day':fmtTime(e.time)} — ${isAdmin?esc(a.name):esc(e.clientName||e.type)}</strong><span class="chooser-email">${isAdmin?esc(e.clientName||e.type):esc(e.venue)} &middot; ${esc(e.type)}</span></span>
+    <span style="flex:1;min-width:0;"><strong>${primary}</strong><span class="chooser-email">${secondary}</span></span>
     <span class="pill ${sm.cls}">${sm.label}</span>
   </button>`;
 }
@@ -1955,7 +1973,7 @@ function renderUpcomingGigsCard(events, opts={}){
     .sort((a,b)=> a.date===b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date));
   return `
   <div class="section-head"><h2>Upcoming — Next ${days} Days</h2></div>
-  ${upcoming.length? `<div class="card">${upcoming.map(e=>renderDayEventRow(e, !!opts.showArtist, 'open-event')).join('')}</div>`
+  ${upcoming.length? `<div class="card">${upcoming.map(e=>renderDayEventRow(e, !!opts.showArtist, 'open-event', {showDate:true})).join('')}</div>`
     : `<div class="card empty">Nothing coming up in the next ${days} days.</div>`}
   `;
 }
@@ -1963,7 +1981,7 @@ function renderOpenLeadsCard(events){
   const open = events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status)).sort((a,b)=>a.date.localeCompare(b.date));
   return `
   <div class="section-head" style="margin-top:20px;"><h2>Open Leads (${open.length})</h2></div>
-  ${open.length? `<div class="card">${open.map(e=>renderDayEventRow(e, true, 'open-event')).join('')}</div>`
+  ${open.length? `<div class="card">${open.map(e=>renderDayEventRow(e, true, 'open-event', {showDate:true})).join('')}</div>`
     : `<div class="card empty">No open leads right now.</div>`}
   `;
 }
