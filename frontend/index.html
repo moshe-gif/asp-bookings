@@ -1902,6 +1902,7 @@ function renderMgmtDashboard(){
     return `
     ${renderWelcomeHeader(adminById(S.user).name)}
     ${renderUpcomingGigsCard(S.events, {days:7, showArtist:true})}
+    ${renderOpenLeadsCard(S.events)}
     `;
   }
   const open = S.events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status));
@@ -1956,6 +1957,14 @@ function renderUpcomingGigsCard(events, opts={}){
   <div class="section-head"><h2>Upcoming — Next ${days} Days</h2></div>
   ${upcoming.length? `<div class="card">${upcoming.map(e=>renderDayEventRow(e, !!opts.showArtist, 'open-event')).join('')}</div>`
     : `<div class="card empty">Nothing coming up in the next ${days} days.</div>`}
+  `;
+}
+function renderOpenLeadsCard(events){
+  const open = events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status)).sort((a,b)=>a.date.localeCompare(b.date));
+  return `
+  <div class="section-head" style="margin-top:20px;"><h2>Open Leads (${open.length})</h2></div>
+  ${open.length? `<div class="card">${open.map(e=>renderDayEventRow(e, true, 'open-event')).join('')}</div>`
+    : `<div class="card empty">No open leads right now.</div>`}
   `;
 }
 function subpageBack(){
@@ -2025,12 +2034,14 @@ function renderTravelPage(events, opts={}){
     </div>`;
   };
   return `
+  ${opts.singleArtist ? '' : `
   <div class="section-head"><h2>Needs Arranging</h2></div>
   ${(!needsFlight.length && !needsTransport.length) ? `<div class="card empty">Nothing needs arranging right now.</div>` : `
   <div class="card card-pad" style="display:flex;flex-direction:column;gap:2px;margin-bottom:20px;">
     ${needsFlight.map(e=>travelRow(e,'Needs flight')).join('')}
     ${needsTransport.map(e=>travelRow(e,'Needs driver')).join('')}
   </div>`}
+  `}
 
   <div class="section-head"><h2>Upcoming Itineraries (${readyItineraries.length})</h2></div>
   ${!readyItineraries.length ? `<div class="card empty">Nothing here yet.</div>` : `
@@ -3165,9 +3176,10 @@ function renderConflictWarning(ev){
 function renderFlightBlock(ev, isAdmin){
   if(!ev.flightNeeded) return isAdmin ? `<button class="btn btn-ghost" data-action="toggle-flight" data-id="${ev.id}" style="justify-content:flex-start;color:var(--ink-2);">${ICO.checkSquare} Mark flight needed</button>` : '';
   if(!ev.flightBooked){
+    if(!isAdmin) return '';
     return `<div class="card card-pad" style="border-color:var(--warn);background:var(--warn-wash);">
       <div style="display:flex;align-items:center;gap:8px;color:var(--warn-ink);font-weight:700;font-size:13px;">${ICO.plane} Flight needed — booking secretary notified</div>
-      ${isAdmin ? `<button class="btn btn-sm" style="margin-top:10px;" data-action="open-flight-form" data-id="${ev.id}">Add flight info</button>` : `<p style="font-size:12.5px;color:var(--warn-ink);margin:8px 0 0;">The booking secretary is arranging your flight. You'll be notified once it's booked.</p>`}
+      <button class="btn btn-sm" style="margin-top:10px;" data-action="open-flight-form" data-id="${ev.id}">Add flight info</button>
     </div>`;
   }
   const f = ev.flight;
@@ -3198,9 +3210,10 @@ function renderFlightBlock(ev, isAdmin){
 function renderGroundTransportBlock(ev, isAdmin){
   if(!ev.groundTransportNeeded) return isAdmin ? `<button class="btn btn-ghost" data-action="toggle-ground-transport" data-id="${ev.id}" style="justify-content:flex-start;color:var(--ink-2);">${ICO.checkSquare} Mark ground transport needed</button>` : '';
   if(!ev.groundTransportBooked){
+    if(!isAdmin) return '';
     return `<div class="card card-pad" style="border-color:var(--warn);background:var(--warn-wash);">
       <div style="display:flex;align-items:center;gap:8px;color:var(--warn-ink);font-weight:700;font-size:13px;">${ICO.car} Driver needed — booking secretary notified</div>
-      ${isAdmin ? `<button class="btn btn-sm" style="margin-top:10px;" data-action="open-transport-form" data-id="${ev.id}">Add driver info</button>` : `<p style="font-size:12.5px;color:var(--warn-ink);margin:8px 0 0;">The booking secretary is arranging a driver. You'll be notified once it's booked.</p>`}
+      <button class="btn btn-sm" style="margin-top:10px;" data-action="open-transport-form" data-id="${ev.id}">Add driver info</button>
     </div>`;
   }
   const g = ev.groundTransport;
@@ -4151,7 +4164,6 @@ function answerAskAI(q, isAdmin){
     if(ql.includes('next gig') || ql.includes('next booking')) return nextGig ? `Your next gig is ${nextGig.type} for ${nextGig.clientName||'you'} on ${fmtDateShort(nextGig.date)}.` : `You don't have any upcoming gigs booked yet.`;
     if(ql.includes('this month')){ const n=new Date(); const thisMonth = upcoming(evs).filter(e=>{const d=new Date(e.date+'T00:00:00'); return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear();}); return `You have ${thisMonth.length} gig${thisMonth.length===1?'':'s'} this month.`; }
     if(ql.includes('ytd') || ql.includes('payout') || ql.includes('earn')) return `You've been paid ${money(ytd)} so far this year.`;
-    if(ql.includes('flight') || ql.includes('travel') || ql.includes('driver')){ const needs = evs.filter(e=>!isPast(e.date) && ((e.flightNeeded&&!e.flightBooked)||(e.groundTransportNeeded&&!e.groundTransportBooked))); return needs.length? `You have ${needs.length} upcoming gig${needs.length===1?'':'s'} still needing travel arranged.` : `All your upcoming travel is arranged.`; }
     return `I can help with your gigs, next booking, this month's schedule, or your YTD payout — try asking one of those.`;
   }
   const open = S.events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status));
