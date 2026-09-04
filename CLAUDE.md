@@ -36,9 +36,9 @@ template silently regresses production. Rules:
 1. **Elegance.** Completely, directly, simply solve the problem. Reuse an existing convention
    over inventing one; delete/strangle bad patterns rather than duplicate them. No band-aids
    that leave the root cause in place.
-2. **Limit blast radius.** Fewest call sites, local + additive + reversible changes; preserve
-   out-of-scope behavior. Replace patterns strangler-fig (new path beside old → migrate → remove
-   old last), never big-bang rewrites.
+2. **Limit blast radius and downstream-bug risk.** Fewest call sites, local + additive +
+   reversible changes; preserve out-of-scope behavior. Replace patterns strangler-fig (new path
+   beside old → migrate → remove old last), never big-bang rewrites.
 3. **Scope in user-meaningful arcs.** An arc = the minimum to end-to-end test a real user-facing
    capability against the REAL thing (no mocks/sims). Atomic commits; tightly-scoped PRs; split
    sequential work into ordered waves.
