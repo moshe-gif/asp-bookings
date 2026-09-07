@@ -1,3 +1,9 @@
 .env
 node_modules/
 *.log
+
+# test-harness/ (Python/Playwright) — venv, browser cache, and run artifacts stay local
+test-harness/.venv/
+test-harness/.pytest_cache/
+test-harness/test-results/
+test-harness/__pycache__/

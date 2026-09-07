@@ -81,6 +81,13 @@ gains: untrusted external users, a large/growing feature set, hard first-load pe
 public/SEO pages, npm UI libraries, or multiple developers. The line is COMPLEXITY + UNTRUSTED
 USERS, not user count. For untrusted users the real change is the SECURITY/auth architecture.
 
+## Testing
+A real-browser E2E test harness exists at `test-harness/` (Playwright via Python — no Node
+needed). It drives the actual app in a real Chromium browser the way a real user would: real
+login clicks, real nav clicks, real typing — no mocks, no simulations, no unit tests. See
+`test-harness/README.md` for setup, how to run it, and the full registry of available
+fixtures/helpers/specs (and the convention for keeping that registry current).
+
 ## Communication: explain big decisions
 For any significant decision (architecture, security tradeoff, tooling pick, anything non-trivial),
 explain it in simple English first — WHAT and WHY — then give the technical term(s) in parentheses,
