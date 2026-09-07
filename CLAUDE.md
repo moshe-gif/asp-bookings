@@ -88,6 +88,10 @@ login clicks, real nav clicks, real typing — no mocks, no simulations, no unit
 `test-harness/README.md` for setup, how to run it, and the full registry of available
 fixtures/helpers/specs (and the convention for keeping that registry current).
 
+**Run it before the final commit+push on every change to this repo** — not optional, not only
+when asked. If a change doesn't fit any existing spec, use judgment (a trivial doc-only edit
+doesn't need a browser test) but default to running the harness, not skipping it.
+
 ## Communication: explain big decisions
 For any significant decision (architecture, security tradeoff, tooling pick, anything non-trivial),
 explain it in simple English first — WHAT and WHY — then give the technical term(s) in parentheses,
@@ -100,5 +104,7 @@ routine choices, but explain the meaningful ones.
 3. Assess blast radius: list call sites touched + what could break; mark high-risk for double-review.
 4. Implement (elegance + blast-radius rules).
 5. Review the diff: correctness, scope creep, SSOT violations, security.
-6. Test against the real deployed app; loop-fix until green.
+6. Run the test harness (`test-harness/`, see the Testing section above) — always before the
+   final commit+push, loop-fix until green — plus a real click-through of anything the harness
+   doesn't cover yet.
 7. Verify live, then deploy via the deploy scripts.
