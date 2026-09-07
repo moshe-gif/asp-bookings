@@ -392,10 +392,10 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
 .doc-signature{ display:inline-block; font-family:"Snell Roundhand","Segoe Script","Brush Script MT",cursive; font-size:1.9rem; font-weight:400; color:var(--ink); line-height:1.1; transform:rotate(-2deg); margin-bottom:2px; }
 .doc-foot{ margin-top:28px; padding-top:14px; border-top:1px solid var(--border); font-size:10.5px; color:var(--ink-3); text-align:center; }
 @media print{
-  body > *:not(#contractPrintHost):not(#itineraryPrintHost):not(#invoicePrintHost){ display:none !important; }
-  #contractPrintHost, #contractPrintHost .overlay, #itineraryPrintHost, #itineraryPrintHost .overlay, #invoicePrintHost, #invoicePrintHost .overlay{ position:static !important; background:transparent !important; inset:auto !important; display:block !important; padding:0 !important; }
-  #contractPrintHost .doc, #itineraryPrintHost .doc, #invoicePrintHost .doc{ box-shadow:none; max-height:none; width:100%; animation:none; }
-  #contractPrintHost .sheet-head, #itineraryPrintHost .sheet-head, #invoicePrintHost .sheet-head{ display:none; }
+  body > *:not(#contractPrintHost):not(#itineraryPrintHost):not(#invoicePrintHost):not(#outsideDocPrintHost){ display:none !important; }
+  #contractPrintHost, #contractPrintHost .overlay, #itineraryPrintHost, #itineraryPrintHost .overlay, #invoicePrintHost, #invoicePrintHost .overlay, #outsideDocPrintHost, #outsideDocPrintHost .overlay{ position:static !important; background:transparent !important; inset:auto !important; display:block !important; padding:0 !important; }
+  #contractPrintHost .doc, #itineraryPrintHost .doc, #invoicePrintHost .doc, #outsideDocPrintHost .doc{ box-shadow:none; max-height:none; width:100%; animation:none; }
+  #contractPrintHost .sheet-head, #itineraryPrintHost .sheet-head, #invoicePrintHost .sheet-head, #outsideDocPrintHost .sheet-head{ display:none; }
 }
 @media (max-width: 860px){
   body{ font-size:14px; }
@@ -741,7 +741,7 @@ function makeOutsideBooking(performerName, clientName, clientEmail, date, venue,
     id:'OB-'+(OBID++), performerName, performerContact:'', clientName, clientEmail: clientEmail||'',
     date, venue: venue||'', city: city||'', state: state||'',
     totalAmount, aspCut, notes: notes||'', status,
-    createdAt: fmtISO(created), log,
+    createdAt: fmtISO(created), log, doc: null,
   };
 }
 function seedOutsideBookings(){
@@ -755,7 +755,12 @@ function loadOutsideBookings(){ try{ const raw = localStorage.getItem(OUTSIDE_BO
 function saveOutsideBookings(){ try{ localStorage.setItem(OUTSIDE_BOOKINGS_LS_KEY, JSON.stringify(OUTSIDE_BOOKINGS)); }catch(e){} }
 let OUTSIDE_BOOKINGS = loadOutsideBookings();
 if(!OUTSIDE_BOOKINGS){ OUTSIDE_BOOKINGS = seedOutsideBookings(); saveOutsideBookings(); }
-else { OBID = OUTSIDE_BOOKINGS.reduce((max,b)=>{ const n=parseInt(String(b.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, OBID); }
+else {
+  OBID = OUTSIDE_BOOKINGS.reduce((max,b)=>{ const n=parseInt(String(b.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, OBID);
+  let obMigrated = false;
+  OUTSIDE_BOOKINGS.forEach(b=>{ if(b.doc===undefined){ b.doc = null; obMigrated = true; } });
+  if(obMigrated) saveOutsideBookings();
+}
 function getOutsideBooking(id){ return OUTSIDE_BOOKINGS.find(b=>b.id===id); }
 
 const ADMIN_USERS = [
@@ -978,6 +983,9 @@ let S = {
   newInvoiceForm:{},
   showNewOutsideBooking:false,
   newOutsideBookingForm:{},
+  outsideDocBookingId:null,
+  outsideDocForm:{},
+  showAiEditNotice:false,
   showInvoiceDoc:false,
   invoiceDocId:null,
   showAskAI:false,
@@ -1329,6 +1337,7 @@ function closeAllOverlays(){
   S.dayListDate=null; S.showNewProject=false; S.showFlightForm=false; S.showContract=false;
   S.showTransportForm=false; S.showItinerary=false; S.itineraryEventId=null; S.showBlockTime=false; S.showAskAI=false; S.showDressCodeForm=false;
   S.showNewInvoice=false; S.showInvoiceDoc=false; S.invoiceDocId=null; S.showNewOutsideBooking=false;
+  S.outsideDocBookingId=null; S.showAiEditNotice=false;
   S.showAddCharge=false; S.showEventMenu=false; S.projectTab='tasks'; S.taskAssigneeFilter=null; S.showReminderPreview=false; S.showBookingConfirmation=false;
   S.showMobileMenu=false;
 }
@@ -1528,6 +1537,7 @@ function render(){
     ${S.showAskAI ? renderAskAIModal() : ''}
     ${S.showNewInvoice ? renderNewInvoiceModal() : ''}
     ${S.showNewOutsideBooking ? renderNewOutsideBookingModal() : ''}
+    ${S.outsideDocBookingId ? renderOutsideDocBuilderModal() : ''}
     ${S.showAddArtist ? renderAddArtistModal() : ''}
     ${S.newArtistWelcome ? renderWelcomeEmailPreview() : ''}
     ${S.dayListDate ? renderDayList() : ''}
@@ -2399,7 +2409,10 @@ function renderFinancialsPage(){
         <td data-label="Date" class="u-mono">${fmtDateShort(b.date)}</td><td data-label="Total" class="u-mono">${money(b.totalAmount)}</td>
         <td data-label="ASP Cut" class="u-mono">${money(b.aspCut)}</td><td data-label="Payout to Performer" class="u-mono">${money(outsideBookingPayout(b))}</td>
         <td data-label="Status"><span class="pill ${b.status==='paid'?'pill-good':'pill-warn'}">${b.status==='paid'?'Paid':'Open'}</span></td>
-        <td data-label="">${b.status==='open'? `<button class="btn btn-sm" data-action="mark-outside-booking-paid" data-id="${b.id}">Mark Paid</button>` : ''}</td>
+        <td data-label="" style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${b.status==='open'? `<button class="btn btn-sm" data-action="mark-outside-booking-paid" data-id="${b.id}">Mark Paid</button>` : ''}
+          <button class="btn btn-sm" data-action="open-outside-doc-builder" data-id="${b.id}">${b.doc?'Edit Document':'Document'}</button>
+        </td>
       </tr>`;
     }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--ink-3);padding:20px;">No outside bookings yet.</td></tr>`}
     </tbody></table></div>
@@ -3463,6 +3476,94 @@ function renderNewOutsideBookingModal(){
   </div>`;
 }
 
+const OUTSIDE_DOC_BRANDS = {
+  asp: { label:'ASP Artist Management', signer:'ASP Artist Management' },
+  sing: { label:'SING Entertainment', signer:'SING Entertainment (for Ilan)' },
+};
+function outsideDocBodyHtml(bodyText){
+  const blocks = (bodyText||'').split(/\n\s*\n/).map(b=>b.trim()).filter(Boolean);
+  return blocks.map(block=>{
+    const lines = block.split('\n').map(l=>l.trim()).filter(Boolean);
+    const isList = lines.length && lines.every(l=>/^[-*]\s+/.test(l));
+    if(isList) return `<ul class="doc-terms">${lines.map(l=>`<li>${esc(l.replace(/^[-*]\s+/,''))}</li>`).join('')}</ul>`;
+    return `<p style="font-size:13px;line-height:1.6;">${esc(block).replace(/\n/g,'<br/>')}</p>`;
+  }).join('');
+}
+function defaultOutsideDocBody(b){
+  return `This confirms the booking of ${b.performerName} for ${b.clientName}${b.venue?` at ${b.venue}`:''} on ${fmtDate(b.date)}, for a total fee of ${money(b.totalAmount)}.\n\nEdit this text freely — add terms, payment details, or anything else this document needs to say.`;
+}
+function renderOutsideDocBuilderModal(){
+  const b = getOutsideBooking(S.outsideDocBookingId); if(!b) return '';
+  const f = S.outsideDocForm;
+  const brand = f.brand || (b.doc && b.doc.brand) || 'asp';
+  return `<div class="overlay center" data-action="outsidedoc-overlay-close">
+    <div class="modal" data-stop data-form="outsidedoc" style="width:560px;">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">Document — ${esc(b.performerName)}</h2>
+        <div style="display:flex;gap:6px;">
+          <button class="icon-btn" data-action="print-outside-doc" title="Download as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
+          <button class="icon-btn" data-action="close-sheet">${ICO.x}</button>
+        </div>
+      </div>
+      <div class="sheet-body">
+        <div class="field"><label>Letterhead / Signing Party</label>
+          <div class="chip-row">
+            <button class="filter-chip ${brand==='asp'?'sel':''}" data-action="pick-outside-doc-brand" data-brand="asp">ASP Artist Management</button>
+            <button class="filter-chip ${brand==='sing'?'sel':''}" data-action="pick-outside-doc-brand" data-brand="sing">SING Entertainment</button>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Client Name</label><input data-field="clientName" value="${esc(f.clientName!==undefined?f.clientName:(b.doc?.clientName||b.clientName||''))}"/></div>
+          <div class="field"><label>Client Signer Title (optional)</label><input data-field="clientSignerTitle" value="${esc(f.clientSignerTitle!==undefined?f.clientSignerTitle:(b.doc?.clientSignerTitle||''))}" placeholder="e.g. Event Coordinator"/></div>
+        </div>
+        <div class="field"><label>Document Text</label>
+          <textarea data-field="bodyText" style="width:100%;min-height:180px;padding:10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:13px;font-family:var(--font-body);color:var(--ink);">${esc(f.bodyText!==undefined?f.bodyText:(b.doc?.bodyText||defaultOutsideDocBody(b)))}</textarea>
+          <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Blank line = new paragraph. Lines starting with "-" become a bulleted list.</p>
+        </div>
+        ${S.showAiEditNotice? `<p style="font-size:12px;color:var(--ink-2);background:var(--surface-2);border-radius:8px;padding:8px 10px;margin:0;">AI editing needs a backend connection — not set up yet.</p>` : ''}
+        <div style="display:flex;gap:8px;">
+          <button class="btn" style="flex:1;" data-action="ai-edit-outside-doc">${ICO.sparkle} AI Editor</button>
+          <button class="btn btn-primary" style="flex:1;" data-action="save-outside-doc">Save Document</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+function renderOutsideDoc(b){
+  if(!b || !b.doc) return '';
+  const d = b.doc;
+  const brand = OUTSIDE_DOC_BRANDS[d.brand] || OUTSIDE_DOC_BRANDS.asp;
+  const clientName = d.clientName || b.clientName;
+  return `<div class="overlay center" data-action="outsidedoc-overlay-close">
+    <div class="doc" data-stop>
+      <div class="sheet-head"><h2 style="font-size:1.1rem;">Document Preview</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
+      <div class="doc-body">
+        <div class="doc-letterhead">
+          ${d.brand==='sing'
+            ? `<img src="assets/sing-entertainment-logo-dark.svg" alt="SING Entertainment" style="height:36px;"/>`
+            : `<div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>`}
+          <span class="pill ${d.signedAt?'pill-good':'pill-neutral'}">${d.signedAt?'Signed':'Unsigned'}</span>
+        </div>
+        <div class="doc-title">${esc(b.performerName.toUpperCase())}</div>
+        <div class="doc-sub">Prepared ${fmtDate(d.createdAt)} &middot; ${esc(brand.label)}</div>
+
+        <div class="doc-parties">
+          <div class="doc-party"><h4>Performer</h4><p><strong>${esc(b.performerName)}</strong></p></div>
+          <div class="doc-party"><h4>Client</h4><p><strong>${esc(clientName)}</strong>${d.clientSignerTitle?`<br/>${esc(d.clientSignerTitle)}`:''}</p></div>
+        </div>
+
+        ${outsideDocBodyHtml(d.bodyText)}
+
+        <div class="doc-sign">
+          <div class="doc-sign-line">${d.signedAt? `<span class="doc-signature">${esc(clientName)}</span><br/>Signed electronically &middot; ${fmtDateShort(d.signedAt)}` : `<strong>&nbsp;</strong>Client Signature &middot; Date`}</div>
+          <div class="doc-sign-line"><strong>${esc(brand.signer)}</strong></div>
+        </div>
+
+        <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderInvoiceDoc(){
   const inv = getInvoice(S.invoiceDocId); if(!inv) return '';
   const total = invoiceTotal(inv);
@@ -3761,6 +3862,24 @@ function doMarkOutsideBookingPaid(id){
   b.log.push({ts:new Date().toISOString(), type:'success', text:'Marked paid.'});
   saveOutsideBookings();
   toast('Outside booking marked paid.', 'success');
+  render();
+}
+function doSaveOutsideDoc(){
+  const b = getOutsideBooking(S.outsideDocBookingId); if(!b) return;
+  const f = S.outsideDocForm;
+  const brand = f.brand || (b.doc && b.doc.brand) || 'asp';
+  b.doc = {
+    brand,
+    clientName: (f.clientName!==undefined? f.clientName : (b.doc?.clientName||b.clientName||'')).trim() || b.clientName,
+    clientSignerTitle: (f.clientSignerTitle!==undefined? f.clientSignerTitle : (b.doc?.clientSignerTitle||'')).trim(),
+    bodyText: f.bodyText!==undefined? f.bodyText : (b.doc?.bodyText || defaultOutsideDocBody(b)),
+    createdAt: b.doc?.createdAt || fmtISO(new Date()),
+    signedAt: b.doc?.signedAt || null,
+  };
+  b.log.push({ts:new Date().toISOString(), type:'system', text:`Document saved (${OUTSIDE_DOC_BRANDS[brand].label} letterhead).`});
+  saveOutsideBookings();
+  S.outsideDocForm = {};
+  toast('Document saved.', 'success');
   render();
 }
 function doEmailItinerary(id){
@@ -4265,13 +4384,28 @@ function bindGlobal(){
     holder.innerHTML = renderInvoiceDoc();
     document.body.appendChild(holder);
   }
+  const staleOutsideDoc = document.getElementById('outsideDocPrintHost');
+  if(staleOutsideDoc) staleOutsideDoc.remove();
+  if(S.outsideDocBookingId){
+    const b = getOutsideBooking(S.outsideDocBookingId);
+    if(b && b.doc){
+      const holder = document.createElement('div');
+      holder.id = 'outsideDocPrintHost';
+      // Unlike contract/itinerary/invoice, this doc has a separate interactive builder modal
+      // on screen at the same time -- the print host must stay invisible until an actual print
+      // (the @media print block above forces it back to display:block, print-only).
+      holder.style.display = 'none';
+      holder.innerHTML = renderOutsideDoc(b);
+      document.body.appendChild(holder);
+    }
+  }
   document.querySelectorAll('[data-field]').forEach(el=>{
     el.addEventListener('input', e=>{
       const key = el.getAttribute('data-field');
       const form = el.closest('[data-form]')?.getAttribute('data-form');
       if(form==='task'){ S.newTaskText = el.value; return; }
       if(form==='comment'){ S.newCommentText = el.value; return; }
-      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S };
+      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, outsidedoc:S.outsideDocForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S };
       const target = formTargets[form] || S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
       if(el.type==='checkbox') render();
@@ -4422,6 +4556,12 @@ function bindGlobal(){
       case 'open-new-outside-booking': closeAllOverlays(); S.newOutsideBookingForm={}; S.showNewOutsideBooking=true; render(); break;
       case 'submit-outside-booking': doSubmitOutsideBooking(); break;
       case 'mark-outside-booking-paid': doMarkOutsideBookingPaid(id); break;
+      case 'open-outside-doc-builder': closeAllOverlays(); S.outsideDocForm={}; S.outsideDocBookingId=id; render(); break;
+      case 'outsidedoc-overlay-close': if(e.target===t){ closeAllOverlays(); render(); } break;
+      case 'pick-outside-doc-brand': S.outsideDocForm.brand = t.getAttribute('data-brand'); render(); break;
+      case 'save-outside-doc': doSaveOutsideDoc(); break;
+      case 'print-outside-doc': doSaveOutsideDoc(); window.print(); break;
+      case 'ai-edit-outside-doc': S.showAiEditNotice = true; render(); break;
       case 'send-reminder': doSendReminder(id); break;
       case 'preview-reminder': S.showReminderPreview=true; render(); break;
       case 'close-reminder-preview': S.showReminderPreview=false; render(); break;

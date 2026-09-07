@@ -70,6 +70,7 @@ than grepping the source to check.
 | `test_smoke.py` | Every admin role + every artist logs in for real, clicks every nav item, asserts no console errors and real content rendered. The baseline "is the app fundamentally broken" check. |
 | `test_mobile.py` | Same sweep at a real 390×844 viewport (`page.set_viewport_size` — no floor-size bug, unlike the `resize_window` MCP tool in interactive sessions), asserting no horizontal overflow anywhere. |
 | `test_core_flows.py` | A few real write-flows: create a lead, add a sticky-note board item, assign a project task to a person — each asserts the created state actually appears, not just "didn't crash." |
+| `test_outside_doc.py` | Outside Booking document builder: create a document, switch its letterhead between ASP and SING Entertainment, confirm the right logo/wordmark and both signature lines render for each brand. |
 
 ## Conventions for updating this harness
 
