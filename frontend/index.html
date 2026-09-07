@@ -451,7 +451,7 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
   .bn-item.active{ color:var(--accent-ink); font-weight:700; }
   .bn-item.active .ico{ color:var(--accent-ink); }
   .bn-slider{ position:absolute; top:5px; bottom:5px; border-radius:999px; background:color-mix(in srgb, var(--accent) 55%, transparent); backdrop-filter:blur(8px) saturate(160%); -webkit-backdrop-filter:blur(8px) saturate(160%); border:1px solid color-mix(in srgb, var(--accent) 70%, transparent); box-shadow:0 1px 2px rgba(20,20,26,.12),0 4px 14px -4px var(--accent), inset 0 1px 0 rgba(255,255,255,.35); z-index:0; transition:left .22s cubic-bezier(.2,.7,.3,1), width .22s cubic-bezier(.2,.7,.3,1); }
-  .bn-item[data-view="artists"], .bn-item[data-view="travel"], .bn-item[data-view="pricing"], .bn-item[data-view="messages"]{ display:none; }
+  .bn-item[data-view="artists"], .bn-item[data-view="travel"], .bn-item[data-view="pricing"], .bn-item[data-view="messages"], .bn-item[data-view="outside_bookings"]{ display:none; }
   /* Artist bottom nav: Dashboard sits centered and slightly larger than the other
      4 items (reordered visually via flex `order`, not DOM order, so the desktop
      top-tabs and slide-direction logic — both driven by ARTIST_NAV_ITEMS' real
@@ -1607,7 +1607,7 @@ function pageTitle(){
   if(S.view==='project_detail'){ const p=getProject(S.projectId); return p ? p.title : 'Project'; }
   const t = {
     dashboard:'Dashboard', calendar:'Calendar', leads:'Open Leads', artists:'Artists', financials:'Financials', projects:'Projects', pricing:'Pricing',
-    travel:'Travel', international:'International Opportunities', daily_digest:'Daily Digest', messages:'Messages',
+    travel:'Travel', international:'International Opportunities', daily_digest:'Daily Digest', messages:'Messages', outside_bookings:'Outside Bookings',
     artist_detail: artistById(S.artistDetailId)?.name || '',
     a_dashboard:'My Dashboard', a_calendar:'Calendar', a_gigs:'My Gigs', a_travel:'Travel', a_financials:'Financials', a_projects:'My Projects', settings:'Settings',
   };
@@ -1628,8 +1628,14 @@ function renderUserChip(){
 const MGMT_NAV_ITEMS = [
   ['dashboard','Dashboard',ICO.dash], ['calendar','Calendar',ICO.cal], ['leads','Leads',ICO.leads],
   ['artists','Artists',ICO.artists], ['travel','Travel',ICO.suitcase], ['projects','Projects',ICO.kanban], ['pricing','Pricing',ICO.tag], ['financials','Financials',ICO.money],
+  ['outside_bookings','Outside Bookings',ICO.leads],
   ['messages','Messages',ICO.sms],
 ];
+// Outside Bookings (docs/contracts for non-roster jobs) is office/bookkeeping work, not
+// something Ilan (CEO) needs on his simplified view — hide the nav item for that login only.
+function mgmtNavItemsFor(userId){
+  return MGMT_NAV_ITEMS.filter(([v])=> !(v==='outside_bookings' && userId==='admin_ceo'));
+}
 /* ============ "NEW SINCE YOU LAST LOOKED" BADGES ============ */
 // Per-section last-visited date (YYYY-MM-DD), persisted so the badge survives a reload.
 // A key with no stored date is seeded to today on first load, rather than treating all
@@ -1675,7 +1681,7 @@ function renderRail(){
   return `<div class="rail">
     <div class="wordmark"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
     <div class="rail-nav">
-      ${MGMT_NAV_ITEMS.map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span>${l}</a>`).join('')}
+      ${mgmtNavItemsFor(S.user).map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span>${l}</a>`).join('')}
       <a href="#" class="rail-link ${isNavActive('settings')?'active':''}" data-action="nav" data-view="settings">${ICO.settings}Settings</a>
     </div>
     <div class="rail-foot">
@@ -1714,7 +1720,7 @@ function renderMobileMenu(isAdmin){
         <button class="icon-btn" data-action="close-mobile-menu">${ICO.x}</button>
       </div>
       <div class="rail-nav">
-        ${(isAdmin ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS).map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span>${l}</a>`).join('')}
+        ${(isAdmin ? mgmtNavItemsFor(S.user) : ARTIST_NAV_ITEMS).map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span>${l}</a>`).join('')}
         <a href="#" class="rail-link ${isNavActive('settings')?'active':''}" data-action="nav" data-view="settings">${ICO.settings}Settings</a>
       </div>
       <div class="rail-foot">
@@ -1740,6 +1746,7 @@ function renderView(){
     if(S.view==='artists') return renderArtistsPage();
     if(S.view==='artist_detail') return renderArtistDetailPage(S.artistDetailId);
     if(S.view==='financials') return renderFinancialsPage();
+    if(S.view==='outside_bookings') return renderOutsideBookingsPage();
     if(S.view==='messages') return renderMessagesPage();
     if(S.view==='projects') return renderProjectsBoard();
     if(S.view==='pricing') return renderPricingPage();
@@ -2394,6 +2401,21 @@ function renderFinancialsPage(){
     }).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--ink-3);padding:20px;">No custom invoices yet.</td></tr>`}
     </tbody></table></div>
 
+  <div class="section-head"><h2>All Jobs (${booked.length})</h2><button class="btn btn-sm" data-action="export-csv">${ICO.leads} Export CSV</button></div>
+  <div class="card u-scroll-x table-cards"><table>
+    <thead><tr><th>Artist</th><th>Client</th><th>Date</th><th>Price</th><th>Commission</th><th>Payout</th><th>Status</th></tr></thead>
+    <tbody>${booked.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const a=artistById(e.artistId); const sm=statusMeta(e);
+      return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
+        <td data-label="Artist">${esc(a.name)}</td><td data-label="Client">${esc(e.clientName)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
+        <td data-label="Price" class="u-mono">${money(e.price)}</td><td data-label="Commission" class="u-mono">${money(e.commission)}</td><td data-label="Payout" class="u-mono">${money(e.balance)}</td>
+        <td data-label="Status"><span class="pill ${sm.cls}">${sm.label}</span></td></tr>`;}).join('')}
+    </tbody></table></div>
+  `;
+}
+
+/* ============ OUTSIDE BOOKINGS PAGE (own nav tab — office/bookkeeping only, not CEO) ============ */
+function renderOutsideBookingsPage(){
+  return `
   <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
     <div class="card stat-tile"><span class="u-label">Outside Bookings Open</span><span class="val">${OUTSIDE_BOOKINGS.filter(b=>b.status==='open').length}</span><span class="sub">Not yet paid</span></div>
     <div class="card stat-tile"><span class="u-label">ASP Earned (Outside)</span><span class="val">${money(OUTSIDE_BOOKINGS.reduce((s,b)=>s+b.aspCut,0))}</span><span class="sub">Across ${OUTSIDE_BOOKINGS.length} booking${OUTSIDE_BOOKINGS.length===1?'':'s'}</span></div>
@@ -2401,7 +2423,7 @@ function renderFinancialsPage(){
 
   <div class="section-head"><h2>Outside Bookings (${OUTSIDE_BOOKINGS.length})</h2><button class="btn btn-sm btn-primary" data-action="open-new-outside-booking">+ New Outside Booking</button></div>
   <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Jobs that don't involve one of our own roster artists — outside acts we coordinate or refer.</p>
-  <div class="card u-scroll-x table-cards" style="margin-bottom:22px;"><table>
+  <div class="card u-scroll-x table-cards"><table>
     <thead><tr><th>Performer</th><th>Client</th><th>Date</th><th>Total</th><th>ASP Cut</th><th>Payout to Performer</th><th>Status</th><th></th></tr></thead>
     <tbody>${OUTSIDE_BOOKINGS.length? OUTSIDE_BOOKINGS.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(b=>{
       return `<tr>
@@ -2415,16 +2437,6 @@ function renderFinancialsPage(){
         </td>
       </tr>`;
     }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--ink-3);padding:20px;">No outside bookings yet.</td></tr>`}
-    </tbody></table></div>
-
-  <div class="section-head"><h2>All Jobs (${booked.length})</h2><button class="btn btn-sm" data-action="export-csv">${ICO.leads} Export CSV</button></div>
-  <div class="card u-scroll-x table-cards"><table>
-    <thead><tr><th>Artist</th><th>Client</th><th>Date</th><th>Price</th><th>Commission</th><th>Payout</th><th>Status</th></tr></thead>
-    <tbody>${booked.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const a=artistById(e.artistId); const sm=statusMeta(e);
-      return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
-        <td data-label="Artist">${esc(a.name)}</td><td data-label="Client">${esc(e.clientName)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
-        <td data-label="Price" class="u-mono">${money(e.price)}</td><td data-label="Commission" class="u-mono">${money(e.commission)}</td><td data-label="Payout" class="u-mono">${money(e.balance)}</td>
-        <td data-label="Status"><span class="pill ${sm.cls}">${sm.label}</span></td></tr>`;}).join('')}
     </tbody></table></div>
   `;
 }

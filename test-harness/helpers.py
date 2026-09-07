@@ -16,8 +16,13 @@ ARTIST_IDS = ["baruch", "benny", "moshe", "yaakov", "eli", "dovie"]
 MOBILE_ADMIN_NAV = ["dashboard", "calendar", "leads", "projects", "financials"]
 MOBILE_ARTIST_NAV = ["a_calendar", "a_gigs", "a_dashboard", "a_travel", "a_financials"]
 
-MGMT_NAV_ITEMS = ["dashboard", "calendar", "leads", "artists", "travel", "projects", "pricing", "financials", "messages"]
+MGMT_NAV_ITEMS = ["dashboard", "calendar", "leads", "artists", "travel", "projects", "pricing", "financials", "outside_bookings", "messages"]
 ARTIST_NAV_ITEMS = ["a_dashboard", "a_calendar", "a_gigs", "a_travel", "a_financials", "a_projects"]
+
+
+def mgmt_nav_items_for(user_id):
+    """Mirrors index.html's mgmtNavItemsFor() -- Outside Bookings is hidden from admin_ceo."""
+    return [v for v in MGMT_NAV_ITEMS if not (v == "outside_bookings" and user_id == "admin_ceo")]
 
 
 def login_as(page, user_id):

@@ -9,7 +9,7 @@ def test_outside_doc_brand_swap(live_server, page):
     errors = collect_console_errors(page)
     page.goto(live_server)
     login_as(page, "admin_bookings")
-    goto_nav(page, "financials", mobile=False)
+    goto_nav(page, "outside_bookings", mobile=False)
 
     page.locator('[data-action="open-outside-doc-builder"]').first.click()
 
