@@ -16,13 +16,33 @@ ARTIST_IDS = ["baruch", "benny", "moshe", "yaakov", "eli", "dovie"]
 MOBILE_ADMIN_NAV = ["dashboard", "calendar", "leads", "projects", "financials"]
 MOBILE_ARTIST_NAV = ["a_calendar", "a_gigs", "a_dashboard", "a_travel", "a_financials"]
 
-MGMT_NAV_ITEMS = ["dashboard", "calendar", "leads", "artists", "travel", "projects", "pricing", "financials", "outside_bookings", "messages"]
+MGMT_NAV_ITEMS = ["dashboard", "calendar", "leads", "artists", "travel", "projects", "pricing", "financials", "outside_bookings", "documents", "messages"]
 ARTIST_NAV_ITEMS = ["a_dashboard", "a_calendar", "a_gigs", "a_travel", "a_financials", "a_projects"]
+
+CEO_HIDDEN_NAV_VIEWS = ("outside_bookings", "documents")
 
 
 def mgmt_nav_items_for(user_id):
-    """Mirrors index.html's mgmtNavItemsFor() -- Outside Bookings is hidden from admin_ceo."""
-    return [v for v in MGMT_NAV_ITEMS if not (v == "outside_bookings" and user_id == "admin_ceo")]
+    """Mirrors index.html's mgmtNavItemsFor() -- Outside Bookings/Documents hidden from admin_ceo."""
+    return [v for v in MGMT_NAV_ITEMS if not (v in CEO_HIDDEN_NAV_VIEWS and user_id == "admin_ceo")]
+
+
+def dismiss_opener(page):
+    """
+    The splash screen (#opener, frontend/index.html) sits full-viewport for ~2.7s before
+    auto-dismissing (a setTimeout + a further 900ms removal) -- under this harness's back-to-back
+    browser load, backgrounded-tab timer throttling can slip that well past a naive wait, causing
+    real (if intermittent) failures clicking anything on the login screen. The opener has its own
+    built-in click-to-skip handler (any click on it calls its internal finish()) -- use that
+    directly instead of racing its timer.
+    """
+    opener = page.locator('#opener')
+    if opener.count():
+        try:
+            opener.click(timeout=2000)
+        except Exception:
+            pass
+        opener.wait_for(state='detached', timeout=8000)
 
 
 def login_as(page, user_id):
@@ -32,6 +52,7 @@ def login_as(page, user_id):
     (demo-mode login isn't persisted to localStorage, confirmed against the app's own code).
     Lands on that role's dashboard.
     """
+    dismiss_opener(page)
     page.get_by_text("Sign In (Demo Mode)").click()
     page.locator(f'.chooser-row[data-user="{user_id}"]').click()
     # Not ".topbar, .artist-top-tabs": artist views render a SECOND, nested .topbar inside

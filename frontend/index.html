@@ -392,10 +392,10 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
 .doc-signature{ display:inline-block; font-family:"Snell Roundhand","Segoe Script","Brush Script MT",cursive; font-size:1.9rem; font-weight:400; color:var(--ink); line-height:1.1; transform:rotate(-2deg); margin-bottom:2px; }
 .doc-foot{ margin-top:28px; padding-top:14px; border-top:1px solid var(--border); font-size:10.5px; color:var(--ink-3); text-align:center; }
 @media print{
-  body > *:not(#contractPrintHost):not(#itineraryPrintHost):not(#invoicePrintHost):not(#outsideDocPrintHost){ display:none !important; }
-  #contractPrintHost, #contractPrintHost .overlay, #itineraryPrintHost, #itineraryPrintHost .overlay, #invoicePrintHost, #invoicePrintHost .overlay, #outsideDocPrintHost, #outsideDocPrintHost .overlay{ position:static !important; background:transparent !important; inset:auto !important; display:block !important; padding:0 !important; }
-  #contractPrintHost .doc, #itineraryPrintHost .doc, #invoicePrintHost .doc, #outsideDocPrintHost .doc{ box-shadow:none; max-height:none; width:100%; animation:none; }
-  #contractPrintHost .sheet-head, #itineraryPrintHost .sheet-head, #invoicePrintHost .sheet-head, #outsideDocPrintHost .sheet-head{ display:none; }
+  body > *:not(#contractPrintHost):not(#itineraryPrintHost):not(#invoicePrintHost):not(#documentPrintHost){ display:none !important; }
+  #contractPrintHost, #contractPrintHost .overlay, #itineraryPrintHost, #itineraryPrintHost .overlay, #invoicePrintHost, #invoicePrintHost .overlay, #documentPrintHost, #documentPrintHost .overlay{ position:static !important; background:transparent !important; inset:auto !important; display:block !important; padding:0 !important; }
+  #contractPrintHost .doc, #itineraryPrintHost .doc, #invoicePrintHost .doc, #documentPrintHost .doc{ box-shadow:none; max-height:none; width:100%; animation:none; }
+  #contractPrintHost .sheet-head, #itineraryPrintHost .sheet-head, #invoicePrintHost .sheet-head, #documentPrintHost .sheet-head{ display:none; }
 }
 @media (max-width: 860px){
   body{ font-size:14px; }
@@ -451,7 +451,7 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
   .bn-item.active{ color:var(--accent-ink); font-weight:700; }
   .bn-item.active .ico{ color:var(--accent-ink); }
   .bn-slider{ position:absolute; top:5px; bottom:5px; border-radius:999px; background:color-mix(in srgb, var(--accent) 55%, transparent); backdrop-filter:blur(8px) saturate(160%); -webkit-backdrop-filter:blur(8px) saturate(160%); border:1px solid color-mix(in srgb, var(--accent) 70%, transparent); box-shadow:0 1px 2px rgba(20,20,26,.12),0 4px 14px -4px var(--accent), inset 0 1px 0 rgba(255,255,255,.35); z-index:0; transition:left .22s cubic-bezier(.2,.7,.3,1), width .22s cubic-bezier(.2,.7,.3,1); }
-  .bn-item[data-view="artists"], .bn-item[data-view="travel"], .bn-item[data-view="pricing"], .bn-item[data-view="messages"], .bn-item[data-view="outside_bookings"]{ display:none; }
+  .bn-item[data-view="artists"], .bn-item[data-view="travel"], .bn-item[data-view="pricing"], .bn-item[data-view="messages"], .bn-item[data-view="outside_bookings"], .bn-item[data-view="documents"]{ display:none; }
   /* Artist bottom nav: Dashboard sits centered and slightly larger than the other
      4 items (reordered visually via flex `order`, not DOM order, so the desktop
      top-tabs and slide-direction logic — both driven by ARTIST_NAV_ITEMS' real
@@ -741,7 +741,7 @@ function makeOutsideBooking(performerName, clientName, clientEmail, date, venue,
     id:'OB-'+(OBID++), performerName, performerContact:'', clientName, clientEmail: clientEmail||'',
     date, venue: venue||'', city: city||'', state: state||'',
     totalAmount, aspCut, notes: notes||'', status,
-    createdAt: fmtISO(created), log, doc: null,
+    createdAt: fmtISO(created), log,
   };
 }
 function seedOutsideBookings(){
@@ -757,11 +757,37 @@ let OUTSIDE_BOOKINGS = loadOutsideBookings();
 if(!OUTSIDE_BOOKINGS){ OUTSIDE_BOOKINGS = seedOutsideBookings(); saveOutsideBookings(); }
 else {
   OBID = OUTSIDE_BOOKINGS.reduce((max,b)=>{ const n=parseInt(String(b.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, OBID);
-  let obMigrated = false;
-  OUTSIDE_BOOKINGS.forEach(b=>{ if(b.doc===undefined){ b.doc = null; obMigrated = true; } });
-  if(obMigrated) saveOutsideBookings();
 }
 function getOutsideBooking(id){ return OUTSIDE_BOOKINGS.find(b=>b.id===id); }
+
+/* ============ DOCUMENTS (general doc builder — contracts, proposals, riders; any subject) ============ */
+const DOC_BRANDS = {
+  asp: { label:'ASP Artist Management', signer:'ASP Artist Management' },
+  sing: { label:'SING Entertainment', signer:'SING Entertainment (for Ilan)' },
+};
+let DOCID = 1;
+const DOCUMENTS_LS_KEY = 'asp_mock_documents_v1';
+function loadDocuments(){ try{ const raw = localStorage.getItem(DOCUMENTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
+function saveDocuments(){ try{ localStorage.setItem(DOCUMENTS_LS_KEY, JSON.stringify(DOCUMENTS)); }catch(e){} }
+let DOCUMENTS = loadDocuments();
+if(!DOCUMENTS){
+  // One-time migration: promote any doc saved on an outside booking (from before this was
+  // generalized beyond Outside Bookings) into its own DOCUMENTS record.
+  DOCUMENTS = [];
+  let legacyFound = false;
+  OUTSIDE_BOOKINGS.forEach(b=>{
+    if(b.doc){
+      DOCUMENTS.push(Object.assign({id:'DOC-'+(DOCID++), subjectType:'outside', subjectId:b.id, title:`Document — ${b.performerName}`}, b.doc));
+      delete b.doc;
+      legacyFound = true;
+    }
+  });
+  saveDocuments();
+  if(legacyFound) saveOutsideBookings();
+} else {
+  DOCID = DOCUMENTS.reduce((max,d)=>{ const n=parseInt(String(d.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, DOCID);
+}
+function getDocument(id){ return DOCUMENTS.find(d=>d.id===id); }
 
 const ADMIN_USERS = [
   {id:'admin_bookings', name:'ASP Office — Bookings', displayName:'Bookings', email:'bookings@aspmanagement.com', initials:'AB'},
@@ -983,8 +1009,9 @@ let S = {
   newInvoiceForm:{},
   showNewOutsideBooking:false,
   newOutsideBookingForm:{},
-  outsideDocBookingId:null,
-  outsideDocForm:{},
+  showDocumentBuilder:false,
+  documentId:null,
+  documentForm:{},
   showAiEditNotice:false,
   showInvoiceDoc:false,
   invoiceDocId:null,
@@ -1337,7 +1364,7 @@ function closeAllOverlays(){
   S.dayListDate=null; S.showNewProject=false; S.showFlightForm=false; S.showContract=false;
   S.showTransportForm=false; S.showItinerary=false; S.itineraryEventId=null; S.showBlockTime=false; S.showAskAI=false; S.showDressCodeForm=false;
   S.showNewInvoice=false; S.showInvoiceDoc=false; S.invoiceDocId=null; S.showNewOutsideBooking=false;
-  S.outsideDocBookingId=null; S.showAiEditNotice=false;
+  S.showDocumentBuilder=false; S.documentId=null; S.showAiEditNotice=false;
   S.showAddCharge=false; S.showEventMenu=false; S.projectTab='tasks'; S.taskAssigneeFilter=null; S.showReminderPreview=false; S.showBookingConfirmation=false;
   S.showMobileMenu=false;
 }
@@ -1537,7 +1564,7 @@ function render(){
     ${S.showAskAI ? renderAskAIModal() : ''}
     ${S.showNewInvoice ? renderNewInvoiceModal() : ''}
     ${S.showNewOutsideBooking ? renderNewOutsideBookingModal() : ''}
-    ${S.outsideDocBookingId ? renderOutsideDocBuilderModal() : ''}
+    ${S.showDocumentBuilder ? renderDocumentBuilderModal() : ''}
     ${S.showAddArtist ? renderAddArtistModal() : ''}
     ${S.newArtistWelcome ? renderWelcomeEmailPreview() : ''}
     ${S.dayListDate ? renderDayList() : ''}
@@ -1607,7 +1634,7 @@ function pageTitle(){
   if(S.view==='project_detail'){ const p=getProject(S.projectId); return p ? p.title : 'Project'; }
   const t = {
     dashboard:'Dashboard', calendar:'Calendar', leads:'Open Leads', artists:'Artists', financials:'Financials', projects:'Projects', pricing:'Pricing',
-    travel:'Travel', international:'International Opportunities', daily_digest:'Daily Digest', messages:'Messages', outside_bookings:'Outside Bookings',
+    travel:'Travel', international:'International Opportunities', daily_digest:'Daily Digest', messages:'Messages', outside_bookings:'Outside Bookings', documents:'Documents',
     artist_detail: artistById(S.artistDetailId)?.name || '',
     a_dashboard:'My Dashboard', a_calendar:'Calendar', a_gigs:'My Gigs', a_travel:'Travel', a_financials:'Financials', a_projects:'My Projects', settings:'Settings',
   };
@@ -1629,12 +1656,14 @@ const MGMT_NAV_ITEMS = [
   ['dashboard','Dashboard',ICO.dash], ['calendar','Calendar',ICO.cal], ['leads','Leads',ICO.leads],
   ['artists','Artists',ICO.artists], ['travel','Travel',ICO.suitcase], ['projects','Projects',ICO.kanban], ['pricing','Pricing',ICO.tag], ['financials','Financials',ICO.money],
   ['outside_bookings','Outside Bookings',ICO.leads],
+  ['documents','Documents',ICO.leads],
   ['messages','Messages',ICO.sms],
 ];
-// Outside Bookings (docs/contracts for non-roster jobs) is office/bookkeeping work, not
-// something Ilan (CEO) needs on his simplified view — hide the nav item for that login only.
+// Outside Bookings and Documents are office/bookkeeping work, not something Ilan (CEO) needs on
+// his simplified view — hide those nav items for that login only.
+const CEO_HIDDEN_NAV_VIEWS = ['outside_bookings','documents'];
 function mgmtNavItemsFor(userId){
-  return MGMT_NAV_ITEMS.filter(([v])=> !(v==='outside_bookings' && userId==='admin_ceo'));
+  return MGMT_NAV_ITEMS.filter(([v])=> !(CEO_HIDDEN_NAV_VIEWS.includes(v) && userId==='admin_ceo'));
 }
 /* ============ "NEW SINCE YOU LAST LOOKED" BADGES ============ */
 // Per-section last-visited date (YYYY-MM-DD), persisted so the badge survives a reload.
@@ -1747,6 +1776,7 @@ function renderView(){
     if(S.view==='artist_detail') return renderArtistDetailPage(S.artistDetailId);
     if(S.view==='financials') return renderFinancialsPage();
     if(S.view==='outside_bookings') return renderOutsideBookingsPage();
+    if(S.view==='documents') return renderDocumentsPage();
     if(S.view==='messages') return renderMessagesPage();
     if(S.view==='projects') return renderProjectsBoard();
     if(S.view==='pricing') return renderPricingPage();
@@ -2433,11 +2463,31 @@ function renderOutsideBookingsPage(){
         <td data-label="Status"><span class="pill ${b.status==='paid'?'pill-good':'pill-warn'}">${b.status==='paid'?'Paid':'Open'}</span></td>
         <td data-label="" style="display:flex;gap:6px;flex-wrap:wrap;">
           ${b.status==='open'? `<button class="btn btn-sm" data-action="mark-outside-booking-paid" data-id="${b.id}">Mark Paid</button>` : ''}
-          <button class="btn btn-sm" data-action="open-outside-doc-builder" data-id="${b.id}">${b.doc?'Edit Document':'Document'}</button>
+          <button class="btn btn-sm" data-action="open-outside-doc-builder" data-id="${b.id}">${DOCUMENTS.some(d=>d.subjectType==='outside'&&d.subjectId===b.id)?'Edit Document':'Document'}</button>
         </td>
       </tr>`;
     }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--ink-3);padding:20px;">No outside bookings yet.</td></tr>`}
     </tbody></table></div>
+  `;
+}
+
+/* ============ DOCUMENTS PAGE (general doc builder hub — office/bookkeeping only, not CEO) ============ */
+function renderDocumentsPage(){
+  return `
+  <div class="section-head"><h2>Documents (${DOCUMENTS.length})</h2><button class="btn btn-sm btn-primary" data-action="open-new-document">${ICO.plus} New Document</button></div>
+  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Contracts, proposals, riders — for one of our own artists, an outside act, or general use. ASP letterhead and signature throughout (or SING Entertainment's, when that's the signing party).</p>
+  ${DOCUMENTS.length? `<div class="card u-scroll-x table-cards"><table>
+    <thead><tr><th>Title</th><th>For</th><th>Letterhead</th><th>Date</th><th>Status</th></tr></thead>
+    <tbody>${DOCUMENTS.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(d=>{
+      return `<tr class="row-link" data-action="open-document" data-id="${d.id}">
+        <td data-label="Title">${esc(d.title)}</td>
+        <td data-label="For">${esc(documentSubjectLabel(d))}</td>
+        <td data-label="Letterhead">${esc((DOC_BRANDS[d.brand]||DOC_BRANDS.asp).label)}</td>
+        <td data-label="Date" class="u-mono">${fmtDateShort(d.createdAt)}</td>
+        <td data-label="Status"><span class="pill ${d.signedAt?'pill-good':'pill-neutral'}">${d.signedAt?'Signed':'Draft'}</span></td>
+      </tr>`;
+    }).join('')}
+    </tbody></table></div>` : `<div class="card empty">No documents yet.</div>`}
   `;
 }
 
@@ -3488,11 +3538,7 @@ function renderNewOutsideBookingModal(){
   </div>`;
 }
 
-const OUTSIDE_DOC_BRANDS = {
-  asp: { label:'ASP Artist Management', signer:'ASP Artist Management' },
-  sing: { label:'SING Entertainment', signer:'SING Entertainment (for Ilan)' },
-};
-function outsideDocBodyHtml(bodyText){
+function documentBodyHtml(bodyText){
   const blocks = (bodyText||'').split(/\n\s*\n/).map(b=>b.trim()).filter(Boolean);
   return blocks.map(block=>{
     const lines = block.split('\n').map(l=>l.trim()).filter(Boolean);
@@ -3501,73 +3547,138 @@ function outsideDocBodyHtml(bodyText){
     return `<p style="font-size:13px;line-height:1.6;">${esc(block).replace(/\n/g,'<br/>')}</p>`;
   }).join('');
 }
-function defaultOutsideDocBody(b){
-  return `This confirms the booking of ${b.performerName} for ${b.clientName}${b.venue?` at ${b.venue}`:''} on ${fmtDate(b.date)}, for a total fee of ${money(b.totalAmount)}.\n\nEdit this text freely — add terms, payment details, or anything else this document needs to say.`;
+function documentSubjectContext(subjectType, subjectId){
+  if(subjectType==='artist'){
+    const artist = artistById(subjectId);
+    const next = artist ? eventsFor(artist.id).filter(e=>!isPast(e.date) && ['booked','paid'].includes(e.status)).sort((a,b)=>a.date.localeCompare(b.date))[0] : null;
+    return { name: artist?artist.name:'', clientName: next?(next.clientName||''):'', date: next?next.date:null, venue: next?next.venue:'' };
+  }
+  if(subjectType==='outside'){
+    const b = getOutsideBooking(subjectId);
+    return b ? { name:b.performerName, clientName:b.clientName, date:b.date, venue:b.venue, totalAmount:b.totalAmount } : {};
+  }
+  return {};
 }
-function renderOutsideDocBuilderModal(){
-  const b = getOutsideBooking(S.outsideDocBookingId); if(!b) return '';
-  const f = S.outsideDocForm;
-  const brand = f.brand || (b.doc && b.doc.brand) || 'asp';
-  return `<div class="overlay center" data-action="outsidedoc-overlay-close">
-    <div class="modal" data-stop data-form="outsidedoc" style="width:560px;">
-      <div class="sheet-head"><h2 style="font-size:1.3rem;">Document — ${esc(b.performerName)}</h2>
+function documentSubjectLabel(doc){
+  if(doc.subjectType==='artist'){ const a=artistById(doc.subjectId); return a? a.name : 'Artist'; }
+  if(doc.subjectType==='outside'){ const b=getOutsideBooking(doc.subjectId); return b? b.performerName : 'Outside Act'; }
+  return 'General';
+}
+function documentAttribution(doc){
+  if(doc.subjectType==='artist' && doc.brand==='asp'){
+    const artist = artistById(doc.subjectId);
+    if(artist) return `On behalf of ${artist.name}`;
+  }
+  return (DOC_BRANDS[doc.brand] || DOC_BRANDS.asp).signer;
+}
+function defaultDocumentTitle(subjectType, subjectId){
+  const ctx = documentSubjectContext(subjectType, subjectId);
+  if(ctx.name) return `${subjectType==='artist'?'Proposal':'Document'} — ${ctx.name}`;
+  return 'New Document';
+}
+function defaultDocumentBody(subjectType, subjectId){
+  const ctx = documentSubjectContext(subjectType, subjectId);
+  if(subjectType==='outside' && ctx.name){
+    return `This confirms the booking of ${ctx.name} for ${ctx.clientName}${ctx.venue?` at ${ctx.venue}`:''}${ctx.date?` on ${fmtDate(ctx.date)}`:''}, for a total fee of ${money(ctx.totalAmount||0)}.\n\nEdit this text freely — add terms, payment details, or anything else this document needs to say.`;
+  }
+  if(subjectType==='artist' && ctx.name){
+    return `This proposal covers ${ctx.name}'s upcoming performance${ctx.clientName?` for ${ctx.clientName}`:''}${ctx.venue?` at ${ctx.venue}`:''}${ctx.date?` on ${fmtDate(ctx.date)}`:''}.\n\nEquipment Needed:\n- \n\nRoom / Hospitality:\n- \n\nTravel:\n- \n\nEdit this text freely.`;
+  }
+  return 'Edit this text freely — add whatever this document needs to say.';
+}
+function renderDocumentBuilderModal(){
+  const existing = S.documentId ? getDocument(S.documentId) : null;
+  const isNew = !existing;
+  const f = S.documentForm;
+  const subjectType = f.subjectType!==undefined? f.subjectType : (existing?existing.subjectType:'artist');
+  const subjectId = f.subjectId!==undefined? f.subjectId : (existing?existing.subjectId:null);
+  const brand = f.brand || (existing && existing.brand) || 'asp';
+  const ctx = documentSubjectContext(subjectType, subjectId);
+  const title = f.title!==undefined? f.title : (existing? existing.title : defaultDocumentTitle(subjectType, subjectId));
+  const clientName = f.clientName!==undefined? f.clientName : (existing? existing.clientName : (ctx.clientName||''));
+  const clientSignerTitle = f.clientSignerTitle!==undefined? f.clientSignerTitle : (existing? existing.clientSignerTitle : '');
+  const bodyText = f.bodyText!==undefined? f.bodyText : (existing? existing.bodyText : defaultDocumentBody(subjectType, subjectId));
+  return `<div class="overlay center" data-action="document-overlay-close">
+    <div class="modal" data-stop data-form="document" style="width:560px;">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">${isNew?'New Document':'Edit Document'}</h2>
         <div style="display:flex;gap:6px;">
-          <button class="icon-btn" data-action="print-outside-doc" title="Download as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
+          ${!isNew? `<button class="icon-btn" data-action="print-document" title="Download as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>`:''}
           <button class="icon-btn" data-action="close-sheet">${ICO.x}</button>
         </div>
       </div>
       <div class="sheet-body">
+        ${isNew? `
+        <div class="field"><label>Who's This For?</label>
+          <div class="chip-row">
+            <button class="filter-chip ${subjectType==='artist'?'sel':''}" data-action="pick-document-subject-type" data-subject="artist">One of Our Artists</button>
+            <button class="filter-chip ${subjectType==='outside'?'sel':''}" data-action="pick-document-subject-type" data-subject="outside">Outside Act</button>
+            <button class="filter-chip ${subjectType==='general'?'sel':''}" data-action="pick-document-subject-type" data-subject="general">General</button>
+          </div>
+        </div>
+        ${subjectType==='artist'? `<div class="field"><label>Artist</label>
+          <select class="document-subject-select">
+            <option value="">Pick an artist…</option>
+            ${ARTISTS.map(a=>`<option value="${a.id}" ${subjectId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
+          </select>
+        </div>` : ''}
+        ${subjectType==='outside'? `<div class="field"><label>Outside Booking</label>
+          <select class="document-subject-select">
+            <option value="">Pick a booking…</option>
+            ${OUTSIDE_BOOKINGS.map(b=>`<option value="${b.id}" ${subjectId===b.id?'selected':''}>${esc(b.performerName)} — ${esc(b.clientName)}</option>`).join('')}
+          </select>
+        </div>` : ''}
+        ` : `<p style="font-size:12px;color:var(--ink-3);margin:0;">For: <strong style="color:var(--ink);">${esc(documentSubjectLabel(existing))}</strong></p>`}
+
+        <div class="field"><label>Title</label><input data-field="title" value="${esc(title)}" placeholder="e.g. Succos Proposal — Shmili Landau"/></div>
         <div class="field"><label>Letterhead / Signing Party</label>
           <div class="chip-row">
-            <button class="filter-chip ${brand==='asp'?'sel':''}" data-action="pick-outside-doc-brand" data-brand="asp">ASP Artist Management</button>
-            <button class="filter-chip ${brand==='sing'?'sel':''}" data-action="pick-outside-doc-brand" data-brand="sing">SING Entertainment</button>
+            <button class="filter-chip ${brand==='asp'?'sel':''}" data-action="pick-document-brand" data-brand="asp">ASP Artist Management</button>
+            <button class="filter-chip ${brand==='sing'?'sel':''}" data-action="pick-document-brand" data-brand="sing">SING Entertainment</button>
           </div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Client Name</label><input data-field="clientName" value="${esc(f.clientName!==undefined?f.clientName:(b.doc?.clientName||b.clientName||''))}"/></div>
-          <div class="field"><label>Client Signer Title (optional)</label><input data-field="clientSignerTitle" value="${esc(f.clientSignerTitle!==undefined?f.clientSignerTitle:(b.doc?.clientSignerTitle||''))}" placeholder="e.g. Event Coordinator"/></div>
+          <div class="field"><label>Client Name</label><input data-field="clientName" value="${esc(clientName)}"/></div>
+          <div class="field"><label>Client Signer Title (optional)</label><input data-field="clientSignerTitle" value="${esc(clientSignerTitle)}" placeholder="e.g. Event Coordinator"/></div>
         </div>
         <div class="field"><label>Document Text</label>
-          <textarea data-field="bodyText" style="width:100%;min-height:180px;padding:10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:13px;font-family:var(--font-body);color:var(--ink);">${esc(f.bodyText!==undefined?f.bodyText:(b.doc?.bodyText||defaultOutsideDocBody(b)))}</textarea>
+          <textarea data-field="bodyText" style="width:100%;min-height:180px;padding:10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:13px;font-family:var(--font-body);color:var(--ink);">${esc(bodyText)}</textarea>
           <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Blank line = new paragraph. Lines starting with "-" become a bulleted list.</p>
         </div>
         ${S.showAiEditNotice? `<p style="font-size:12px;color:var(--ink-2);background:var(--surface-2);border-radius:8px;padding:8px 10px;margin:0;">AI editing needs a backend connection — not set up yet.</p>` : ''}
         <div style="display:flex;gap:8px;">
-          <button class="btn" style="flex:1;" data-action="ai-edit-outside-doc">${ICO.sparkle} AI Editor</button>
-          <button class="btn btn-primary" style="flex:1;" data-action="save-outside-doc">Save Document</button>
+          <button class="btn" style="flex:1;" data-action="ai-edit-document">${ICO.sparkle} AI Editor</button>
+          <button class="btn btn-primary" style="flex:1;" data-action="save-document">Save Document</button>
         </div>
       </div>
     </div>
   </div>`;
 }
-function renderOutsideDoc(b){
-  if(!b || !b.doc) return '';
-  const d = b.doc;
-  const brand = OUTSIDE_DOC_BRANDS[d.brand] || OUTSIDE_DOC_BRANDS.asp;
-  const clientName = d.clientName || b.clientName;
-  return `<div class="overlay center" data-action="outsidedoc-overlay-close">
+function renderDocumentDoc(doc){
+  if(!doc) return '';
+  const brandInfo = DOC_BRANDS[doc.brand] || DOC_BRANDS.asp;
+  return `<div class="overlay center" data-action="document-overlay-close">
     <div class="doc" data-stop>
       <div class="sheet-head"><h2 style="font-size:1.1rem;">Document Preview</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
       <div class="doc-body">
         <div class="doc-letterhead">
-          ${d.brand==='sing'
+          ${doc.brand==='sing'
             ? `<img src="assets/sing-entertainment-logo-dark.svg" alt="SING Entertainment" style="height:36px;"/>`
             : `<div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>`}
-          <span class="pill ${d.signedAt?'pill-good':'pill-neutral'}">${d.signedAt?'Signed':'Unsigned'}</span>
+          <span class="pill ${doc.signedAt?'pill-good':'pill-neutral'}">${doc.signedAt?'Signed':'Unsigned'}</span>
         </div>
-        <div class="doc-title">${esc(b.performerName.toUpperCase())}</div>
-        <div class="doc-sub">Prepared ${fmtDate(d.createdAt)} &middot; ${esc(brand.label)}</div>
+        <div class="doc-title">${esc((doc.title||'Document').toUpperCase())}</div>
+        <div class="doc-sub">Prepared ${fmtDate(doc.createdAt)} &middot; ${esc(brandInfo.label)}</div>
 
         <div class="doc-parties">
-          <div class="doc-party"><h4>Performer</h4><p><strong>${esc(b.performerName)}</strong></p></div>
-          <div class="doc-party"><h4>Client</h4><p><strong>${esc(clientName)}</strong>${d.clientSignerTitle?`<br/>${esc(d.clientSignerTitle)}`:''}</p></div>
+          <div class="doc-party"><h4>For</h4><p><strong>${esc(documentSubjectLabel(doc))}</strong></p></div>
+          <div class="doc-party"><h4>Client</h4><p><strong>${esc(doc.clientName||'—')}</strong>${doc.clientSignerTitle?`<br/>${esc(doc.clientSignerTitle)}`:''}</p></div>
         </div>
 
-        ${outsideDocBodyHtml(d.bodyText)}
+        ${documentBodyHtml(doc.bodyText)}
 
         <div class="doc-sign">
-          <div class="doc-sign-line">${d.signedAt? `<span class="doc-signature">${esc(clientName)}</span><br/>Signed electronically &middot; ${fmtDateShort(d.signedAt)}` : `<strong>&nbsp;</strong>Client Signature &middot; Date`}</div>
-          <div class="doc-sign-line"><strong>${esc(brand.signer)}</strong></div>
+          <div class="doc-sign-line">${doc.signedAt? `<span class="doc-signature">${esc(doc.clientName)}</span><br/>Signed electronically &middot; ${fmtDateShort(doc.signedAt)}` : `<strong>&nbsp;</strong>Client Signature &middot; Date`}</div>
+          <div class="doc-sign-line"><strong>${esc(documentAttribution(doc))}</strong></div>
         </div>
 
         <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
@@ -3876,22 +3987,35 @@ function doMarkOutsideBookingPaid(id){
   toast('Outside booking marked paid.', 'success');
   render();
 }
-function doSaveOutsideDoc(){
-  const b = getOutsideBooking(S.outsideDocBookingId); if(!b) return;
-  const f = S.outsideDocForm;
-  const brand = f.brand || (b.doc && b.doc.brand) || 'asp';
-  b.doc = {
-    brand,
-    clientName: (f.clientName!==undefined? f.clientName : (b.doc?.clientName||b.clientName||'')).trim() || b.clientName,
-    clientSignerTitle: (f.clientSignerTitle!==undefined? f.clientSignerTitle : (b.doc?.clientSignerTitle||'')).trim(),
-    bodyText: f.bodyText!==undefined? f.bodyText : (b.doc?.bodyText || defaultOutsideDocBody(b)),
-    createdAt: b.doc?.createdAt || fmtISO(new Date()),
-    signedAt: b.doc?.signedAt || null,
-  };
-  b.log.push({ts:new Date().toISOString(), type:'system', text:`Document saved (${OUTSIDE_DOC_BRANDS[brand].label} letterhead).`});
-  saveOutsideBookings();
-  S.outsideDocForm = {};
+function doSaveDocument(){
+  const f = S.documentForm;
+  const existing = S.documentId ? getDocument(S.documentId) : null;
+  const subjectType = f.subjectType!==undefined? f.subjectType : (existing?existing.subjectType:'general');
+  const subjectId = f.subjectId!==undefined? f.subjectId : (existing? existing.subjectId : null);
+  if(subjectType!=='general' && !subjectId){ toast("Pick who this document is for.", 'system'); return; }
+  const brand = f.brand || (existing && existing.brand) || 'asp';
+  const doc = existing || { id:'DOC-'+(DOCID++), createdAt: fmtISO(new Date()), signedAt: null };
+  doc.subjectType = subjectType;
+  doc.subjectId = subjectId;
+  doc.brand = brand;
+  doc.title = (f.title!==undefined? f.title : (existing?existing.title:'')).trim() || defaultDocumentTitle(subjectType, subjectId);
+  const ctx = documentSubjectContext(subjectType, subjectId);
+  doc.clientName = (f.clientName!==undefined? f.clientName : (existing?existing.clientName:(ctx.clientName||''))).trim();
+  doc.clientSignerTitle = (f.clientSignerTitle!==undefined? f.clientSignerTitle : (existing?existing.clientSignerTitle:'')).trim();
+  doc.bodyText = f.bodyText!==undefined? f.bodyText : (existing? existing.bodyText : defaultDocumentBody(subjectType, subjectId));
+  if(!existing){ DOCUMENTS.unshift(doc); }
+  saveDocuments();
+  S.documentId = doc.id;
+  S.documentForm = {};
   toast('Document saved.', 'success');
+  render();
+}
+function doOpenOutsideBookingDoc(bookingId){
+  closeAllOverlays();
+  const existing = DOCUMENTS.find(d=>d.subjectType==='outside' && d.subjectId===bookingId);
+  if(existing){ S.documentId = existing.id; S.documentForm = {}; }
+  else { S.documentId = null; S.documentForm = {subjectType:'outside', subjectId:bookingId}; }
+  S.showDocumentBuilder = true;
   render();
 }
 function doEmailItinerary(id){
@@ -4396,18 +4520,18 @@ function bindGlobal(){
     holder.innerHTML = renderInvoiceDoc();
     document.body.appendChild(holder);
   }
-  const staleOutsideDoc = document.getElementById('outsideDocPrintHost');
-  if(staleOutsideDoc) staleOutsideDoc.remove();
-  if(S.outsideDocBookingId){
-    const b = getOutsideBooking(S.outsideDocBookingId);
-    if(b && b.doc){
+  const staleDocumentDoc = document.getElementById('documentPrintHost');
+  if(staleDocumentDoc) staleDocumentDoc.remove();
+  if(S.showDocumentBuilder && S.documentId){
+    const doc = getDocument(S.documentId);
+    if(doc){
       const holder = document.createElement('div');
-      holder.id = 'outsideDocPrintHost';
+      holder.id = 'documentPrintHost';
       // Unlike contract/itinerary/invoice, this doc has a separate interactive builder modal
       // on screen at the same time -- the print host must stay invisible until an actual print
       // (the @media print block above forces it back to display:block, print-only).
       holder.style.display = 'none';
-      holder.innerHTML = renderOutsideDoc(b);
+      holder.innerHTML = renderDocumentDoc(doc);
       document.body.appendChild(holder);
     }
   }
@@ -4417,7 +4541,7 @@ function bindGlobal(){
       const form = el.closest('[data-form]')?.getAttribute('data-form');
       if(form==='task'){ S.newTaskText = el.value; return; }
       if(form==='comment'){ S.newCommentText = el.value; return; }
-      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, outsidedoc:S.outsideDocForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S };
+      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S };
       const target = formTargets[form] || S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
       if(el.type==='checkbox') render();
@@ -4568,12 +4692,15 @@ function bindGlobal(){
       case 'open-new-outside-booking': closeAllOverlays(); S.newOutsideBookingForm={}; S.showNewOutsideBooking=true; render(); break;
       case 'submit-outside-booking': doSubmitOutsideBooking(); break;
       case 'mark-outside-booking-paid': doMarkOutsideBookingPaid(id); break;
-      case 'open-outside-doc-builder': closeAllOverlays(); S.outsideDocForm={}; S.outsideDocBookingId=id; render(); break;
-      case 'outsidedoc-overlay-close': if(e.target===t){ closeAllOverlays(); render(); } break;
-      case 'pick-outside-doc-brand': S.outsideDocForm.brand = t.getAttribute('data-brand'); render(); break;
-      case 'save-outside-doc': doSaveOutsideDoc(); break;
-      case 'print-outside-doc': doSaveOutsideDoc(); window.print(); break;
-      case 'ai-edit-outside-doc': S.showAiEditNotice = true; render(); break;
+      case 'open-outside-doc-builder': doOpenOutsideBookingDoc(id); break;
+      case 'open-new-document': closeAllOverlays(); S.documentId=null; S.documentForm={subjectType:'artist'}; S.showDocumentBuilder=true; render(); break;
+      case 'open-document': closeAllOverlays(); S.documentId=id; S.documentForm={}; S.showDocumentBuilder=true; render(); break;
+      case 'document-overlay-close': if(e.target===t){ closeAllOverlays(); render(); } break;
+      case 'pick-document-subject-type': S.documentForm.subjectType = t.getAttribute('data-subject'); S.documentForm.subjectId = null; render(); break;
+      case 'pick-document-brand': S.documentForm.brand = t.getAttribute('data-brand'); render(); break;
+      case 'save-document': doSaveDocument(); break;
+      case 'print-document': doSaveDocument(); window.print(); break;
+      case 'ai-edit-document': S.showAiEditNotice = true; render(); break;
       case 'send-reminder': doSendReminder(id); break;
       case 'preview-reminder': S.showReminderPreview=true; render(); break;
       case 'close-reminder-preview': S.showReminderPreview=false; render(); break;
@@ -4698,6 +4825,9 @@ function bindGlobal(){
   });
   document.querySelectorAll('.person-refid-select').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.newPersonForm.refId = sel.value; });
+  });
+  document.querySelectorAll('.document-subject-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.documentForm.subjectId = sel.value || null; render(); });
   });
   document.querySelectorAll('.new-task-assignee-select').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.newTaskAssignee = sel.value; });

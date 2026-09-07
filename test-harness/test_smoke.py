@@ -53,10 +53,16 @@ def test_outside_bookings_hidden_from_ceo(live_server, page):
     assert page.locator('.rail-link[data-action="nav"][data-view="outside_bookings"]').count() == 0, (
         "CEO login should not see Outside Bookings in the sidebar"
     )
+    assert page.locator('.rail-link[data-action="nav"][data-view="documents"]').count() == 0, (
+        "CEO login should not see Documents in the sidebar"
+    )
     page.set_viewport_size({"width": 390, "height": 844})  # hamburger button is mobile-only
     page.locator('.hamburger-btn').click()
     assert page.locator('.mobile-menu-panel .rail-link[data-view="outside_bookings"]').count() == 0, (
         "CEO login should not see Outside Bookings in the hamburger menu"
+    )
+    assert page.locator('.mobile-menu-panel .rail-link[data-view="documents"]').count() == 0, (
+        "CEO login should not see Documents in the hamburger menu"
     )
 
 
@@ -66,4 +72,7 @@ def test_outside_bookings_visible_for_office_logins(live_server, page):
         login_as(page, user_id)
         assert page.locator('.rail-link[data-action="nav"][data-view="outside_bookings"]').count() == 1, (
             f"[{user_id}] should see the Outside Bookings nav item"
+        )
+        assert page.locator('.rail-link[data-action="nav"][data-view="documents"]').count() == 1, (
+            f"[{user_id}] should see the Documents nav item"
         )

@@ -55,7 +55,8 @@ than grepping the source to check.
 |------|-------|---------|
 | `live_server` | `conftest.py` | Session-scoped fixture. Serves `frontend/` over real `http://localhost:8791`. Auto-starts/stops. |
 | `page` | pytest-playwright (built-in) | Fresh browser page per test, standard fixture, not ours. |
-| `login_as(page, user_id)` | `helpers.py` | Drives the real login UI (click "Sign In (Demo Mode)" → click the matching account row). Not a state shortcut. |
+| `dismiss_opener(page)` | `helpers.py` | Clicks through the splash screen instead of waiting on its auto-dismiss timer (which can slip under this harness's back-to-back browser load). Called automatically by `login_as` — most callers never need this directly. |
+| `login_as(page, user_id)` | `helpers.py` | Drives the real login UI (dismisses the splash screen, clicks "Sign In (Demo Mode)" → the matching account row). Not a state shortcut. |
 | `goto_nav(page, view_key, mobile=False)` | `helpers.py` | Clicks the real nav control for a view — desktop rail/top-tabs, or the mobile bottom-nav pill if `mobile=True`. |
 | `collect_console_errors(page)` | `helpers.py` | Call right after page creation; returns a list that fills up with any console errors/page errors as you drive the page. |
 | `has_no_horizontal_overflow(page)` | `helpers.py` | Real check for the app's "no sideways scrolling, ever" rule (`scrollWidth <= innerWidth`). Returns bool, not an assertion, so callers can report actual values on failure. |
@@ -70,7 +71,7 @@ than grepping the source to check.
 | `test_smoke.py` | Every admin role + every artist logs in for real, clicks every nav item, asserts no console errors and real content rendered. The baseline "is the app fundamentally broken" check. |
 | `test_mobile.py` | Same sweep at a real 390×844 viewport (`page.set_viewport_size` — no floor-size bug, unlike the `resize_window` MCP tool in interactive sessions), asserting no horizontal overflow anywhere. |
 | `test_core_flows.py` | A few real write-flows: create a lead, add a sticky-note board item, assign a project task to a person — each asserts the created state actually appears, not just "didn't crash." |
-| `test_outside_doc.py` | Outside Booking document builder: create a document, switch its letterhead between ASP and SING Entertainment, confirm the right logo/wordmark and both signature lines render for each brand. |
+| `test_documents.py` | General Documents builder (own nav tab): brand-swap between ASP and SING Entertainment letterhead via the Outside Bookings entry point, and the "On behalf of {artist}" attribution line when a document's subject is one of ASP's own roster artists. |
 
 ## Conventions for updating this harness
 

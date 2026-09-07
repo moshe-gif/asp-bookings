@@ -31,7 +31,12 @@ def live_server():
     bare IP) so the app's service-worker registration behaves the same as it does on a real
     secure-context deploy.
     """
-    httpd = socketserver.TCPServer(("localhost", PORT), _QuietHandler)
+    # ThreadingTCPServer, not plain TCPServer: a real browser fires off several *concurrent*
+    # requests for one page load (HTML, icons, manifest.json, sw.js) -- a single-threaded server
+    # serializes those, which gets slow enough under this harness's back-to-back load to risk a
+    # bare page.goto() timing out entirely. Threading handles them in parallel, like a real host.
+    httpd = socketserver.ThreadingTCPServer(("localhost", PORT), _QuietHandler)
+    httpd.daemon_threads = True
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     yield f"http://localhost:{PORT}"
