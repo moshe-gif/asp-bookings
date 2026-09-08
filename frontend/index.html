@@ -994,6 +994,10 @@ let S = {
   realSignInNotFound: false, // true if a real session resolved to no matching artists/admin_users row
   realPasskeys: null, // fetched async once a real session is active; null = not loaded yet
   realPasskeyBusy: false,
+  realRoster: null, // {admins:[...], artists:[...]} of real (non-demo) people, fetched lazily
+  realRosterBusy: false,
+  showAddRealUser: false,
+  addRealUserForm: {},
   showNewLead:false,
   showFlightForm:false,
   checkingFlightId:null,
@@ -1130,11 +1134,16 @@ async function linkRealSessionToRoster(session){
     return;
   }
   if(adminRow){
-    if(!ADMIN_USERS.some(u=>u.id===adminRow.id)) ADMIN_USERS.push({id:adminRow.id, name:adminRow.name, email:adminRow.email, initials:adminRow.initials});
+    // The app's admin logic checks S.user against literal role slugs ('admin_ceo' etc.)
+    // throughout (isCEO, CEO_HIDDEN_NAV_VIEWS) -- use the DB row's role as the in-memory id so
+    // those checks work unchanged for a real login, same as they already do in Demo Mode. The
+    // row's own uuid (its real Postgres identity) is kept as dbId for anything that needs it.
+    if(!ADMIN_USERS.some(u=>u.id===adminRow.role)) ADMIN_USERS.push({id:adminRow.role, name:adminRow.name, email:adminRow.email, initials:adminRow.initials, dbId:adminRow.id});
+    S.user = adminRow.role;
   } else {
     if(!ARTISTS.some(a=>a.id===artistRow.id)) ARTISTS.push({id:artistRow.id, name:artistRow.name, slot:artistRow.slot, initials:artistRow.initials, email:artistRow.email, role:artistRow.role});
+    S.user = artistRow.id;
   }
-  S.user = row.id;
   S.view = adminRow ? 'dashboard' : 'a_dashboard';
   S.showChooser = false; S.showRealSignIn = false; S.realSignInSent = false; S.realSignInNotFound = false;
   S.realPasskeys = null;
@@ -1193,6 +1202,43 @@ async function doRemoveRealPasskey(id){
   toast('Passkey removed.', 'system');
   S.realPasskeys = null;
   render();
+}
+// ============ USERS DASHBOARD (real people, admin-only) ============
+// Self-serve onboarding: an admin adds a real person's name/email/role here, which inserts a
+// real row into admin_users/artists (RLS already allows any is_admin() session to do this --
+// "admin manages roster"/"admin manages office list" in supabase/migrations/0001). That person
+// can then sign in for real; linkRealSessionToRoster()'s existing email-match trigger links
+// their auth.users row to this one automatically the first time they do.
+const ADMIN_ROLE_LABELS = { admin_bookings:'Bookings', admin_bookkeeping:'Bookkeeping', admin_ceo:'CEO' };
+async function loadRealRoster(){
+  S.realRosterBusy = true;
+  const [{data: admins, error: e1}, {data: artists, error: e2}] = await Promise.all([
+    supabaseClient.from('admin_users').select('*').order('created_at'),
+    supabaseClient.from('artists').select('*').order('created_at'),
+  ]);
+  if(e1 || e2) toast('Could not load the users list: ' + (e1||e2).message, 'system');
+  S.realRoster = { admins: admins||[], artists: artists||[] };
+  S.realRosterBusy = false;
+  render();
+}
+function doAddRealUser(){
+  const f = S.addRealUserForm;
+  const name = (f.name||'').trim();
+  const email = (f.email||'').trim().toLowerCase();
+  if(!name || !email){ toast('Enter a name and email.', 'system'); return; }
+  const parts = name.split(/\s+/);
+  const initials = (parts[0][0] + (parts[1]? parts[1][0] : '')).toUpperCase();
+  const kind = f.kind || 'artist';
+  const table = kind==='admin' ? 'admin_users' : 'artists';
+  const row = kind==='admin'
+    ? { name, email, initials, role: f.adminRole || 'admin_bookings' }
+    : { name, email, initials, role: f.artistRole || 'Singer', slot: ((S.realRoster?.artists.length||0) % 6) + 1 };
+  supabaseClient.from(table).insert(row).then(({error})=>{
+    if(error){ toast('Could not add that person: ' + error.message, 'system'); return; }
+    toast(`${name} added. They can sign in at ${email} once they have a passkey or magic link set up.`, 'success');
+    S.showAddRealUser = false; S.addRealUserForm = {};
+    loadRealRoster();
+  });
 }
 if(supabaseClient){
   supabaseClient.auth.onAuthStateChange((event, session)=>{
@@ -1369,7 +1415,7 @@ function closeAllOverlays(){
   S.showNewInvoice=false; S.showInvoiceDoc=false; S.invoiceDocId=null; S.showNewOutsideBooking=false;
   S.showDocumentBuilder=false; S.documentId=null; S.showAiEditNotice=false;
   S.showAddCharge=false; S.showEventMenu=false; S.projectTab='tasks'; S.taskAssigneeFilter=null; S.showReminderPreview=false; S.showBookingConfirmation=false;
-  S.showMobileMenu=false;
+  S.showMobileMenu=false; S.showAddRealUser=false;
 }
 let pendingViewTransition = false;
 let pendingViewDirection = 'right';
@@ -1570,6 +1616,7 @@ function render(){
     ${S.showDocumentBuilder ? renderDocumentBuilderModal() : ''}
     ${S.showAddArtist ? renderAddArtistModal() : ''}
     ${S.newArtistWelcome ? renderWelcomeEmailPreview() : ''}
+    ${S.showAddRealUser ? renderAddRealUserModal() : ''}
     ${S.dayListDate ? renderDayList() : ''}
     ${S.showNewProject ? renderNewProjectModal() : ''}
     ${S.eventId ? renderEventSheet(getEvent(S.eventId)) : ''}
@@ -1823,6 +1870,54 @@ function renderRealPasskeySection(){
     <button class="btn btn-sm" style="margin-top:12px;" data-action="add-real-passkey">${ICO.plus} Add a passkey</button>
   `;
 }
+function renderUsersDashboardCard(){
+  const roster = S.realRoster;
+  return `<div class="card card-pad" style="margin-bottom:20px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <h3 style="margin:0;">Users</h3>
+      <button class="btn btn-sm btn-primary" data-action="open-add-real-user">${ICO.plus} Add Person</button>
+    </div>
+    ${!roster ? `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">Loading...</p>` : `
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 12px;">Real accounts for ASP Bookings. Add someone here, then they sign in themselves with a passkey or email link at that address.</p>
+    <div class="u-label" style="margin-bottom:6px;">Office</div>
+    ${roster.admins.length? roster.admins.map(u=>`<div class="settings-row">
+      <div><h4>${esc(u.name)} <span style="font-weight:400;color:var(--ink-3);">— ${esc(ADMIN_ROLE_LABELS[u.role]||u.role)}</span></h4><p>${esc(u.email)}</p></div>
+      <span class="pill ${u.user_id?'pill-good':''}">${u.user_id?'Active':'Invited'}</span>
+    </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0 0 12px;">No office accounts yet.</p>`}
+    <div class="u-label" style="margin:14px 0 6px;">Artists</div>
+    ${roster.artists.length? roster.artists.map(a=>`<div class="settings-row">
+      <div><h4>${esc(a.name)} <span style="font-weight:400;color:var(--ink-3);">— ${esc(a.role)}</span></h4><p>${esc(a.email)}</p></div>
+      <span class="pill ${a.user_id?'pill-good':''}">${a.user_id?'Active':'Invited'}</span>
+    </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0;">No real artist accounts yet.</p>`}
+    `}
+  </div>`;
+}
+function renderAddRealUserModal(){
+  const f = S.addRealUserForm;
+  const kind = f.kind || 'artist';
+  const adminRole = f.adminRole || 'admin_bookings';
+  const artistRole = f.artistRole || 'Singer';
+  return `<div class="overlay center" data-action="overlay-close-addrealuser">
+    <div class="modal" data-stop data-form="addrealuser" style="width:420px;">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">Add Person</h2><button class="icon-btn" data-action="close-add-real-user">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <div class="chip-row" style="margin-bottom:4px;">
+          <button class="filter-chip ${kind==='artist'?'sel':''}" data-action="pick-real-user-kind" data-kind="artist">Artist</button>
+          <button class="filter-chip ${kind==='admin'?'sel':''}" data-action="pick-real-user-kind" data-kind="admin">Office</button>
+        </div>
+        <div class="field"><label>Full Name</label><input data-field="name" value="${esc(f.name||'')}" placeholder="Full name" autofocus/></div>
+        <div class="field"><label>Real Email</label><input type="email" data-field="email" value="${esc(f.email||'')}" placeholder="them@realdomain.com"/></div>
+        ${kind==='artist' ? `<div class="field"><label>Role</label>
+          <div class="chip-row">${ARTIST_ROLES.map(r=>`<button class="filter-chip ${artistRole===r?'sel':''}" data-action="pick-real-artist-role" data-role="${r}">${r}</button>`).join('')}</div>
+        </div>` : `<div class="field"><label>Desk</label>
+          <div class="chip-row">${Object.entries(ADMIN_ROLE_LABELS).map(([k,l])=>`<button class="filter-chip ${adminRole===k?'sel':''}" data-action="pick-real-admin-role" data-role="${k}">${l}</button>`).join('')}</div>
+        </div>`}
+        <p style="font-size:11px;color:var(--ink-3);margin:0;">This creates a real account. They sign in themselves at this email — nothing is emailed automatically yet.</p>
+        <button class="btn btn-primary btn-block" data-action="confirm-add-real-user">Add Person</button>
+      </div>
+    </div>
+  </div>`;
+}
 function renderSettingsPage(){
   const isAdmin = isAdminUser(S.user);
   const who = isAdmin ? adminById(S.user) : artistById(S.user);
@@ -1830,6 +1925,7 @@ function renderSettingsPage(){
   const themeIdx = THEME_OPTIONS.findIndex(([k])=>k===THEME_PREF);
   const isReal = !!S.realSession;
   if(isReal && S.realPasskeys===null && !S.realPasskeyBusy) loadRealPasskeys();
+  if(isReal && isAdmin && S.realRoster===null && !S.realRosterBusy) loadRealRoster();
   return `
   <div class="card card-pad" style="margin-bottom:20px;">
     <h3 style="margin-bottom:12px;">Sign-in &amp; Security</h3>
@@ -1842,6 +1938,8 @@ function renderSettingsPage(){
     <button class="btn btn-sm" style="margin-top:12px;" data-action="add-passkey">${ICO.plus} Add a passkey</button>
     `}
   </div>
+
+  ${isReal && isAdmin ? renderUsersDashboardCard() : ''}
 
   <div class="card card-pad" style="margin-bottom:20px;">
     <h3 style="margin-bottom:12px;">Connected Accounts</h3>
@@ -4614,7 +4712,7 @@ function bindGlobal(){
       const form = el.closest('[data-form]')?.getAttribute('data-form');
       if(form==='task'){ S.newTaskText = el.value; return; }
       if(form==='comment'){ S.newCommentText = el.value; return; }
-      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S };
+      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S };
       const target = formTargets[form] || S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
       if(el.type==='checkbox') render();
@@ -4835,6 +4933,13 @@ function bindGlobal(){
       case 'pick-artist-role': S.addArtistForm.role = t.getAttribute('data-role'); render(); break;
       case 'close-welcome': S.newArtistWelcome=null; render(); break;
       case 'overlay-close-welcome': if(e.target===t){ S.newArtistWelcome=null; render(); } break;
+      case 'open-add-real-user': closeAllOverlays(); S.addRealUserForm={}; S.showAddRealUser=true; render(); break;
+      case 'close-add-real-user': S.showAddRealUser=false; render(); break;
+      case 'overlay-close-addrealuser': if(e.target===t){ S.showAddRealUser=false; render(); } break;
+      case 'pick-real-user-kind': S.addRealUserForm.kind = t.getAttribute('data-kind'); render(); break;
+      case 'pick-real-artist-role': S.addRealUserForm.artistRole = t.getAttribute('data-role'); render(); break;
+      case 'pick-real-admin-role': S.addRealUserForm.adminRole = t.getAttribute('data-role'); render(); break;
+      case 'confirm-add-real-user': doAddRealUser(); break;
       case 'toggle-event-menu': S.showEventMenu = !S.showEventMenu; render(); break;
       case 'share-event': doShareEvent(id); break;
       case 'copy-daily-digest': doCopyDailyDigest(); break;

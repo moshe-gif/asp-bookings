@@ -32,15 +32,57 @@ function saveST(s){ try{ const iv=crypto.randomBytes(12);
     ct:ct.toString('hex'),tag:e.getAuthTag().toString('hex')})); }catch(e){} }
 let ST = loadST();
 
-// ── Verify an identity-provider ID token (replace with your IdP specifics) ───────
-// Pattern: RS256 verify against the provider's public certs; check iss/aud/exp/iat;
-// restrict to an allowed email domain; mark admins from an allowlist.
-const ADMIN_EMAILS = ['<you@company.com>'];
+// ── Verify a Supabase-issued session JWT ─────────────────────────────────────────
+// The app's real IdP is Supabase (magic-link + passkey), not Firebase -- verify against
+// Supabase's own JWKS (asymmetric ES256/RS256; every project publishes one, key rotation
+// included), matching this project's SUPABASE_URL. Authorization (admin vs artist, which
+// desk) is looked up from admin_users/artists in Postgres, not an env-var allowlist here --
+// that keeps one source of truth (the same RLS-backed tables the browser already reads),
+// see supabase/migrations/0001_initial_schema.sql's is_admin()/current_admin_role().
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+let jwksCache = null, jwksCacheAt = 0;
+function fetchJwks(cb){
+  if(jwksCache && Date.now() - jwksCacheAt < 3600000) return cb(null, jwksCache);
+  https.get(SUPABASE_URL + '/auth/v1/.well-known/jwks.json', res=>{
+    let body=''; res.on('data',c=>body+=c);
+    res.on('end',()=>{
+      try{ jwksCache = JSON.parse(body).keys; jwksCacheAt = Date.now(); cb(null, jwksCache); }
+      catch(e){ cb('bad jwks response'); }
+    });
+  }).on('error', e=>cb(e.message));
+}
+function b64url(s){ return Buffer.from(s.replace(/-/g,'+').replace(/_/g,'/'), 'base64'); }
 function verifyIdToken(token, cb){
   if(!token) return cb('no token');
-  // TODO: real RS256 verification vs your IdP's JWKS + iss/aud/exp checks.
-  // Reference implementation: see the Firebase ID-token verifier pattern.
-  return cb('verifyIdToken not configured');
+  if(!SUPABASE_URL) return cb('SUPABASE_URL not configured');
+  const parts = token.split('.');
+  if(parts.length !== 3) return cb('malformed token');
+  let header, payload;
+  try{
+    header = JSON.parse(b64url(parts[0]));
+    payload = JSON.parse(b64url(parts[1]));
+  }catch(e){ return cb('malformed token'); }
+  fetchJwks((err, keys)=>{
+    if(err) return cb('could not load signing keys: ' + err);
+    const jwk = keys.find(k=>k.kid === header.kid);
+    if(!jwk) return cb('unknown signing key');
+    let publicKey;
+    try{ publicKey = crypto.createPublicKey({ key: jwk, format: 'jwk' }); }
+    catch(e){ return cb('bad signing key'); }
+    const signedData = parts[0] + '.' + parts[1];
+    const signature = b64url(parts[2]);
+    let ok;
+    try{
+      ok = header.alg === 'ES256'
+        ? crypto.verify('sha256', Buffer.from(signedData), { key: publicKey, dsaEncoding: 'ieee-p1363' }, signature)
+        : crypto.verify('RSA-SHA256', Buffer.from(signedData), publicKey, signature);
+    }catch(e){ return cb('signature check failed'); }
+    if(!ok) return cb('invalid signature');
+    const now = Math.floor(Date.now()/1000);
+    if(payload.exp && payload.exp < now) return cb('token expired');
+    if(payload.iss !== SUPABASE_URL + '/auth/v1') return cb('wrong issuer');
+    cb(null, { uid: payload.sub, email: payload.email });
+  });
 }
 
 // ── Per-token rate limiting (simple sliding window) ─────────────────────────────
