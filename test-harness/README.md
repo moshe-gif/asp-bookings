@@ -72,6 +72,7 @@ than grepping the source to check.
 | `test_mobile.py` | Same sweep at a real 390×844 viewport (`page.set_viewport_size` — no floor-size bug, unlike the `resize_window` MCP tool in interactive sessions), asserting no horizontal overflow anywhere. |
 | `test_core_flows.py` | A few real write-flows: create a lead, add a sticky-note board item, assign a project task to a person — each asserts the created state actually appears, not just "didn't crash." |
 | `test_documents.py` | General Documents builder (own nav tab): brand-swap between ASP and SING Entertainment letterhead via the Outside Bookings entry point, and the "On behalf of {artist}" attribution line when a document's subject is one of ASP's own roster artists. |
+| `test_edit_event.py` | The "Edit details" button on an event sheet: creates a fresh lead, edits its core fields (client name, venue, price) after creation, and asserts commission/payout recompute correctly (not just the raw price). |
 
 ## Conventions for updating this harness
 

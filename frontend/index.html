@@ -1004,6 +1004,8 @@ let S = {
   showBlockTime:false,
   blockTimeForm:{},
   showDressCodeForm:false,
+  showEditEvent:false,
+  editEventForm:{},
   dressCodeForm:{},
   showNewInvoice:false,
   newInvoiceForm:{},
@@ -1363,6 +1365,7 @@ function closeAllOverlays(){
   S.eventId=null; S.projectId=null; S.showNewLead=false; S.showAddArtist=false; S.newArtistWelcome=null;
   S.dayListDate=null; S.showNewProject=false; S.showFlightForm=false; S.showContract=false;
   S.showTransportForm=false; S.showItinerary=false; S.itineraryEventId=null; S.showBlockTime=false; S.showAskAI=false; S.showDressCodeForm=false;
+  S.showEditEvent=false;
   S.showNewInvoice=false; S.showInvoiceDoc=false; S.invoiceDocId=null; S.showNewOutsideBooking=false;
   S.showDocumentBuilder=false; S.documentId=null; S.showAiEditNotice=false;
   S.showAddCharge=false; S.showEventMenu=false; S.projectTab='tasks'; S.taskAssigneeFilter=null; S.showReminderPreview=false; S.showBookingConfirmation=false;
@@ -3174,6 +3177,7 @@ function renderEventSheet(ev){
           <span class="pill ${sm.cls}">${sm.label}</span></div>
         </div>
         <div class="kebab-menu-wrap" style="display:flex;gap:4px;align-items:center;position:relative;">
+          ${isAdmin? `<button class="icon-btn" data-action="open-edit-event" title="Edit details">${ICO.edit}</button>`:''}
           <button class="icon-btn" data-action="toggle-event-menu">${ICO.kebab}</button>
           ${S.showEventMenu? `<div class="kebab-dropdown">
             <button class="kebab-item" data-action="share-event" data-id="${ev.id}">${ICO.share} Share</button>
@@ -3469,6 +3473,42 @@ function renderDressCodeFormOverlay(){
         <div class="field"><label>Dress Code</label><input data-field="dressCode" value="${esc(f.dressCode||'')}" placeholder="e.g. Black tie, all black"/></div>
         <div class="chip-row">${DRESS_CODES.map(d=>`<button class="filter-chip" data-action="pick-dresscode" data-value="${esc(d)}">${esc(d)}</button>`).join('')}</div>
         <button class="btn btn-primary btn-block" data-action="save-dresscode" data-id="${ev.id}" style="margin-top:6px;">Save &amp; Notify Artist</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderEditEventFormOverlay(){
+  const ev = getEvent(S.eventId); if(!ev) return '';
+  const f = S.editEventForm;
+  const typeList = ev.unpaid ? INTERNAL_EVENT_TYPES : EVENT_TYPES;
+  const type = f.type!==undefined? f.type : ev.type;
+  return `<div class="overlay center" data-action="editevent-overlay-close">
+    <div class="modal" data-stop data-form="editevent">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">Edit ${ev.unpaid?'Internal Day':'Details'}</h2><button class="icon-btn" data-action="close-edit-event">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <div class="field-row">
+          ${!ev.unpaid? `<div class="field"><label>Client Name</label><input data-field="clientName" value="${esc(f.clientName!==undefined?f.clientName:(ev.clientName||''))}"/></div>`:''}
+          <div class="field"><label>Event Type</label><select class="edit-event-type-select">${typeList.map(t=>`<option ${type===t?'selected':''}>${esc(t)}</option>`).join('')}${!typeList.includes(type)?`<option selected>${esc(type)}</option>`:''}</select></div>
+        </div>
+        ${!ev.unpaid? `<div class="field-row">
+          <div class="field"><label>Client Email</label><input data-field="clientEmail" value="${esc(f.clientEmail!==undefined?f.clientEmail:(ev.clientEmail||''))}"/></div>
+          <div class="field"><label>Client Phone</label><input data-field="clientPhone" value="${esc(f.clientPhone!==undefined?f.clientPhone:(ev.clientPhone||''))}"/></div>
+        </div>` : ''}
+        <div class="field"><label>Date</label><input type="date" data-field="date" value="${f.date!==undefined?f.date:ev.date}"/></div>
+        <div class="field-row">
+          <div class="field"><label>Start Time</label><input type="time" data-field="time" value="${f.time!==undefined?f.time:ev.time}"/></div>
+          <div class="field"><label>End Time</label><input type="time" data-field="endTime" value="${f.endTime!==undefined?f.endTime:(ev.endTime||'')}"/></div>
+        </div>
+        <div class="field"><label>Venue Name</label><input data-field="venue" value="${esc(f.venue!==undefined?f.venue:(ev.venue||''))}"/></div>
+        <div class="field-row">
+          <div class="field"><label>City</label><input data-field="city" value="${esc(f.city!==undefined?f.city:(ev.city||''))}"/></div>
+          <div class="field"><label>State</label><input data-field="state" value="${esc(f.state!==undefined?f.state:(ev.state||''))}"/></div>
+        </div>
+        ${!ev.unpaid? `<div class="field"><label>Price</label><input type="number" data-field="price" value="${f.price!==undefined?f.price:ev.price}"/>
+          <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Commission (15%) and payout recalculate automatically if you change this.</p>
+        </div>` : ''}
+        <button class="btn btn-primary btn-block" data-action="save-edit-event" data-id="${ev.id}" style="margin-top:6px;">Save Changes</button>
       </div>
     </div>
   </div>`;
@@ -3941,6 +3981,31 @@ function doSaveDressCode(id){
   logEvent(ev, 'system', ev.dressCode? `Dress code set: ${ev.dressCode} — ${artistById(ev.artistId).name} notified.` : 'Dress code cleared.');
   toast(ev.dressCode? 'Dress code saved — artist notified.' : 'Dress code cleared.', 'success');
   S.showDressCodeForm=false; saveEvents(); openEvent(id);
+}
+function doSaveEditEvent(id){
+  const ev = getEvent(id); if(!ev) return;
+  const f = S.editEventForm;
+  if(!ev.unpaid){
+    if(f.clientName!==undefined) ev.clientName = f.clientName.trim();
+    if(f.clientEmail!==undefined) ev.clientEmail = f.clientEmail.trim();
+    if(f.clientPhone!==undefined) ev.clientPhone = f.clientPhone.trim();
+  }
+  if(f.type!==undefined) ev.type = f.type;
+  if(f.date!==undefined) ev.date = f.date;
+  if(f.time!==undefined) ev.time = f.time;
+  if(f.endTime!==undefined) ev.endTime = f.endTime || null;
+  if(f.venue!==undefined) ev.venue = f.venue.trim();
+  if(f.city!==undefined) ev.city = f.city.trim();
+  if(f.state!==undefined) ev.state = f.state.trim();
+  if(!ev.unpaid && f.price!==undefined){
+    const price = Number(f.price)||0;
+    ev.price = price;
+    ev.commission = Math.round(price*0.15);
+    ev.balance = price - ev.commission;
+  }
+  logEvent(ev, 'system', 'Details updated by office.');
+  toast('Changes saved.', 'success');
+  S.showEditEvent=false; S.editEventForm={}; saveEvents(); openEvent(id);
 }
 function doSubmitInvoice(){
   const f = S.newInvoiceForm;
@@ -4496,6 +4561,14 @@ function bindGlobal(){
     holder.innerHTML = renderDressCodeFormOverlay();
     document.body.appendChild(holder);
   }
+  const staleEditEvent = document.getElementById('editEventOverlayHost');
+  if(staleEditEvent) staleEditEvent.remove();
+  if(S.showEditEvent){
+    const holder = document.createElement('div');
+    holder.id = 'editEventOverlayHost';
+    holder.innerHTML = renderEditEventFormOverlay();
+    document.body.appendChild(holder);
+  }
   const staleContract = document.getElementById('contractPrintHost');
   if(staleContract) staleContract.remove();
   if(S.showContract){
@@ -4541,7 +4614,7 @@ function bindGlobal(){
       const form = el.closest('[data-form]')?.getAttribute('data-form');
       if(form==='task'){ S.newTaskText = el.value; return; }
       if(form==='comment'){ S.newCommentText = el.value; return; }
-      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S };
+      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S };
       const target = formTargets[form] || S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
       if(el.type==='checkbox') render();
@@ -4662,6 +4735,10 @@ function bindGlobal(){
       case 'dresscode-overlay-close': if(e.target===t) { S.showDressCodeForm=false; render(); } break;
       case 'pick-dresscode': S.dressCodeForm.dressCode = t.getAttribute('data-value'); render(); break;
       case 'save-dresscode': doSaveDressCode(id); break;
+      case 'open-edit-event': S.editEventForm={}; S.showEditEvent=true; render(); break;
+      case 'close-edit-event': S.showEditEvent=false; render(); break;
+      case 'editevent-overlay-close': if(e.target===t) { S.showEditEvent=false; render(); } break;
+      case 'save-edit-event': doSaveEditEvent(id); break;
       case 'toggle-add-charge': S.showAddCharge=!S.showAddCharge; S.addChargeForm={}; render(); break;
       case 'confirm-add-charge': doAddCharge(id); break;
       case 'remove-charge': doRemoveCharge(id, t.getAttribute('data-chargeid')); break;
@@ -4828,6 +4905,9 @@ function bindGlobal(){
   });
   document.querySelectorAll('.document-subject-select').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.documentForm.subjectId = sel.value || null; render(); });
+  });
+  document.querySelectorAll('.edit-event-type-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.editEventForm.type = sel.value; });
   });
   document.querySelectorAll('.new-task-assignee-select').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.newTaskAssignee = sel.value; });
