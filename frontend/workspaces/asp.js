@@ -1476,7 +1476,7 @@ function renderLogin(){
   return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
     <div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP<small>Bookings</small></div>
     <p style="color:var(--ink-2);font-size:13.5px;margin:16px 0 26px;">Sign in to view your schedule and bookings.</p>
-    <button class="btn btn-primary btn-block" data-action="show-chooser">Sign In (Demo Mode)</button>
+    ${window.ASP_DISABLE_DEMO_MODE ? '' : `<button class="btn btn-primary btn-block" data-action="show-chooser">Sign In (Demo Mode)</button>`}
     ${supabaseClient ? `
     <div style="display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--ink-3);font-size:11px;">
       <div style="flex:1;height:1px;background:var(--border);"></div>or<div style="flex:1;height:1px;background:var(--border);"></div>
