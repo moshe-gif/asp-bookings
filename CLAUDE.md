@@ -11,6 +11,16 @@ A starting template for a single-author internal/ops web tool. Two deployables:
   Global `S` state object; `render()` rebuilds views via `innerHTML`; delegated `data-action`
   handlers; `data-field`→form-model input mapping; `esc()` on ALL HTML interpolation. PWA
   (manifest + icons + service worker). Data via a backend proxy and/or a hosted DB over REST.
+  **Exception, this app only (2026-09-11):** `frontend/` is now a thin `index.html` shell
+  (`shell.js`) plus per-workspace files (`workspaces/asp.js`, `workspaces/vox.js`), each a plain,
+  unbundled `<script src>` — still zero build step, zero framework, just more than one static
+  file. This exists because the app now hosts two independently-evolving company workspaces
+  (ASP, VOX) that must never require touching each other's code to change — see
+  `~/.claude/plans/eventual-snacking-globe.md` for the full rationale. Each workspace file keeps
+  the original single-file conventions (global `S`, `render()`/`innerHTML`, `data-action`,
+  `esc()`) internally; only the *file boundary* changed. Smaller single-purpose kit projects keep
+  the original one-file convention — this is the same kind of exception as "When to abandon 'no
+  build step'" below, just for modularity rather than tooling.
 - **Backend:** `backend/proxy.js` — Node, **no dependencies**. Holds all third-party API keys
   server-side, gates every `/api/*` route behind verified auth, encrypts secrets at rest.
 

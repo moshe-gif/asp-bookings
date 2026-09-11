@@ -1,0 +1,4534 @@
+// ASP workspace module. Extracted verbatim from the former single-file frontend/index.html
+// (Phase 1a of the parent-app plan) -- a scope-only move, no logic changed. Exposes the
+// mount/unmount contract the shell (shell.js) will use once a real workspace switcher lands
+// in Phase 1b; for now this still self-executes on load exactly as it always has, so
+// mount()/unmount() are contract-shape stubs, not yet wired to real pause/resume behavior.
+(function(){
+"use strict";
+
+/* ============ ICONS (tiny inline svg) ============ */
+const ICO = {
+  dash:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
+  cal:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
+  leads:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V6a2 2 0 0 1 2-2h9l5 5v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><path d="M14 4v5h5"/></svg>',
+  artists:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="18" cy="8" r="2.6"/><path d="M16 13.2a5.2 5.2 0 0 1 5.5 5.2"/></svg>',
+  money:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 10v0M18 14v0"/></svg>',
+  plane:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg>',
+  check:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg>',
+  mail:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m3 6 9 7 9-7"/></svg>',
+  bell:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>',
+  gear:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>',
+  x:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  chev:(d)=>`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="transform:rotate(${d==='l'?90:-90}deg)"><path d="m6 9 6 6 6-6"/></svg>`,
+  clock:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
+  pin:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-6.3 7-11.5A7 7 0 0 0 5 9.5C5 14.7 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.3"/></svg>',
+  logout:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>',
+  alert:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 2.5 18a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>',
+  share:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v13"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>',
+  plus:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
+  kebab:'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
+  trash:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/><path d="M10 11v6M14 11v6"/></svg>',
+  kanban:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="9.5" y="4" width="5" height="10" rx="1.5"/><rect x="16" y="4" width="5" height="13" rx="1.5"/></svg>',
+  sparkle:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/></svg>',
+  tag:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12.5 3H5a2 2 0 0 0-2 2v7.5a2 2 0 0 0 .586 1.414l9 9a2 2 0 0 0 2.828 0l7.5-7.5a2 2 0 0 0 0-2.828l-9-9A2 2 0 0 0 12.5 3Z"/><circle cx="8.5" cy="8.5" r="1.5"/></svg>',
+  sms:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z"/></svg>',
+  settings:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>',
+  menu:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
+  key:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>',
+  mic:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="7.5" r="4.5"/><path d="M9 6.2h6M9 8.8h6"/><path d="M12 12v9"/></svg>',
+  car:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 17h-.5a1.5 1.5 0 0 1-1.5-1.5v-2a2 2 0 0 1 .15-.76l1.7-4A2 2 0 0 1 6.7 7.5h10.6a2 2 0 0 1 1.85 1.24l1.7 4c.1.24.15.5.15.76v2a1.5 1.5 0 0 1-1.5 1.5H19"/><path d="M5 17h9"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>',
+  suitcase:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><path d="M2 13h20"/></svg>',
+  checkSquare:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/></svg>',
+  edit:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+  image:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>',
+};
+// The animated 5-bar mark, reused as the app's loading indicator wherever something needs a moment.
+function markLoader(heightPx){
+  return `<span class="mark" style="height:${heightPx||16}px;"><i></i><i></i><i></i><i></i><i></i></span>`;
+}
+
+/* ============ SEED DATA ============ */
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+const rng = mulberry32(88771);
+const pick = (arr)=>arr[Math.floor(rng()*arr.length)];
+const randInt = (a,b)=>Math.floor(rng()*(b-a+1))+a;
+
+let ARTISTS = [
+  {id:'baruch', name:'Baruch Levine', slot:1, initials:'BL', email:'baruch@aspmanagement.com', role:'Singer'},
+  {id:'benny',  name:'Benny Friedman', slot:2, initials:'BF', email:'benny@aspmanagement.com', role:'Singer'},
+  {id:'moshe',  name:'Moshe Tischler', slot:3, initials:'MT', email:'moshe@aspmanagement.com', role:'Singer'},
+  {id:'yaakov', name:'Yaakov Rosenblum', slot:4, initials:'YR', email:'yaakov@aspmanagement.com', role:'Singer'},
+  {id:'eli',    name:'Eli Marcus', slot:7, initials:'EM', email:'eli@aspmanagement.com', role:'Singer'},
+  {id:'dovie',  name:'Dovie Nueberger', slot:6, initials:'DN', email:'dovie@aspmanagement.com', role:'Comedian'},
+];
+const artistById = (id)=>ARTISTS.find(a=>a.id===id);
+const ARTISTS_LS_KEY = 'asp_mock_artists_v1';
+function loadArtists(){ try{ const raw = localStorage.getItem(ARTISTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
+function saveArtists(){ try{ localStorage.setItem(ARTISTS_LS_KEY, JSON.stringify(ARTISTS)); }catch(e){} }
+{ const saved = loadArtists();
+  if(saved && saved.length){
+    const canonical = {baruch:1, benny:2, moshe:3, yaakov:4, eli:7, dovie:6};
+    const canonicalRole = {dovie:'Comedian'};
+    saved.forEach(a=>{ if(canonical[a.id]) a.slot = canonical[a.id]; if(!a.role) a.role = canonicalRole[a.id]||'Singer'; });
+    ARTISTS = saved; saveArtists();
+  } else saveArtists();
+}
+
+/* ============ PROJECTS ============ */
+// Projects no longer have a type/stage-pipeline concept — every project is just "General".
+// Kept as a single-entry lookup (rather than inlining) since makeProject/buildProjectTasks/
+// seedProjects still call getProjectType() for the empty stages/checklist shape.
+const PROJECT_TYPES = [
+  { name:'General', stages:['Active'], checklist:{} },
+];
+function getProjectType(name){ return PROJECT_TYPES.find(t=>t.name===name) || PROJECT_TYPES[0]; }
+
+function buildProjectTasks(type){
+  const pt = getProjectType(type);
+  const tasks = [];
+  Object.entries(pt.checklist||{}).forEach(([stage, items])=>{
+    items.forEach(text=> tasks.push({id:'T-'+Math.random().toString(36).slice(2,9), stage, text, done:false, assignedTo:null}));
+  });
+  return tasks;
+}
+const BOARD_CARD_ACCENTS = ['--cat-1','--cat-2','--cat-3','--cat-4','--cat-5','--cat-6','--cat-7'];
+function boardCardColor(header){
+  const s = (header||'').trim().toLowerCase();
+  if(!s) return 'var(--border-strong)';
+  let hash=0; for(let i=0;i<s.length;i++){ hash = (hash*31 + s.charCodeAt(i))|0; }
+  return `var(${BOARD_CARD_ACCENTS[Math.abs(hash)%BOARD_CARD_ACCENTS.length]})`;
+}
+function buildDefaultBoardCards(){
+  return ['Contacts','Musicians','Venue'].map(h=>({id:'BC-'+Math.random().toString(36).slice(2,9), header:h, items:[]}));
+}
+let PROJID = 1;
+function makeProject(artist, type, title, stageIdx, doneUpTo, dueDate, opts={}){
+  const stages = getProjectType(type).stages;
+  const tasks = buildProjectTasks(type);
+  tasks.forEach(t=>{ if(stages.indexOf(t.stage) < doneUpTo) t.done = true; });
+  return {
+    id:'PR-'+(PROJID++), artistId:artist.id, type, title, subtitle: opts.subtitle||'', stage:stages[stageIdx], tasks, comments:[], dueDate: dueDate||null, images:[], links:[],
+    coverImage: null, boardCards: buildDefaultBoardCards(),
+    people: opts.people || [],
+    financials: { income:[], expenses:[] },
+    recordingEventId: opts.recordingEventId || null,
+    createdAt: fmtISO(addDays(new Date(), -randInt(10,120))),
+    log:[{ts:new Date().toISOString(), type:'system', text:`Project "${title}" created for ${artist.name}.`}],
+  };
+}
+function seedProjects(){
+  const projects = [];
+  const titles = { Album:['Unreleased','Chapter Two','Live Sessions'], Tour:['Fall Tour','Winter Run'], 'Music Video':['Lead Single','Behind the Scenes'], Show:['Anniversary Concert','Charity Gala'] };
+  const seedTypes = ['Album','Tour','Music Video','Show'];
+  ARTISTS.slice(0,4).forEach((artist,i)=>{
+    const type = seedTypes[i % 4];
+    const stages = getProjectType(type).stages;
+    const stageIdx = randInt(0, stages.length-1);
+    const dueDate = rng()<0.75 ? fmtISO(addDays(new Date(), randInt(-10,90))) : null;
+    projects.push(makeProject(artist, type, pick(titles[type]), stageIdx, stageIdx, dueDate));
+  });
+  const benny = artistById('benny');
+  if(benny){
+    projects.push(makeProject(benny, 'Podcast Episode', 'Episode — Rabbi Dovid Orlofsky', 1, 1, fmtISO(addDays(new Date(),6)), {
+      subtitle:'Guest: Rabbi Dovid Orlofsky',
+      people:[{id:'PPL-'+randInt(1,999999), role:'Guest', name:'Rabbi Dovid Orlofsky'}, {id:'PPL-'+randInt(1,999999), role:'Sponsor', name:'Continental Ballroom'}],
+    }));
+    projects.push(makeProject(benny, 'Podcast Episode', 'Episode — Yossi Green', 1, 1, fmtISO(addDays(new Date(),13)), {
+      subtitle:'Guest: Yossi Green',
+      people:[{id:'PPL-'+randInt(1,999999), role:'Guest', name:'Yossi Green'}],
+    }));
+  }
+  return projects;
+}
+const PROJECTS_LS_KEY = 'asp_mock_projects_v1';
+function loadProjects(){ try{ const raw = localStorage.getItem(PROJECTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
+function saveProjects(){ try{ localStorage.setItem(PROJECTS_LS_KEY, JSON.stringify(PROJECTS)); }catch(e){} }
+let PROJECTS = loadProjects();
+if(!PROJECTS){ PROJECTS = seedProjects(); saveProjects(); }
+else {
+  PROJID = PROJECTS.reduce((max,p)=>{ const n=parseInt(String(p.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, PROJID);
+  let migrated = false;
+  PROJECTS.forEach(p=>{
+    if(!p.comments){ p.comments = []; migrated = true; }
+    if(!p.images){ p.images = []; migrated = true; }
+    if(!p.links){ p.links = []; migrated = true; }
+    if(p.dueDate === undefined){ p.dueDate = null; migrated = true; }
+    if(p.type==='Video'){ p.type='Music Video'; migrated = true; }
+    if(!p.people){ p.people = []; migrated = true; }
+    p.people.forEach(person=>{
+      if(person.kind===undefined){ person.kind = 'external'; migrated = true; }
+      if(person.email===undefined){ person.email = ''; migrated = true; }
+      if(person.phone===undefined){ person.phone = ''; migrated = true; }
+      if(person.refId===undefined){ person.refId = null; migrated = true; }
+    });
+    if(!p.financials){ p.financials = {income:[], expenses:[]}; migrated = true; }
+    if(p.recordingEventId===undefined){ p.recordingEventId = null; migrated = true; }
+    if(p.subtitle===undefined){ p.subtitle = ''; migrated = true; }
+    if(p.coverImage===undefined){ p.coverImage = null; migrated = true; }
+    if(!p.boardCards){ p.boardCards = buildDefaultBoardCards(); migrated = true; }
+    (p.tasks||[]).forEach(t=>{ if(t.assignedTo===undefined){ t.assignedTo = null; migrated = true; } });
+  });
+  if(migrated) saveProjects();
+}
+function getProject(id){ return PROJECTS.find(p=>p.id===id); }
+function projectFinancials(p){
+  const income = (p.financials?.income||[]).reduce((s,i)=>s+(Number(i.amount)||0),0);
+  const expenses = (p.financials?.expenses||[]).reduce((s,i)=>s+(Number(i.amount)||0),0);
+  return {income, expenses, net: income-expenses};
+}
+
+/* ============ CUSTOM INVOICES ============ */
+let INVID = 1;
+function invoiceTotal(inv){ return (inv.items||[]).reduce((s,it)=>s+(Number(it.amount)||0),0); }
+function makeInvoice(clientName, clientEmail, items, notes, status, daysAgo){
+  const created = addDays(new Date(), -daysAgo);
+  const log = [{ts:created.toISOString(), type:'email', text:`Invoice sent to ${clientName}.`}];
+  const paid = status==='paid';
+  if(paid) log.push({ts:addDays(created, Math.max(1,Math.round(daysAgo/2))).toISOString(), type:'success', text:'Marked paid.'});
+  return {
+    id:'INV-'+(INVID++), clientName, clientEmail, items, notes: notes||'',
+    status, createdAt: fmtISO(created), sentAt: fmtISO(created),
+    paidAt: paid? fmtISO(addDays(created, Math.max(1,Math.round(daysAgo/2)))) : null,
+    log,
+  };
+}
+function seedCustomInvoices(){
+  return [
+    makeInvoice('Continental Ballroom', 'ap@continentalballroom.com', [{id:'LI-1',label:'Sound & production rider reimbursement',amount:850}], 'Reimbursement for Aug 8 event', 'open', 4),
+    makeInvoice('Merkaz Hall Events', 'billing@merkazhall.com', [{id:'LI-2',label:'Merch table fee',amount:200},{id:'LI-3',label:'Extra chairs & staging',amount:300}], '', 'open', 11),
+    makeInvoice('Sarah Klein', 'sarah.klein@example.com', [{id:'LI-4',label:'Private vocal coaching session',amount:400}], '', 'paid', 22),
+  ];
+}
+const INVOICES_LS_KEY = 'asp_mock_invoices_v1';
+function loadCustomInvoices(){ try{ const raw = localStorage.getItem(INVOICES_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
+function saveCustomInvoices(){ try{ localStorage.setItem(INVOICES_LS_KEY, JSON.stringify(CUSTOM_INVOICES)); }catch(e){} }
+let CUSTOM_INVOICES = loadCustomInvoices();
+if(!CUSTOM_INVOICES){ CUSTOM_INVOICES = seedCustomInvoices(); saveCustomInvoices(); }
+else { INVID = CUSTOM_INVOICES.reduce((max,i)=>{ const n=parseInt(String(i.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, INVID); }
+function getInvoice(id){ return CUSTOM_INVOICES.find(i=>i.id===id); }
+
+/* ============ OUTSIDE BOOKINGS (jobs that don't involve one of our own artists) ============ */
+let OBID = 1;
+function outsideBookingPayout(b){ return (b.totalAmount||0) - (b.aspCut||0); }
+function makeOutsideBooking(performerName, clientName, clientEmail, date, venue, city, state, totalAmount, aspCut, notes, status, daysAgo){
+  const created = addDays(new Date(), -daysAgo);
+  const log = [{ts:created.toISOString(), type:'system', text:`Outside booking created — ${performerName} for ${clientName}.`}];
+  const paid = status==='paid';
+  if(paid) log.push({ts:addDays(created, Math.max(1,Math.round(daysAgo/2))).toISOString(), type:'success', text:'Marked paid.'});
+  return {
+    id:'OB-'+(OBID++), performerName, performerContact:'', clientName, clientEmail: clientEmail||'',
+    date, venue: venue||'', city: city||'', state: state||'',
+    totalAmount, aspCut, notes: notes||'', status,
+    createdAt: fmtISO(created), log,
+  };
+}
+function seedOutsideBookings(){
+  return [
+    makeOutsideBooking('The Zemer Boys', 'Weiss Family', 'weiss.family@example.com', fmtISO(addDays(new Date(),18)), 'Prospect Hall', 'Brooklyn', 'NY', 4200, 500, 'Referred out — our roster was fully booked that night.', 'open', 6),
+    makeOutsideBooking('DJ Meir Spins', 'Continental Ballroom', 'events@continentalballroom.com', fmtISO(addDays(new Date(),-30)), 'Continental Ballroom', 'Chicago', 'IL', 1800, 1800, 'Coordination fee only — client paid the DJ directly.', 'paid', 35),
+  ];
+}
+const OUTSIDE_BOOKINGS_LS_KEY = 'asp_mock_outside_bookings_v1';
+function loadOutsideBookings(){ try{ const raw = localStorage.getItem(OUTSIDE_BOOKINGS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
+function saveOutsideBookings(){ try{ localStorage.setItem(OUTSIDE_BOOKINGS_LS_KEY, JSON.stringify(OUTSIDE_BOOKINGS)); }catch(e){} }
+let OUTSIDE_BOOKINGS = loadOutsideBookings();
+if(!OUTSIDE_BOOKINGS){ OUTSIDE_BOOKINGS = seedOutsideBookings(); saveOutsideBookings(); }
+else {
+  OBID = OUTSIDE_BOOKINGS.reduce((max,b)=>{ const n=parseInt(String(b.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, OBID);
+}
+function getOutsideBooking(id){ return OUTSIDE_BOOKINGS.find(b=>b.id===id); }
+
+/* ============ DOCUMENTS (general doc builder — contracts, proposals, riders; any subject) ============ */
+const DOC_BRANDS = {
+  asp: { label:'ASP Artist Management', signer:'ASP Artist Management' },
+  sing: { label:'SING Entertainment', signer:'SING Entertainment (for Ilan)' },
+};
+let DOCID = 1;
+const DOCUMENTS_LS_KEY = 'asp_mock_documents_v1';
+function loadDocuments(){ try{ const raw = localStorage.getItem(DOCUMENTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
+function saveDocuments(){ try{ localStorage.setItem(DOCUMENTS_LS_KEY, JSON.stringify(DOCUMENTS)); }catch(e){} }
+let DOCUMENTS = loadDocuments();
+if(!DOCUMENTS){
+  // One-time migration: promote any doc saved on an outside booking (from before this was
+  // generalized beyond Outside Bookings) into its own DOCUMENTS record.
+  DOCUMENTS = [];
+  let legacyFound = false;
+  OUTSIDE_BOOKINGS.forEach(b=>{
+    if(b.doc){
+      DOCUMENTS.push(Object.assign({id:'DOC-'+(DOCID++), subjectType:'outside', subjectId:b.id, title:`Document — ${b.performerName}`}, b.doc));
+      delete b.doc;
+      legacyFound = true;
+    }
+  });
+  saveDocuments();
+  if(legacyFound) saveOutsideBookings();
+} else {
+  DOCID = DOCUMENTS.reduce((max,d)=>{ const n=parseInt(String(d.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, DOCID);
+}
+function getDocument(id){ return DOCUMENTS.find(d=>d.id===id); }
+
+const ADMIN_USERS = [
+  {id:'admin_bookings', name:'ASP Office — Bookings', displayName:'Bookings', email:'bookings@aspmanagement.com', initials:'AB'},
+  {id:'admin_bookkeeping', name:'ASP Office — Bookkeeping', displayName:'Bookkeeping', email:'bookkeeping@aspmanagement.com', initials:'AK'},
+  {id:'admin_ceo', name:'ASP Office — CEO', displayName:'Ilan', email:'ilan@aspmanagement.com', initials:'CEO'},
+];
+const isAdminUser = (id)=>ADMIN_USERS.some(u=>u.id===id);
+const adminById = (id)=>ADMIN_USERS.find(u=>u.id===id);
+
+const EVENT_TYPES = ['Wedding','Bar Mitzvah','Sheva Brachos','Concert','Melave Malka','Chinese Auction','Private Simcha','Other'];
+const DRESS_CODES = ['Black tie','Formal — dark suit','Business casual','All black','Uniform provided by venue'];
+const INTERNAL_EVENT_TYPES = ['Recording Day','Filming Day','Rehearsal','Studio Session','Unavailable','Other'];
+
+/* ============ PRICING ============ */
+const PRICING_LS_KEY = 'asp_mock_pricing_v1';
+const OVERTIME_MULTIPLIER = 1.5; // time-and-a-half, prorated to the minute past included hours
+function seedPricing(){
+  const p = {};
+  ARTISTS.forEach(a=>{
+    p[a.id] = {};
+    EVENT_TYPES.forEach((type,i)=>{
+      p[a.id][type] = { hourlyRate: 300 + a.slot*35 + i*15, includedHours: 2 };
+    });
+  });
+  return p;
+}
+function loadPricing(){ try{ const raw = localStorage.getItem(PRICING_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
+function savePricing(){ try{ localStorage.setItem(PRICING_LS_KEY, JSON.stringify(PRICING)); }catch(e){} }
+let PRICING = loadPricing();
+if(!PRICING) PRICING = seedPricing();
+ARTISTS.forEach(a=>{ if(!PRICING[a.id]) PRICING[a.id] = {}; EVENT_TYPES.forEach((type,i)=>{ if(!PRICING[a.id][type]) PRICING[a.id][type] = { hourlyRate: 300 + a.slot*35 + i*15, includedHours: 2 }; }); });
+savePricing();
+function getPricing(artistId, type){ return (PRICING[artistId] && PRICING[artistId][type]) || { hourlyRate:0, includedHours:2 }; }
+function applyStandardPricing(){
+  const f = S.newLeadForm;
+  if(!f.artistId || !f.type || f.type==='Other') return;
+  const p = getPricing(f.artistId, f.type);
+  if(p.hourlyRate) f.price = p.hourlyRate * p.includedHours;
+  if(f.time && p.includedHours) f.endTime = addMinutesToTime(f.time, Math.round(p.includedHours*60));
+}
+function setPricing(artistId, type, patch){
+  PRICING[artistId] = PRICING[artistId] || {};
+  PRICING[artistId][type] = Object.assign({hourlyRate:0,includedHours:2}, PRICING[artistId][type], patch);
+  savePricing();
+}
+const CHARGE_PRESETS = ['Travel','Flights','Hotel & Lodging','Sound & Production Rider','Musicians & Band','Other'];
+const VENUES = [
+  {venue:'Ateres Chaya Hall', city:'Lakewood', state:'NJ'}, {venue:'Prospect Hall', city:'Brooklyn', state:'NY'},
+  {venue:'Cedarhurst Country Club', city:'Cedarhurst', state:'NY'}, {venue:'The Atrium', city:'Monsey', state:'NY'},
+  {venue:'Renaissance Woodbridge', city:'Woodbridge', state:'NJ'}, {venue:'Villa Barone', city:'Bronx', state:'NY'},
+  {venue:'Continental Ballroom', city:'Chicago', state:'IL'}, {venue:'The Grove Manor', city:'Baltimore', state:'MD'},
+  {venue:'Sapphire Ballroom', city:'Teaneck', state:'NJ'}, {venue:'Ohel Sara (Satellite Broadcast)', city:'Jerusalem', state:'Israel'},
+  {venue:'Merkaz Hall', city:'Toronto', state:'ON'}, {venue:'Regency Suites', city:'Los Angeles', state:'CA'},
+];
+const FIRST = ['Yossi','Chaim','Shloime','Mendy','Duvid','Avrumi','Yanky','Zevi','Shimmy','Berel','Nachum','Aryeh'];
+const LAST = ['Klein','Roth','Weiss','Stern','Katz','Braun','Adler','Fried','Gross','Halpern','Weber','Cohen'];
+
+function addDays(base, days){ const d=new Date(base); d.setDate(d.getDate()+days); return d; }
+function fmtISO(d){ return d.toISOString().slice(0,10); }
+function money(n){ return '$'+Math.round(n).toLocaleString('en-US'); }
+function chargesTotal(ev){ return (ev.charges||[]).reduce((s,c)=>s+c.amount,0); }
+
+let EVID = 1000;
+function makeEvent(artist, offsetDays, forceStatus){
+  const price = randInt(18,88)*100;
+  const commission = Math.round(price*0.15);
+  const balance = price - commission;
+  const date = addDays(new Date(), offsetDays);
+  const past = offsetDays < 0;
+  let status = forceStatus;
+  if(!status){
+    if(past) status='paid';
+    else status = pick(['lead','lead','negotiating','contract_sent','booked','booked','booked']);
+  }
+  const depositReceived = ['booked','paid'].includes(status);
+  const balanceReceived = status==='paid';
+  const flightNeeded = rng() < 0.4;
+  const flightBooked = flightNeeded && (status==='booked'||status==='paid') && rng()<0.65;
+  const groundTransportNeeded = rng() < 0.3;
+  const groundTransportBooked = groundTransportNeeded && (status==='booked'||status==='paid') && rng()<0.6;
+  const client = FIRST[randInt(0,FIRST.length-1)]+' '+LAST[randInt(0,LAST.length-1)];
+  const startTime = pick(['18:00','19:00','19:30','20:00','21:00']);
+  const endTimeVal = addMinutesToTime(startTime, randInt(2,3)*60);
+  const v = pick(VENUES);
+  const charges = [];
+  if(flightBooked && rng()<0.6) charges.push({id:'CH-'+randInt(1,999999), label:'Flights', amount:randInt(2,6)*100});
+  else if(rng()<0.15) charges.push({id:'CH-'+randInt(1,999999), label: pick(['Travel','Hotel & Lodging']), amount:randInt(1,4)*100});
+  const log = [];
+  const createdOffset = -randInt(4,60);
+  const created = addDays(new Date(), Math.min(createdOffset, offsetDays-2));
+  log.push({ts:created, type:'system', text:`Lead created for ${artist.name} — client info entered by management.`});
+  if(status!=='lead'){ log.push({ts:addDays(created,1), type:'system', text:'Status moved to Negotiating.'}); }
+  if(['contract_sent','booked','paid'].includes(status)){ log.push({ts:addDays(created,3), type:'email', text:`Contract + QuickBooks invoice (15% booking fee) emailed to ${client.toLowerCase().replace(' ','.')}@example.com.`}); }
+  if(depositReceived){ log.push({ts:addDays(created,6), type:'success', text:'Bookkeeping marked booking fee received — job officially booked & locked on calendar.'});
+    log.push({ts:addDays(created,6), type:'email', text:'Confirmation emailed to client with date, time & location.'});
+    log.push({ts:addDays(created,6), type:'email', text:`Schedule notification sent to ${artist.name}.`}); }
+  if(flightNeeded){ log.push({ts:addDays(created,2), type:'email', text:'Flight needed — emailed to the booking secretary with gig details.'});
+    if(flightBooked) log.push({ts:addDays(created,9), type:'email', text:`Flight booked & added to itinerary — Moshe and ${artist.name} notified.`}); }
+  if(groundTransportNeeded){ log.push({ts:addDays(created,2), type:'email', text:'Ground transport needed — emailed to the booking secretary with gig details.'});
+    if(groundTransportBooked) log.push({ts:addDays(created,8), type:'email', text:`Driver booked & added to itinerary — Moshe and ${artist.name} notified.`}); }
+  if(balanceReceived){ log.push({ts:addDays(date,1), type:'success', text:'Bookkeeping marked balance received via Zelle — reminders stopped.'}); }
+  return {
+    id: 'EV-'+(EVID++),
+    artistId: artist.id,
+    type: pick(EVENT_TYPES),
+    unpaid: false,
+    clientName: client,
+    clientEmail: client.toLowerCase().replace(' ','.')+'@example.com',
+    clientPhone: '(917) '+randInt(200,899)+'-'+randInt(1000,9999),
+    date: fmtISO(date),
+    time: startTime, endTime: endTimeVal,
+    venue: v.venue, city: v.city, state: v.state,
+    price, commission, balance,
+    status,
+    depositReceived, depositReceivedDate: depositReceived? fmtISO(addDays(created,6)): null,
+    balanceReceived, balanceReceivedDate: balanceReceived? fmtISO(addDays(date,1)): null,
+    reminderIntervalDays: defaultReminderCadence(fmtISO(date)),
+    lastReminderSent: (status==='booked' && !balanceReceived) ? fmtISO(addDays(new Date(),-randInt(1,4))) : null,
+    flightNeeded, flightBooked,
+    flight: flightBooked ? {
+      airline: pick(['El Al','Delta','United','American']), confirmation: 'CNF'+randInt(1000,9999),
+      depart: fmtISO(addDays(date,-1))+' 14:20', arrive: fmtISO(date)+' 17:05', notes:'Round-trip, coach.'
+    } : null,
+    groundTransportNeeded, groundTransportBooked,
+    groundTransport: groundTransportBooked ? {
+      driverName: pick(['Yossi K.','Mendy F.','Shloimy G.','Duvid R.']), driverPhone: '(347) '+randInt(200,899)+'-'+randInt(1000,9999),
+      pickupTime: fmtISO(date)+' '+addMinutesToTime(startTime, -90), pickupLocation: 'Airport / home pickup',
+      dropoffTime: fmtISO(date)+' '+startTime, dropoffLocation: v.venue, notes:'Sedan, one-way to venue.'
+    } : null,
+    charges,
+    dressCode: rng()<0.5 ? pick(DRESS_CODES) : '',
+    prepSheets: [],
+    createdAt: fmtISO(created),
+    log: log.sort((a,b)=>a.ts-b.ts).map(l=>({...l, ts:l.ts.toISOString()})),
+  };
+}
+
+function makeInternalEvent(artist, offsetDays, type){
+  const date = addDays(new Date(), offsetDays);
+  const startTime = pick(['10:00','11:00','13:00']);
+  const endTimeVal = addMinutesToTime(startTime, randInt(3,6)*60);
+  const v = pick(VENUES);
+  const flightNeeded = rng() < 0.2;
+  const groundTransportNeeded = rng() < 0.3;
+  const created = addDays(new Date(), -randInt(2,20));
+  return {
+    id: 'EV-'+(EVID++),
+    artistId: artist.id,
+    type,
+    unpaid: true,
+    clientName: null, clientEmail:'', clientPhone:'',
+    date: fmtISO(date),
+    time: startTime, endTime: endTimeVal,
+    venue: v.venue, city: v.city, state: v.state,
+    price:0, commission:0, balance:0,
+    status:'scheduled',
+    depositReceived:false, depositReceivedDate:null,
+    balanceReceived:false, balanceReceivedDate:null,
+    reminderIntervalDays: defaultReminderCadence(fmtISO(date)), lastReminderSent:null,
+    flightNeeded, flightBooked:false, flight:null,
+    groundTransportNeeded, groundTransportBooked:false, groundTransport:null,
+    charges:[], prepSheets:[],
+    createdAt: fmtISO(created),
+    log: [{ts:created.toISOString(), type:'system', text:`${type} scheduled for ${artist.name}.`}],
+  };
+}
+
+function seedAll(){
+  const events = [];
+  ARTISTS.forEach(artist=>{
+    events.push(makeEvent(artist, randInt(3,10), 'lead'));
+    events.push(makeEvent(artist, randInt(10,20), 'negotiating'));
+    events.push(makeEvent(artist, randInt(15,30), 'contract_sent'));
+    events.push(makeEvent(artist, randInt(20,45), 'booked'));
+    events.push(makeEvent(artist, randInt(45,70), 'booked'));
+    for(let i=0;i<4;i++) events.push(makeEvent(artist, -randInt(5,150)));
+    events.push(makeEvent(artist, randInt(80,140), 'booked'));
+  });
+  events.push(makeInternalEvent(ARTISTS[0], randInt(5,15), 'Recording Day'));
+  events.push(makeInternalEvent(ARTISTS[1], randInt(8,20), 'Filming Day'));
+  events.push(makeInternalEvent(ARTISTS[2], randInt(10,25), 'Rehearsal'));
+  return events;
+}
+
+/* ============ SUPABASE (real backend, not yet used for data -- auth only so far) ============ */
+// Publishable/anon key is meant to be public -- real access control lives in RLS policies,
+// not in keeping this secret. See supabase/migrations/ in the repo for the schema + policies.
+const SUPABASE_URL = 'https://psgpxbkncuavlnpplykf.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Orec7KI9Lwqd_ZfsKaEq9g__ewGiEiT';
+const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  auth: { experimental: { passkey: true } },
+}) : null;
+
+/* ============ STATE ============ */
+const LS_KEY='asp_mock_state_v1';
+let S = {
+  user: null, // 'admin' or artist id
+  view: 'dashboard',
+  eventId: null,
+  realSession: null, // {supabaseUserId, email} once someone signs in for real (not Demo Mode)
+  showRealSignIn: false,
+  realSignInEmail: '',
+  realSignInSent: false,
+  realSignInNotFound: false, // true if a real session resolved to no matching artists/admin_users row
+  realPasskeys: null, // fetched async once a real session is active; null = not loaded yet
+  realPasskeyBusy: false,
+  realRoster: null, // {admins:[...], artists:[...]} of real (non-demo) people, fetched lazily
+  realRosterBusy: false,
+  showAddRealUser: false,
+  addRealUserForm: {},
+  showNewLead:false,
+  showFlightForm:false,
+  checkingFlightId:null,
+  showTransportForm:false,
+  transportForm:{},
+  showItinerary:false,
+  itineraryEventId:null,
+  showBlockTime:false,
+  blockTimeForm:{},
+  showDressCodeForm:false,
+  showEditEvent:false,
+  editEventForm:{},
+  dressCodeForm:{},
+  showNewInvoice:false,
+  newInvoiceForm:{},
+  showNewOutsideBooking:false,
+  newOutsideBookingForm:{},
+  showDocumentBuilder:false,
+  documentId:null,
+  documentForm:{},
+  showAiEditNotice:false,
+  showInvoiceDoc:false,
+  invoiceDocId:null,
+  showAskAI:false,
+  askAIForm:{},
+  askAIHistory:[],
+  showContract:false,
+  showAddCharge:false,
+  addChargeForm:{},
+  showChooser:false,
+  dayListDate:null,
+  showInstallBanner:false,
+  showEventMenu:false,
+  showAddArtist:false,
+  addArtistForm:{},
+  newArtistWelcome:null,
+  projectArtistFilter:'all',
+  pricingArtist: null,
+  projectId:null,
+  showNewProject:false,
+  newProjectForm:{},
+  newTaskText:'',
+  newTaskAssignee:'',
+  taskAssigneeFilter:null,
+  newBoardItemText:{},
+  showReminderPreview:false,
+  showBookingConfirmation:false,
+  showMobileMenu:false,
+  projectTab:'tasks',
+  newCommentText:'',
+  newLinkForm:{},
+  newPersonForm:{kind:'internal'},
+  newFinIncomeLabel:'', newFinIncomeAmount:'',
+  newFinExpenseLabel:'', newFinExpenseAmount:'',
+  calMonth: (()=>{const d=new Date(); d.setDate(1); return d;})(),
+  calViewMode: 'month',
+  calDate: (()=>{const d=new Date(); d.setHours(0,0,0,0); return d;})(),
+  calArtistFilter: [],
+  finArtistFilter: 'all',
+  leadsArtistFilter: 'all',
+  newLeadForm: {},
+  flightForm: {},
+};
+function loadEvents(){
+  try{ const raw = localStorage.getItem(LS_KEY); if(raw) return JSON.parse(raw); }catch(e){}
+  return seedAll();
+}
+function saveEvents(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(S.events)); }catch(e){} }
+S.events = loadEvents();
+EVID = S.events.reduce((max,e)=>{ const n=parseInt(String(e.id).split('-')[1],10); return isNaN(n)? max : Math.max(max,n+1); }, EVID);
+
+function resetDemo(){ localStorage.removeItem(LS_KEY); S.events = seedAll(); saveEvents(); toast('Demo data reset.', 'system'); navigate('dashboard'); }
+// One-tap migration helper: this app has no shared backend yet, so every distinct
+// browser/installed-PWA has its own separate localStorage. This lets Moshe pull the
+// real projects (from the Excel import, 2026-08-27) onto any device/install that only
+// has the original seeded demo data -- safe to run more than once, it skips anything
+// that already matches by title+artist.
+const OLD_SEED_PROJECT_TITLES = ['Unreleased','Fall Tour','Lead Single','Charity Gala','Episode — Rabbi Dovid Orlofsky','Episode — Yossi Green'];
+function doLoadRealProjects(){
+  if(!ARTISTS.some(a=>a.id==='shmili')){
+    ARTISTS.push({id:'shmili', name:'Shmili Landau', slot:5, initials:'SL', email:'shmili@aspmanagement.com', role:'DJ'});
+    saveArtists();
+  }
+  const before = PROJECTS.length;
+  PROJECTS = PROJECTS.filter(p=>!OLD_SEED_PROJECT_TITLES.includes(p.title));
+  const removed = before - PROJECTS.length;
+
+  function addIfMissing(artistId, title, cards){
+    if(PROJECTS.some(p=>p.title===title && p.artistId===artistId)) return false;
+    const artist = artistById(artistId);
+    const proj = makeProject(artist, 'General', title, 0, 0, null, {});
+    proj.boardCards = cards.map(c=>({
+      id:'BC-'+Math.random().toString(36).slice(2,9), header:c.header,
+      items:c.items.map(text=>({id:'BI-'+Math.random().toString(36).slice(2,9), text, done:false})),
+    }));
+    PROJECTS.unshift(proj);
+    return true;
+  }
+  let added = 0;
+  const add = (...args)=>{ if(addIfMissing(...args)) added++; };
+  add('benny', 'Bennys Podcast', [{header:'Notes', items:['Tishrei Guest — Swekey??','Tuesday','Eitan','Pulse','Sruly Green','Follow up with Yerachmiel in 2027','Binyomin Miller — Purim guest']}]);
+  add('benny', 'Benny Game', [{header:'Notes', items:['Concept and rules created']}]);
+  add('benny', 'Benny Merch', [{header:'Notes', items:['Reached out to LNS']}]);
+  add('eli', '30 Piece Videos', [{header:'Notes', items:['Gershon has music','Shulem Heiman has video']}]);
+  add('eli', 'Job with Panski', []);
+  add('eli', 'DC Project', [{header:'Notes', items:['Yitzy Schwartz has the music','Shalom Kirstein has the video']}]);
+  add('yaakov', "Yaakov's Album", [
+    {header:'To Do', items:['Cover Photo Shoot']},
+    {header:'Song List', items:['Mayim Rabim (slow)','All I need is you','Becoming','Bridge','Adon','Abba','Kol Zman','Ani Maamin','Heart is on fire']},
+  ]);
+  add('shmili', 'Shmueli Landau Concert', [{header:'Notes', items:['Harass Ilan about date','Spoke to Eli — need to find out if this should be a money maker','Shmili is interested right after Succos']}]);
+  add('eli', 'Galei', [{header:'Notes', items:['Harass Schlisselfeld for track']}]);
+  add('baruch', 'Galei', [{header:'Notes', items:['Harass Schlisselfeld for track']}]);
+  saveProjects();
+  toast(`Loaded ${added} real project${added===1?'':'s'}${removed?`, removed ${removed} old demo project${removed===1?'':'s'}`:''}.`, 'success');
+  navigate('projects');
+}
+
+/* ============ REAL AUTH (Supabase) ============ */
+// Separate from Demo Mode entirely: a real session never touches ARTISTS/ADMIN_USERS
+// mock data except to add exactly the one matching row for whoever just signed in, so the
+// rest of the app's isAdminUser()/artistById()/adminById() logic works completely unchanged.
+async function linkRealSessionToRoster(session){
+  S.realSession = { supabaseUserId: session.user.id, email: session.user.email };
+  const [{data: adminRow}, {data: artistRow}] = await Promise.all([
+    supabaseClient.from('admin_users').select('*').eq('user_id', session.user.id).maybeSingle(),
+    supabaseClient.from('artists').select('*').eq('user_id', session.user.id).maybeSingle(),
+  ]);
+  const row = adminRow || artistRow;
+  if(!row){
+    S.realSignInNotFound = true;
+    S.showRealSignIn = false; S.realSignInSent = false;
+    render();
+    return;
+  }
+  if(adminRow){
+    // The app's admin logic checks S.user against literal role slugs ('admin_ceo' etc.)
+    // throughout (isCEO, CEO_HIDDEN_NAV_VIEWS) -- use the DB row's role as the in-memory id so
+    // those checks work unchanged for a real login, same as they already do in Demo Mode. The
+    // row's own uuid (its real Postgres identity) is kept as dbId for anything that needs it.
+    if(!ADMIN_USERS.some(u=>u.id===adminRow.role)) ADMIN_USERS.push({id:adminRow.role, name:adminRow.name, email:adminRow.email, initials:adminRow.initials, dbId:adminRow.id});
+    S.user = adminRow.role;
+  } else {
+    if(!ARTISTS.some(a=>a.id===artistRow.id)) ARTISTS.push({id:artistRow.id, name:artistRow.name, slot:artistRow.slot, initials:artistRow.initials, email:artistRow.email, role:artistRow.role});
+    S.user = artistRow.id;
+  }
+  S.view = adminRow ? 'dashboard' : 'a_dashboard';
+  S.showChooser = false; S.showRealSignIn = false; S.realSignInSent = false; S.realSignInNotFound = false;
+  S.realPasskeys = null;
+  pendingViewTransition = true;
+  pendingViewDirection = 'right';
+  syncURL();
+  render();
+}
+async function doSubmitMagicLink(){
+  const email = (S.realSignInEmail||'').trim();
+  if(!email){ toast('Enter your email.', 'system'); return; }
+  const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href.split('#')[0] } });
+  if(error){ toast('Could not send sign-in link: ' + error.message, 'system'); return; }
+  S.realSignInSent = true;
+  render();
+}
+async function doRealSignInPasskey(){
+  try{
+    const { error } = await supabaseClient.auth.signInWithPasskey();
+    if(error){ toast('Passkey sign-in failed: ' + error.message, 'system'); }
+    // On success, onAuthStateChange's SIGNED_IN handler takes over from here.
+  }catch(e){
+    toast('Passkey sign-in was cancelled or is not available on this device.', 'system');
+  }
+}
+async function doRealSignOut(){
+  if(supabaseClient) await supabaseClient.auth.signOut();
+  S.realSession = null; S.realSignInNotFound = false; S.user = null; S.realPasskeys = null;
+  render();
+}
+// Passkey field names (friendly_name/created_at) are a best guess -- Supabase's passkey API is
+// experimental/BETA and its exact response shape isn't fully documented; adjust here if it
+// turns out to differ once tested against a real registered passkey on the live domain.
+async function loadRealPasskeys(){
+  S.realPasskeyBusy = true;
+  try{
+    const { data, error } = await supabaseClient.auth.passkey.list();
+    if(error){ toast('Could not load passkeys: ' + error.message, 'system'); S.realPasskeys = []; }
+    else S.realPasskeys = (data||[]).map(p=>({ id: p.id, label: p.friendly_name || p.name || 'Passkey', addedAt: p.created_at }));
+  }catch(e){
+    S.realPasskeys = [];
+  }
+  S.realPasskeyBusy = false;
+  render();
+}
+async function doAddRealPasskey(){
+  const { error } = await supabaseClient.auth.registerPasskey();
+  if(error){ toast('Could not add passkey: ' + error.message, 'system'); return; }
+  toast('Passkey added.', 'success');
+  S.realPasskeys = null;
+  render();
+}
+async function doRemoveRealPasskey(id){
+  const { error } = await supabaseClient.auth.passkey.delete({ id });
+  if(error){ toast('Could not remove passkey: ' + error.message, 'system'); return; }
+  toast('Passkey removed.', 'system');
+  S.realPasskeys = null;
+  render();
+}
+// ============ USERS DASHBOARD (real people, admin-only) ============
+// Self-serve onboarding: an admin adds a real person's name/email/role here, which inserts a
+// real row into admin_users/artists (RLS already allows any is_admin() session to do this --
+// "admin manages roster"/"admin manages office list" in supabase/migrations/0001). That person
+// can then sign in for real; linkRealSessionToRoster()'s existing email-match trigger links
+// their auth.users row to this one automatically the first time they do.
+const ADMIN_ROLE_LABELS = { admin_bookings:'Bookings', admin_bookkeeping:'Bookkeeping', admin_ceo:'CEO' };
+async function loadRealRoster(){
+  S.realRosterBusy = true;
+  const [{data: admins, error: e1}, {data: artists, error: e2}] = await Promise.all([
+    supabaseClient.from('admin_users').select('*').order('created_at'),
+    supabaseClient.from('artists').select('*').order('created_at'),
+  ]);
+  if(e1 || e2) toast('Could not load the users list: ' + (e1||e2).message, 'system');
+  S.realRoster = { admins: admins||[], artists: artists||[] };
+  S.realRosterBusy = false;
+  render();
+}
+function doAddRealUser(){
+  const f = S.addRealUserForm;
+  const name = (f.name||'').trim();
+  const email = (f.email||'').trim().toLowerCase();
+  if(!name || !email){ toast('Enter a name and email.', 'system'); return; }
+  const parts = name.split(/\s+/);
+  const initials = (parts[0][0] + (parts[1]? parts[1][0] : '')).toUpperCase();
+  const kind = f.kind || 'artist';
+  const table = kind==='admin' ? 'admin_users' : 'artists';
+  const row = kind==='admin'
+    ? { name, email, initials, role: f.adminRole || 'admin_bookings' }
+    : { name, email, initials, role: f.artistRole || 'Singer', slot: ((S.realRoster?.artists.length||0) % 6) + 1 };
+  supabaseClient.from(table).insert(row).then(({error})=>{
+    if(error){ toast('Could not add that person: ' + error.message, 'system'); return; }
+    toast(`${name} added. They can sign in at ${email} once they have a passkey or magic link set up.`, 'success');
+    S.showAddRealUser = false; S.addRealUserForm = {};
+    loadRealRoster();
+  });
+}
+if(supabaseClient){
+  supabaseClient.auth.onAuthStateChange((event, session)=>{
+    if((event==='SIGNED_IN' || event==='INITIAL_SESSION') && session && !S.user) linkRealSessionToRoster(session);
+    if(event==='SIGNED_OUT'){ S.realSession = null; S.realPasskeys = null; }
+  });
+}
+
+/* ============ THEME PREF ============ */
+const THEME_LS_KEY = 'asp_theme_pref';
+function loadThemePref(){ try{ return localStorage.getItem(THEME_LS_KEY) || 'light'; }catch(e){ return 'light'; } }
+function applyThemePref(pref){ document.documentElement.dataset.theme = pref==='dark' ? 'dark' : 'light'; }
+let THEME_PREF = loadThemePref();
+applyThemePref(THEME_PREF);
+function setThemePref(pref){
+  THEME_PREF = pref;
+  try{ localStorage.setItem(THEME_LS_KEY, pref); }catch(e){}
+  applyThemePref(pref);
+  render();
+}
+
+/* ============ SETTINGS ============ */
+const SETTINGS_LS_KEY = 'asp_mock_settings_v1';
+function loadAllSettings(){ try{ const raw = localStorage.getItem(SETTINGS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return {}; }
+let ALL_SETTINGS = loadAllSettings();
+function saveAllSettings(){ try{ localStorage.setItem(SETTINGS_LS_KEY, JSON.stringify(ALL_SETTINGS)); }catch(e){} }
+function defaultUserSettings(){
+  return {
+    passkeys: [{id:'pk-'+randInt(1,999999), label:'This device', addedAt: fmtISO(new Date())}],
+    calendarConnected: false,
+    calendarEmail: '',
+    notify: {
+      newLeads: {inApp:true, email:false},
+      balanceReminders: {inApp:true, email:false},
+      bookingConfirmations: {inApp:true, email:false},
+      weeklyGigDigest: {inApp:false, email:false},
+      dayOfReminder: {inApp:false, email:false},
+    },
+  };
+}
+function getUserSettings(userId){
+  if(!ALL_SETTINGS[userId]) ALL_SETTINGS[userId] = defaultUserSettings();
+  const st = ALL_SETTINGS[userId];
+  Object.keys(st.notify).forEach(k=>{ if(typeof st.notify[k]==='boolean') st.notify[k] = {inApp: st.notify[k], email:false}; });
+  NOTIFY_ITEMS.forEach(([key])=>{ if(!st.notify[key]) st.notify[key] = {inApp:false, email:false}; });
+  return st;
+}
+
+/* ============ HELPERS ============ */
+function esc(s){ return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function eventsFor(artistId){ return S.events.filter(e=>e.artistId===artistId); }
+function getEvent(id){ return S.events.find(e=>e.id===id); }
+function fmtDate(iso){ const d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{weekday:'short', month:'short', day:'numeric', year:'numeric'}); }
+function fmtDateShort(iso){ const d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short', day:'numeric'}); }
+function fmtDateWeekday(iso){ const d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{weekday:'short', month:'short', day:'numeric'}); }
+function fmtTime(t){ const [h,m]=t.split(':').map(Number); const ap=h>=12?'PM':'AM'; const hh=((h+11)%12)+1; return `${hh}:${String(m).padStart(2,'0')} ${ap}`; }
+function fmtTimeRange(start, end){ if(start==='00:00' && !end) return 'All day'; return end? `${fmtTime(start)} – ${fmtTime(end)}` : fmtTime(start); }
+function hoursBetween(start, end){
+  if(!start || !end) return null;
+  const [sh,sm] = start.split(':').map(Number), [eh,em] = end.split(':').map(Number);
+  let mins = (eh*60+em) - (sh*60+sm);
+  if(mins <= 0) mins += 24*60;
+  const hrs = mins/60;
+  return Number.isInteger(hrs) ? String(hrs) : hrs.toFixed(1);
+}
+function fmtFlightDateTime(s){
+  if(!s || s==='—') return '—';
+  const [datePart, timePart] = s.split(' ');
+  if(!datePart || !timePart) return s;
+  return `${fmtDateShort(datePart)} · ${fmtTime(timePart)}`;
+}
+function addMinutesToTime(t, mins){ const [h,m]=t.split(':').map(Number); const total=(h*60+m+mins+1440)%1440; return `${String(Math.floor(total/60)).padStart(2,'0')}:${String(total%60).padStart(2,'0')}`; }
+function daysUntil(iso){ const today=new Date(); today.setHours(0,0,0,0); const d=new Date(iso+'T00:00:00'); return Math.round((d-today)/86400000); }
+function isPast(iso){ return daysUntil(iso) < 0; }
+// Standard follow-up cadence: every 2 weeks, tightening to weekly once the gig is under a month out.
+function defaultReminderCadence(iso){ return daysUntil(iso) > 30 ? 14 : 7; }
+function fullLocation(ev){
+  const parts = [ev.venue, ev.city, ev.state].filter(Boolean);
+  return parts.length? parts.join(', ') : 'Location TBD';
+}
+function hasLocation(ev){ return !!(ev.venue || ev.city || ev.state); }
+function gmapsUrl(ev){ return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullLocation(ev))}`; }
+function wazeUrl(ev){ return `https://waze.com/ul?q=${encodeURIComponent(fullLocation(ev))}&navigate=yes`; }
+const US_STATES = new Set(['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC']);
+function isInternational(ev){ const s=(ev.state||'').trim().toUpperCase(); return s.length>0 && !US_STATES.has(s); }
+function eventTravelDates(ev){
+  const dates = new Set([ev.date]);
+  if(ev.flight){
+    if(ev.flight.depart) dates.add(ev.flight.depart.slice(0,10));
+    if(ev.flight.arrive) dates.add(ev.flight.arrive.slice(0,10));
+  }
+  return dates;
+}
+function findConflicts(ev){
+  const myDates = eventTravelDates(ev);
+  return S.events.filter(e=>{
+    if(e.id===ev.id || e.artistId!==ev.artistId) return false;
+    const otherDates = eventTravelDates(e);
+    for(const d of myDates) if(otherDates.has(d)) return true;
+    return false;
+  });
+}
+function allConflictPairs(){
+  const seen = new Set(); const pairs = [];
+  S.events.forEach(ev=>{
+    findConflicts(ev).forEach(other=>{
+      const key = [ev.id, other.id].sort().join('|');
+      if(!seen.has(key)){ seen.add(key); pairs.push([ev, other]); }
+    });
+  });
+  return pairs;
+}
+function statusMeta(ev){
+  const map = {
+    lead:      {label:'New Lead', cls:'pill-neutral'},
+    negotiating:{label:'Negotiating', cls:'pill-warn'},
+    contract_sent:{label:'Contract Sent', cls:'pill-warn'},
+    booked:    {label: ev.balanceReceived? 'Paid in Full':'Booked · Balance Pending', cls: ev.balanceReceived? 'pill-good':'pill-accent'},
+    paid:      {label: isPast(ev.date)?'Completed':'Paid in Full', cls:'pill-good'},
+    scheduled: {label: isPast(ev.date)?'Completed':'Scheduled', cls:'pill-neutral'},
+  };
+  return map[ev.status] || {label:ev.status, cls:'pill-neutral'};
+}
+function toast(msg, type){
+  const wrap = document.getElementById('toasts');
+  const el = document.createElement('div');
+  el.className='toast';
+  const ic = type==='email'? ICO.mail : type==='success'? ICO.check : ICO.bell;
+  el.innerHTML = `<span style="color:var(--accent);margin-top:1px;">${ic}</span><span>${esc(msg)}</span>`;
+  wrap.appendChild(el);
+  setTimeout(()=>{ el.style.transition='.25s ease'; el.style.opacity='0'; el.style.transform='translateY(6px)'; setTimeout(()=>el.remove(),260); }, 4200);
+}
+function logEvent(ev, type, text){ ev.log.push({ts:new Date().toISOString(), type, text}); }
+
+/* ============ INSTALL PROMPT ============ */
+let deferredInstallPrompt = null;
+function isStandalone(){ return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; }
+function isIOS(){ return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream; }
+function isMobileUA(){ return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent); }
+function shouldShowInstallBanner(){
+  if(isStandalone() || !isMobileUA()) return false;
+  const dismissedAt = Number(localStorage.getItem('aspInstallDismissedAt')||0);
+  if(Date.now() - dismissedAt < 14*24*60*60*1000) return false;
+  return true;
+}
+window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredInstallPrompt = e; render(); });
+window.addEventListener('appinstalled', ()=>{ deferredInstallPrompt=null; S.showInstallBanner=false; render(); });
+function renderInstallBanner(){
+  if(!S.showInstallBanner) return '';
+  const ios = isIOS();
+  const canPrompt = !!deferredInstallPrompt;
+  return `<div class="install-banner">
+    <span class="ib-icon">ASP</span>
+    <div class="ib-text">
+      <strong>Add ASP Bookings to your Home Screen</strong>
+      ${ios
+        ? `Tap <span class="ib-steps">${ICO.share} Share</span>, then <span class="ib-steps">${ICO.plus} Add to Home Screen</span>.`
+        : canPrompt
+          ? `Install it for one-tap access, like a real app.`
+          : `Open your browser menu and choose <strong>Add to Home Screen</strong> or <strong>Install app</strong>.`}
+    </div>
+    ${(!ios && canPrompt) ? `<button class="btn btn-sm btn-primary" data-action="install-app">Install</button>` : ''}
+    <button class="ib-close" data-action="dismiss-install" title="Dismiss">${ICO.x}</button>
+  </div>`;
+}
+
+S.showInstallBanner = shouldShowInstallBanner();
+
+function closeAllOverlays(){
+  S.eventId=null; S.projectId=null; S.showNewLead=false; S.showAddArtist=false; S.newArtistWelcome=null;
+  S.dayListDate=null; S.showNewProject=false; S.showFlightForm=false; S.showContract=false;
+  S.showTransportForm=false; S.showItinerary=false; S.itineraryEventId=null; S.showBlockTime=false; S.showAskAI=false; S.showDressCodeForm=false;
+  S.showEditEvent=false;
+  S.showNewInvoice=false; S.showInvoiceDoc=false; S.invoiceDocId=null; S.showNewOutsideBooking=false;
+  S.showDocumentBuilder=false; S.documentId=null; S.showAiEditNotice=false;
+  S.showAddCharge=false; S.showEventMenu=false; S.projectTab='tasks'; S.taskAssigneeFilter=null; S.showReminderPreview=false; S.showBookingConfirmation=false;
+  S.showMobileMenu=false; S.showAddRealUser=false;
+}
+let pendingViewTransition = false;
+let pendingViewDirection = 'right';
+function slideDirection(oldView, newView){
+  const oldIdx = navOrderIndex(oldView), newIdx = navOrderIndex(newView);
+  return (oldIdx!==-1 && newIdx!==-1 && newIdx<oldIdx) ? 'left' : 'right';
+}
+/* ============ URL ROUTING (hash-based -- works on static hosting with no server config) ============ */
+function pathForState(){
+  let seg = S.view;
+  if(S.view==='artist_detail' && S.artistDetailId) seg += '/'+S.artistDetailId;
+  if(S.view==='project_detail' && S.projectId) seg += '/'+S.projectId;
+  return '#/'+seg;
+}
+function syncURL(){
+  const path = pathForState();
+  if(location.hash !== path) history.pushState(null, '', path);
+}
+function applyHashToState(){
+  const hash = location.hash.replace(/^#\/?/, '');
+  if(!hash) return;
+  const [view, id] = hash.split('/');
+  if(view==='artist_detail'){ S.view='artist_detail'; S.artistDetailId=id; }
+  else if(view==='project_detail'){ S.view='project_detail'; S.projectId=id; }
+  else { S.view = view; }
+}
+window.addEventListener('popstate', ()=>{
+  const oldView = S.view;
+  closeAllOverlays();
+  applyHashToState();
+  pendingViewTransition = true;
+  pendingViewDirection = slideDirection(oldView, S.view);
+  render();
+});
+window.addEventListener('resize', repositionNavSliders);
+window.addEventListener('orientationchange', ()=> setTimeout(repositionNavSliders, 60));
+function navigate(view, opts={}){
+  const oldView = S.view;
+  closeAllOverlays();
+  const changed = oldView!==view;
+  S.view=view;
+  Object.assign(S, opts);
+  if(changed){ pendingViewTransition = true; pendingViewDirection = slideDirection(oldView, view); }
+  markSeen(view);
+  syncURL();
+  render();
+  window.scrollTo({top:0});
+}
+function openEvent(id){ closeAllOverlays(); S.eventId=id; render(); }
+function closeSheet(){ closeAllOverlays(); render(); }
+
+/* ============ GOOGLE CAL / ICS ============ */
+function gcalUrl(ev){
+  const artist = artistById(ev.artistId);
+  const start = ev.date.replace(/-/g,'')+'T'+ev.time.replace(':','')+'00';
+  const endDate = ev.endTime ? new Date(ev.date+'T'+ev.endTime+':00') : new Date(ev.date+'T'+ev.time+':00');
+  if(!ev.endTime) endDate.setHours(endDate.getHours()+3);
+  const end = endDate.toISOString().slice(0,19).replace(/[-:]/g,'').replace('T','T');
+  const details = `${ev.type} for ${artist.name}.${ev.clientName ? ` Client: ${ev.clientName}.` : ''} Booked via ASP.`;
+  const params = new URLSearchParams({action:'TEMPLATE', text:`${artist.name} — ${ev.type}`, dates:`${start}/${end}`, details, location:fullLocation(ev)});
+  return 'https://calendar.google.com/calendar/render?'+params.toString();
+}
+function downloadIcs(ev){
+  const artist = artistById(ev.artistId);
+  const start = ev.date.replace(/-/g,'')+'T'+ev.time.replace(':','')+'00';
+  const endDate = ev.endTime ? new Date(ev.date+'T'+ev.endTime+':00') : new Date(ev.date+'T'+ev.time+':00');
+  if(!ev.endTime) endDate.setHours(endDate.getHours()+3);
+  const end = endDate.toISOString().slice(0,19).replace(/[-:]/g,'');
+  const ics = ['BEGIN:VCALENDAR','VERSION:2.0','BEGIN:VEVENT',`UID:${ev.id}@asp-bookings`,`DTSTART:${start}`,`DTEND:${end}`,`SUMMARY:${artist.name} — ${ev.type}`,`LOCATION:${fullLocation(ev)}`,`DESCRIPTION:${ev.clientName ? `Client ${ev.clientName}. ` : ''}Booked via ASP.`,'END:VEVENT','END:VCALENDAR'].join('\r\n');
+  const blob = new Blob([ics], {type:'text/calendar'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${artist.name.replace(/\s/g,'_')}_${ev.date}.ics`; a.click();
+}
+
+function exportCSV(){
+  const filt = S.finArtistFilter==='all' ? S.events : S.events.filter(e=>e.artistId===S.finArtistFilter);
+  const rows = filt.filter(e=>['booked','paid'].includes(e.status));
+  const cols = ['Artist','Client','Date','Type','Venue','City','State','Price','Charges','Commission','Payout','Status'];
+  const csvEsc = (v)=>{ const s=String(v??''); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
+  const lines = [cols.join(',')];
+  rows.sort((a,b)=>a.date.localeCompare(b.date)).forEach(e=>{
+    const a = artistById(e.artistId); const sm = statusMeta(e);
+    lines.push([a.name, e.clientName, e.date, e.type, e.venue, e.city, e.state, e.price, chargesTotal(e), e.commission, e.balance+chargesTotal(e), sm.label].map(csvEsc).join(','));
+  });
+  const blob = new Blob([lines.join('\r\n')], {type:'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `asp-bookings-${S.finArtistFilter}-${fmtISO(new Date())}.csv`; a.click();
+  toast('CSV exported.', 'system');
+}
+
+function positionOneNavSlider(container, sliderClass, oldRect, axis){
+  const active = container.querySelector('.active');
+  if(!active) return;
+  const slider = document.createElement('div');
+  slider.className = sliderClass;
+  container.insertBefore(slider, container.firstChild);
+  const newRect = axis==='vertical'
+    ? {top:active.offsetTop, height:active.offsetHeight}
+    : {left:active.offsetLeft, width:active.offsetWidth};
+  if(oldRect){
+    slider.style.transition = 'none';
+    if(axis==='vertical'){ slider.style.top = oldRect.top+'px'; slider.style.height = oldRect.height+'px'; }
+    else { slider.style.left = oldRect.left+'px'; slider.style.width = oldRect.width+'px'; }
+    void slider.offsetHeight;
+    slider.style.transition = '';
+  }
+  if(axis==='vertical'){ slider.style.top = newRect.top+'px'; slider.style.height = newRect.height+'px'; }
+  else { slider.style.left = newRect.left+'px'; slider.style.width = newRect.width+'px'; }
+}
+// containerSel can match more than one element at once (e.g. the desktop rail's
+// .rail-nav is still in the DOM, just hidden, while the mobile slide-out menu
+// renders its own .rail-nav) -- every match needs its own slider, paired with the
+// old rect captured from the same position in DOM order.
+function positionNavSlider(containerSel, sliderClass, oldRects, axis){
+  document.querySelectorAll(containerSel).forEach((container, i)=>{
+    positionOneNavSlider(container, sliderClass, (oldRects||[])[i]||null, axis);
+  });
+}
+function captureNavRects(containerSel, axis){
+  return Array.from(document.querySelectorAll(containerSel)).map(container=>{
+    const active = container.querySelector('.active');
+    if(!active) return null;
+    return axis==='vertical' ? {top:active.offsetTop, height:active.offsetHeight} : {left:active.offsetLeft, width:active.offsetWidth};
+  });
+}
+// Viewport size changes (phone rotation, window resize) don't go through render(), but the
+// nav sliders' position/size is inline-styled pixels captured at the last render -- so a
+// container that resizes via CSS (e.g. .bottom-nav's safe-area-driven left/right insets)
+// leaves the slider stale. Re-measure the *existing* slider elements in place (no new
+// element, no animation) rather than reusing positionNavSlider, which always inserts a
+// fresh slider div and would double them up here.
+function repositionNavSliders(){
+  document.querySelectorAll('.rail-nav').forEach(container=>{
+    const active = container.querySelector('.active'), slider = container.querySelector('.rail-slider');
+    if(!active || !slider) return;
+    slider.style.transition = 'none';
+    slider.style.top = active.offsetTop+'px'; slider.style.height = active.offsetHeight+'px';
+    void slider.offsetHeight;
+    slider.style.transition = '';
+  });
+  document.querySelectorAll('.bottom-nav').forEach(container=>{
+    const active = container.querySelector('.active'), slider = container.querySelector('.bn-slider');
+    if(!active || !slider) return;
+    slider.style.transition = 'none';
+    slider.style.left = active.offsetLeft+'px'; slider.style.width = active.offsetWidth+'px';
+    void slider.offsetHeight;
+    slider.style.transition = '';
+  });
+}
+/* ============ RENDER: SHELL ============ */
+function render(){
+  const app = document.getElementById('app');
+  const prevScroll = { sheet: document.querySelector('.sheet')?.scrollTop, modal: document.querySelector('.modal')?.scrollTop };
+  const hadOverlay = !!document.querySelector('.overlay');
+  const oldRailRects = captureNavRects('.rail-nav', 'vertical');
+  const oldBnRects = captureNavRects('.bottom-nav', 'horizontal');
+  let exitClone = null, exitDir = null;
+  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(pendingViewTransition && !reduceMotion){
+    const oldContent = document.querySelector('.content');
+    const r = oldContent ? oldContent.getBoundingClientRect() : null;
+    if(r && r.width && r.height){
+      exitDir = pendingViewDirection;
+      exitClone = oldContent.cloneNode(true);
+      exitClone.querySelectorAll('[id]').forEach(el=>el.removeAttribute('id'));
+      exitClone.className = 'content-exit-clone ' + (exitDir==='right' ? 'exit-left' : 'exit-right');
+      exitClone.style.top = r.top+'px'; exitClone.style.left = r.left+'px';
+      exitClone.style.width = r.width+'px'; exitClone.style.height = r.height+'px';
+    }
+  }
+  if(!S.user){ app.innerHTML = renderLogin() + renderInstallBanner(); bindGlobal(); return; }
+  const isAdmin = isAdminUser(S.user);
+  app.innerHTML = `
+    <div class="shell">
+      ${isAdmin ? renderRail() : ''}
+      <div class="main">
+        ${isAdmin ? '' : renderArtistTopTabs()}
+        <div class="topbar">
+          <div style="display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;">
+            <button class="icon-btn hamburger-btn" data-action="open-mobile-menu" title="Menu">${ICO.menu}</button>
+            <h1 style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${pageTitle()}</h1>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex:none;">
+            <button class="btn askai-btn" data-action="open-ask-ai" title="Ask AI" style="background:var(--accent-wash);color:var(--accent-ink);border-color:transparent;">${ICO.sparkle}<span class="btn-label">Ask AI</span></button>
+            ${isAdmin ? `<button class="btn btn-primary newlead-btn" data-action="open-new-lead">${ICO.leads}<span class="btn-label">New Lead</span></button>` : ''}
+            ${renderUserChip()}
+          </div>
+        </div>
+        <div class="content${pendingViewTransition?(' view-enter-'+pendingViewDirection):''}">${renderView()}</div>
+      </div>
+    </div>
+    ${renderBottomNav(isAdmin)}
+    ${S.showMobileMenu ? renderMobileMenu(isAdmin) : ''}
+    ${S.showNewLead ? renderNewLeadModal() : ''}
+    ${S.showBlockTime ? renderBlockTimeModal() : ''}
+    ${S.showAskAI ? renderAskAIModal() : ''}
+    ${S.showNewInvoice ? renderNewInvoiceModal() : ''}
+    ${S.showNewOutsideBooking ? renderNewOutsideBookingModal() : ''}
+    ${S.showDocumentBuilder ? renderDocumentBuilderModal() : ''}
+    ${S.showAddArtist ? renderAddArtistModal() : ''}
+    ${S.newArtistWelcome ? renderWelcomeEmailPreview() : ''}
+    ${S.showAddRealUser ? renderAddRealUserModal() : ''}
+    ${S.dayListDate ? renderDayList() : ''}
+    ${S.showNewProject ? renderNewProjectModal() : ''}
+    ${S.eventId ? renderEventSheet(getEvent(S.eventId)) : ''}
+    ${S.showReminderPreview ? renderReminderPreview() : ''}
+    ${S.showBookingConfirmation ? renderBookingConfirmationPreview() : ''}
+    ${renderInstallBanner()}
+  `;
+  pendingViewTransition = false;
+  bindGlobal();
+  positionNavSlider('.rail-nav', 'rail-slider', oldRailRects, 'vertical');
+  positionNavSlider('.bottom-nav', 'bn-slider', oldBnRects, 'horizontal');
+  if(exitClone){
+    document.body.appendChild(exitClone);
+    setTimeout(()=>{ exitClone.remove(); }, 280);
+  }
+  if(hadOverlay){
+    document.querySelectorAll('.overlay, .modal, .sheet, .doc').forEach(el=>{ el.style.animationDuration='0.001ms'; });
+  }
+  if(prevScroll.sheet){ const s=document.querySelector('.sheet'); if(s) s.scrollTop = prevScroll.sheet; }
+  if(prevScroll.modal){ const m=document.querySelector('.modal'); if(m) m.scrollTop = prevScroll.modal; }
+}
+
+function renderDayEventRow(e, isAdmin, action, opts={}){
+  const a = artistById(e.artistId); const sm = statusMeta(e);
+  const timeLabel = e.time==='00:00'?'All day':fmtTime(e.time);
+  let primary, secondary;
+  if(opts.showDate){
+    // Multi-day lists (dashboard "upcoming"/"open leads") need the date on the row —
+    // single-day contexts (day-list popover, week/day calendar) already show the date
+    // as their own heading, so they keep the original time-led layout below.
+    if(isAdmin){
+      primary = `${esc(a.name)} — ${fmtDateWeekday(e.date)}`;
+      secondary = `${timeLabel} &middot; ${esc(e.clientName||e.type)}`;
+    } else {
+      primary = `${fmtDateWeekday(e.date)} &middot; ${timeLabel}`;
+      secondary = `${esc(e.venue||'Location TBD')} <span style="font-size:10px;opacity:.7;">&middot; ${esc(e.clientName||e.type)}</span>`;
+    }
+  } else {
+    primary = `${timeLabel} — ${isAdmin?esc(a.name):esc(e.clientName||e.type)}`;
+    secondary = `${isAdmin?esc(e.clientName||e.type):esc(e.venue)} &middot; ${esc(e.type)}`;
+  }
+  return `<button class="chooser-row" data-action="${action}" data-id="${e.id}">
+    <span class="avatar" data-slot="${a.slot}" style="width:32px;height:32px;font-size:11px;">${a.initials}</span>
+    <span style="flex:1;min-width:0;"><strong>${primary}</strong><span class="chooser-email">${secondary}</span></span>
+    <span class="pill ${sm.cls}">${sm.label}</span>
+  </button>`;
+}
+function renderDayList(){
+  const iso = S.dayListDate;
+  const isAdmin = isAdminUser(S.user);
+  const evs = S.events.filter(e=>e.date===iso && (isAdmin || e.artistId===S.user)).sort((a,b)=>a.time.localeCompare(b.time));
+  return `<div class="overlay center" data-action="dayoverlay-close">
+    <div class="modal" data-stop style="width:400px;">
+      <div class="sheet-head"><h2 style="font-size:1.1rem;">${fmtDate(iso)}</h2><button class="icon-btn" data-action="close-daylist">${ICO.x}</button></div>
+      <div class="sheet-body" style="padding-top:8px;gap:2px;">
+        ${evs.length? evs.map(e=>renderDayEventRow(e, isAdmin, 'open-event-from-day')).join('') : `<p style="color:var(--ink-3);font-size:13px;margin:0;">Nothing on this date.</p>`}
+      </div>
+    </div>
+  </div>`;
+}
+
+function pageTitle(){
+  if(S.showNewLead) return (S.newLeadForm.kind==='internal') ? 'New Internal Day' : 'New Lead';
+  if(S.eventId){ const ev=getEvent(S.eventId); return ev ? artistById(ev.artistId).name : ''; }
+  if(S.view==='project_detail'){ const p=getProject(S.projectId); return p ? p.title : 'Project'; }
+  const t = {
+    dashboard:'Dashboard', calendar:'Calendar', leads:'Open Leads', artists:'Artists', financials:'Financials', projects:'Projects', pricing:'Pricing',
+    travel:'Travel', international:'International Opportunities', daily_digest:'Daily Digest', messages:'Messages', outside_bookings:'Outside Bookings', documents:'Documents',
+    artist_detail: artistById(S.artistDetailId)?.name || '',
+    a_dashboard:'My Dashboard', a_calendar:'Calendar', a_gigs:'My Gigs', a_travel:'Travel', a_financials:'Financials', a_projects:'My Projects', settings:'Settings',
+  };
+  return t[S.view] || 'ASP Bookings';
+}
+
+function renderUserChip(){
+  if(isAdminUser(S.user)){
+    const u = adminById(S.user);
+    return `<div class="user-chip"><span class="avatar" data-slot="0" style="background:var(--ink);color:var(--page);width:22px;height:22px;font-size:10px;">${u.initials}</span> <span class="chip-name">${esc(u.name)}</span>
+      <button class="icon-btn" data-action="logout" title="Switch user">${ICO.logout}</button></div>`;
+  }
+  const a = artistById(S.user);
+  return `<div class="user-chip"><span class="avatar" data-slot="${a.slot}" style="width:22px;height:22px;font-size:10px;">${a.initials}</span> <span class="chip-name">${esc(a.name)}</span>
+    <button class="icon-btn" data-action="logout" title="Switch user">${ICO.logout}</button></div>`;
+}
+
+const MGMT_NAV_ITEMS = [
+  ['dashboard','Dashboard',ICO.dash], ['calendar','Calendar',ICO.cal], ['leads','Leads',ICO.leads],
+  ['artists','Artists',ICO.artists], ['travel','Travel',ICO.suitcase], ['projects','Projects',ICO.kanban], ['pricing','Pricing',ICO.tag], ['financials','Financials',ICO.money],
+  ['outside_bookings','Outside Bookings',ICO.leads],
+  ['documents','Documents',ICO.leads],
+  ['messages','Messages',ICO.sms],
+];
+// Outside Bookings and Documents are office/bookkeeping work, not something Ilan (CEO) needs on
+// his simplified view — hide those nav items for that login only.
+const CEO_HIDDEN_NAV_VIEWS = ['outside_bookings','documents'];
+function mgmtNavItemsFor(userId){
+  return MGMT_NAV_ITEMS.filter(([v])=> !(CEO_HIDDEN_NAV_VIEWS.includes(v) && userId==='admin_ceo'));
+}
+/* ============ "NEW SINCE YOU LAST LOOKED" BADGES ============ */
+// Per-section last-visited date (YYYY-MM-DD), persisted so the badge survives a reload.
+// A key with no stored date is seeded to today on first load, rather than treating all
+// existing history as "new" the moment this feature ships.
+const LAST_SEEN_LS_KEY = 'asp_mock_lastseen_v1';
+function loadLastSeen(){ try{ const raw = localStorage.getItem(LAST_SEEN_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
+function saveLastSeen(){ try{ localStorage.setItem(LAST_SEEN_LS_KEY, JSON.stringify(LAST_SEEN)); }catch(e){} }
+let LAST_SEEN = loadLastSeen() || {};
+['leads','financials','messages'].forEach(k=>{ if(!LAST_SEEN[k]) LAST_SEEN[k] = fmtISO(new Date()); });
+saveLastSeen();
+function markSeen(key){ if(LAST_SEEN[key]===undefined) return; LAST_SEEN[key] = fmtISO(new Date()); saveLastSeen(); }
+function newLeadsCount(){
+  const since = LAST_SEEN.leads;
+  return S.events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status) && e.createdAt && e.createdAt>since).length;
+}
+function newPaymentsCount(){
+  const since = LAST_SEEN.financials;
+  return S.events.filter(e=>(e.depositReceivedDate && e.depositReceivedDate>since) || (e.balanceReceivedDate && e.balanceReceivedDate>since)).length;
+}
+function newMessagesCount(){ return 0; } // WhatsApp isn't connected yet -- nothing to count.
+function navBadgeCount(v){
+  if(v==='leads') return newLeadsCount();
+  if(v==='financials') return newPaymentsCount();
+  if(v==='messages') return newMessagesCount();
+  return 0;
+}
+function navBadge(v){
+  const n = navBadgeCount(v);
+  return n>0 ? `<span class="nav-badge">${n>9?'9+':n}</span>` : '';
+}
+const ARTIST_NAV_ITEMS = [
+  ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',ICO.mic], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
+];
+const APP_VERSION = 'v1.1.0'; // v1.1.0: ASP workspace extracted into its own module (parent-app Phase 1a)
+const OVERTIME_PER_HALF_HOUR = 250;
+function navOrderIndex(v){
+  const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
+  return list.findIndex(([x])=>x===v);
+}
+function isNavActive(v){ return S.view===v || (v==='artists' && S.view==='artist_detail') || ((v==='projects'||v==='a_projects') && S.view==='project_detail'); }
+
+function renderRail(){
+  return `<div class="rail">
+    <div class="wordmark"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
+    <div class="rail-nav">
+      ${mgmtNavItemsFor(S.user).map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span>${l}</a>`).join('')}
+      <a href="#" class="rail-link ${isNavActive('settings')?'active':''}" data-action="nav" data-view="settings">${ICO.settings}Settings</a>
+    </div>
+    <div class="rail-foot">
+      <button class="btn btn-ghost btn-block" data-action="load-real-projects" style="justify-content:flex-start;font-weight:600;color:var(--ink-3);">Load real projects</button>
+      <button class="btn btn-ghost btn-block" data-action="reset-demo" style="justify-content:flex-start;font-weight:600;color:var(--ink-3);">Reset demo data</button>
+      <div style="padding:10px 10px 0;font-size:11px;color:var(--ink-3);">${APP_VERSION}</div>
+    </div>
+  </div>`;
+}
+
+function renderArtistTopTabs(){
+  return `<div class="artist-top-tabs">
+  <div class="topbar" style="border-bottom:none;padding-bottom:0;">
+    <div class="wordmark"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
+    <button class="icon-btn artist-settings-btn" data-action="nav" data-view="settings" title="Settings">${ICO.settings}</button>
+  </div>
+  <div style="padding:0 28px;">
+    <div class="tabbar">
+      ${ARTIST_NAV_ITEMS.map(([v,l])=>`<a href="#" class="tab ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}">${l}</a>`).join('')}
+    </div>
+  </div>
+  </div>`;
+}
+function renderBottomNav(isAdmin){
+  const items = isAdmin ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS;
+  return `<div class="bottom-nav">
+    ${items.map(([v,l,ic])=>`<a href="#" class="bn-item ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span><span>${l}</span></a>`).join('')}
+  </div>`;
+}
+function renderMobileMenu(isAdmin){
+  const who = isAdmin ? adminById(S.user) : artistById(S.user);
+  return `<div class="overlay left" data-action="mobilemenu-close">
+    <div class="mobile-menu-panel" data-stop>
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div class="wordmark"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
+        <button class="icon-btn" data-action="close-mobile-menu">${ICO.x}</button>
+      </div>
+      <div class="rail-nav">
+        ${(isAdmin ? mgmtNavItemsFor(S.user) : ARTIST_NAV_ITEMS).map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span>${l}</a>`).join('')}
+        <a href="#" class="rail-link ${isNavActive('settings')?'active':''}" data-action="nav" data-view="settings">${ICO.settings}Settings</a>
+      </div>
+      <div class="rail-foot">
+        <div style="display:flex;align-items:center;gap:10px;padding:4px 10px 12px;">
+          <span class="avatar" data-slot="${isAdmin?'0':who.slot}" style="width:32px;height:32px;font-size:11px;${isAdmin?'background:var(--ink);color:var(--page);':''}">${who.initials}</span>
+          <span style="font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(who.name)}</span>
+        </div>
+        ${isAdmin? `<a href="#" class="rail-link" data-action="load-real-projects">${ICO.plus} Load real projects</a>`:''}
+        <a href="#" class="rail-link" data-action="logout" style="color:var(--crit);">${ICO.logout} Log Out</a>
+        <div style="padding:10px 10px 0;font-size:11px;color:var(--ink-3);">${APP_VERSION}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderView(){
+  if(S.view==='settings') return renderSettingsPage();
+  if(S.view==='project_detail') return renderProjectDetail();
+  if(isAdminUser(S.user)){
+    if(S.view==='dashboard') return renderMgmtDashboard();
+    if(S.view==='calendar') return renderCalendarPage(S.events, {showFilter:true});
+    if(S.view==='leads') return renderLeadsPage();
+    if(S.view==='artists') return renderArtistsPage();
+    if(S.view==='artist_detail') return renderArtistDetailPage(S.artistDetailId);
+    if(S.view==='financials') return renderFinancialsPage();
+    if(S.view==='outside_bookings') return renderOutsideBookingsPage();
+    if(S.view==='documents') return renderDocumentsPage();
+    if(S.view==='messages') return renderMessagesPage();
+    if(S.view==='projects') return renderProjectsBoard();
+    if(S.view==='pricing') return renderPricingPage();
+    if(S.view==='international') return renderInternationalPage();
+    if(S.view==='daily_digest') return renderDailyDigestPage();
+    if(S.view==='travel') return renderTravelPage(S.events);
+  } else {
+    if(S.view==='a_dashboard') return renderArtistDashboard(S.user);
+    if(S.view==='a_calendar') return renderCalendarPage(eventsFor(S.user), {noLegend:true, singleArtist:true, showBlockButton:true});
+    if(S.view==='a_gigs') return renderArtistGigs(S.user);
+    if(S.view==='a_financials') return renderArtistFinancials(S.user);
+    if(S.view==='a_travel') return renderTravelPage(eventsFor(S.user), {singleArtist:true});
+    if(S.view==='a_projects') return renderArtistProjects(S.user);
+  }
+  return '';
+}
+
+/* ============ SETTINGS ============ */
+const THEME_OPTIONS = [
+  ['light', 'Light', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>'],
+  ['dark', 'Dark', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>'],
+];
+const NOTIFY_ITEMS = [
+  ['newLeads', 'New leads', 'A new booking request comes in', 'ASP books a new gig for you'],
+  ['balanceReminders', 'Balance reminders', "A client's remaining balance is coming due", "A client's remaining balance is coming due"],
+  ['bookingConfirmations', 'Booking confirmations', 'A gig is signed and officially locked in', 'A gig is signed and officially locked in'],
+  ['weeklyGigDigest', 'Weekly gig digest', '', 'A weekly email listing your gigs for the coming week', true],
+  ['dayOfReminder', 'Day-of reminder', '', "A reminder email the morning of each gig", true],
+];
+function renderRealPasskeySection(){
+  if(S.realPasskeyBusy || S.realPasskeys===null){
+    return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0 10px;color:var(--ink-3);font-size:12.5px;">${markLoader(16)} Loading passkeys…</div>`;
+  }
+  const list = S.realPasskeys;
+  return `
+    ${list.length===0 ? `<p style="color:var(--ink-3);font-size:12.5px;margin:0 0 12px;">No passkeys yet on this account.</p>` : list.map(pk=>`<div class="passkey-row">
+      <div class="passkey-ico">${ICO.key}</div>
+      <div style="flex:1;min-width:0;"><strong style="font-size:13px;">${esc(pk.label)}</strong><br/><span style="font-size:11.5px;color:var(--ink-3);">${pk.addedAt?'Added '+fmtDateShort(pk.addedAt):''}</span></div>
+      <button class="icon-btn" data-action="remove-real-passkey" data-id="${esc(pk.id)}" title="Remove">${ICO.x}</button>
+    </div>`).join('')}
+    <button class="btn btn-sm" style="margin-top:12px;" data-action="add-real-passkey">${ICO.plus} Add a passkey</button>
+  `;
+}
+function renderUsersDashboardCard(){
+  const roster = S.realRoster;
+  return `<div class="card card-pad" style="margin-bottom:20px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <h3 style="margin:0;">Users</h3>
+      <button class="btn btn-sm btn-primary" data-action="open-add-real-user">${ICO.plus} Add Person</button>
+    </div>
+    ${!roster ? `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">Loading...</p>` : `
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 12px;">Real accounts for ASP Bookings. Add someone here, then they sign in themselves with a passkey or email link at that address.</p>
+    <div class="u-label" style="margin-bottom:6px;">Office</div>
+    ${roster.admins.length? roster.admins.map(u=>`<div class="settings-row">
+      <div><h4>${esc(u.name)} <span style="font-weight:400;color:var(--ink-3);">— ${esc(ADMIN_ROLE_LABELS[u.role]||u.role)}</span></h4><p>${esc(u.email)}</p></div>
+      <span class="pill ${u.user_id?'pill-good':''}">${u.user_id?'Active':'Invited'}</span>
+    </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0 0 12px;">No office accounts yet.</p>`}
+    <div class="u-label" style="margin:14px 0 6px;">Artists</div>
+    ${roster.artists.length? roster.artists.map(a=>`<div class="settings-row">
+      <div><h4>${esc(a.name)} <span style="font-weight:400;color:var(--ink-3);">— ${esc(a.role)}</span></h4><p>${esc(a.email)}</p></div>
+      <span class="pill ${a.user_id?'pill-good':''}">${a.user_id?'Active':'Invited'}</span>
+    </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0;">No real artist accounts yet.</p>`}
+    `}
+  </div>`;
+}
+function renderAddRealUserModal(){
+  const f = S.addRealUserForm;
+  const kind = f.kind || 'artist';
+  const adminRole = f.adminRole || 'admin_bookings';
+  const artistRole = f.artistRole || 'Singer';
+  return `<div class="overlay center" data-action="overlay-close-addrealuser">
+    <div class="modal" data-stop data-form="addrealuser" style="width:420px;">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">Add Person</h2><button class="icon-btn" data-action="close-add-real-user">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <div class="chip-row" style="margin-bottom:4px;">
+          <button class="filter-chip ${kind==='artist'?'sel':''}" data-action="pick-real-user-kind" data-kind="artist">Artist</button>
+          <button class="filter-chip ${kind==='admin'?'sel':''}" data-action="pick-real-user-kind" data-kind="admin">Office</button>
+        </div>
+        <div class="field"><label>Full Name</label><input data-field="name" value="${esc(f.name||'')}" placeholder="Full name" autofocus/></div>
+        <div class="field"><label>Real Email</label><input type="email" data-field="email" value="${esc(f.email||'')}" placeholder="them@realdomain.com"/></div>
+        ${kind==='artist' ? `<div class="field"><label>Role</label>
+          <div class="chip-row">${ARTIST_ROLES.map(r=>`<button class="filter-chip ${artistRole===r?'sel':''}" data-action="pick-real-artist-role" data-role="${r}">${r}</button>`).join('')}</div>
+        </div>` : `<div class="field"><label>Desk</label>
+          <div class="chip-row">${Object.entries(ADMIN_ROLE_LABELS).map(([k,l])=>`<button class="filter-chip ${adminRole===k?'sel':''}" data-action="pick-real-admin-role" data-role="${k}">${l}</button>`).join('')}</div>
+        </div>`}
+        <p style="font-size:11px;color:var(--ink-3);margin:0;">This creates a real account. They sign in themselves at this email — nothing is emailed automatically yet.</p>
+        <button class="btn btn-primary btn-block" data-action="confirm-add-real-user">Add Person</button>
+      </div>
+    </div>
+  </div>`;
+}
+function renderSettingsPage(){
+  const isAdmin = isAdminUser(S.user);
+  const who = isAdmin ? adminById(S.user) : artistById(S.user);
+  const st = getUserSettings(S.user);
+  const themeIdx = THEME_OPTIONS.findIndex(([k])=>k===THEME_PREF);
+  const isReal = !!S.realSession;
+  if(isReal && S.realPasskeys===null && !S.realPasskeyBusy) loadRealPasskeys();
+  if(isReal && isAdmin && S.realRoster===null && !S.realRosterBusy) loadRealRoster();
+  return `
+  <div class="card card-pad" style="margin-bottom:20px;">
+    <h3 style="margin-bottom:12px;">Sign-in &amp; Security</h3>
+    ${isReal ? renderRealPasskeySection() : `
+    ${st.passkeys.map(pk=>`<div class="passkey-row">
+      <div class="passkey-ico">${ICO.key}</div>
+      <div style="flex:1;min-width:0;"><strong style="font-size:13px;">${esc(pk.label)}</strong><br/><span style="font-size:11.5px;color:var(--ink-3);">Added ${fmtDateShort(pk.addedAt)}</span></div>
+      ${st.passkeys.length>1 ? `<button class="icon-btn" data-action="remove-passkey" data-id="${pk.id}" title="Remove">${ICO.x}</button>` : ''}
+    </div>`).join('')}
+    <button class="btn btn-sm" style="margin-top:12px;" data-action="add-passkey">${ICO.plus} Add a passkey</button>
+    `}
+  </div>
+
+  ${isReal && isAdmin ? renderUsersDashboardCard() : ''}
+
+  <div class="card card-pad" style="margin-bottom:20px;">
+    <h3 style="margin-bottom:12px;">Connected Accounts</h3>
+    <div class="settings-row" style="border-bottom:none;padding-bottom:0;">
+      <div><h4>Google Calendar</h4><p>${st.calendarConnected? `Connected as ${esc(st.calendarEmail)}` : 'Not connected'}</p></div>
+      ${st.calendarConnected
+        ? `<button class="btn btn-sm btn-ghost" data-action="disconnect-calendar">Disconnect</button>`
+        : `<button class="btn btn-sm btn-primary" data-action="connect-calendar">Connect</button>`}
+    </div>
+  </div>
+
+  <div class="card card-pad" style="margin-bottom:20px;">
+    <h3 style="margin-bottom:8px;">Notifications</h3>
+    ${NOTIFY_ITEMS.filter(([,,,,artistOnly])=>!artistOnly||!isAdmin).map(([key,label,adminSub,artistSub])=>`
+    <div class="settings-row">
+      <div><h4>${label}</h4><p>${isAdmin?adminSub:artistSub}</p></div>
+      ${isAdmin
+        ? `<label class="switch"><input type="checkbox" data-action="toggle-notif" data-key="${key}" data-channel="inApp" ${st.notify[key].inApp?'checked':''}/><span class="switch-track"></span></label>`
+        : `<div style="display:flex;gap:14px;">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+              <span class="u-label" style="font-size:9px;">In-app</span>
+              <label class="switch"><input type="checkbox" data-action="toggle-notif" data-key="${key}" data-channel="inApp" ${st.notify[key].inApp?'checked':''}/><span class="switch-track"></span></label>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+              <span class="u-label" style="font-size:9px;">Email</span>
+              <label class="switch"><input type="checkbox" data-action="toggle-notif" data-key="${key}" data-channel="email" ${st.notify[key].email?'checked':''}/><span class="switch-track"></span></label>
+            </div>
+          </div>`}
+    </div>`).join('')}
+  </div>
+
+  <div class="card card-pad" style="margin-bottom:20px;">
+    <h3 style="margin-bottom:8px;">Appearance</h3>
+    <div class="settings-row" style="border-bottom:none;">
+      <h4>Theme</h4>
+      <div class="seg">
+        <div class="seg-thumb" style="transform:translateX(${themeIdx*38}px);"></div>
+        ${THEME_OPTIONS.map(([k,l,ic])=>`<button class="${k===THEME_PREF?'active':''}" data-action="set-theme" data-theme-pref="${k}" title="${l}">${ic}</button>`).join('')}
+      </div>
+    </div>
+  </div>
+
+  <div class="card card-pad">
+    <h3 style="margin-bottom:2px;">About</h3>
+    <p style="font-size:12.5px;color:var(--ink-2);margin:0;">Signed in as <strong>${esc(who.name)}</strong></p>
+    <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">ASP Bookings ${APP_VERSION}</p>
+  </div>
+  `;
+}
+
+/* ============ LOGIN ============ */
+function renderLogin(){
+  if(S.showChooser) return renderAccountChooser();
+  if(S.showRealSignIn) return renderRealSignIn();
+  if(S.realSignInNotFound) return renderRealSignInNotFound();
+  return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
+    <div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP<small>Bookings</small></div>
+    <p style="color:var(--ink-2);font-size:13.5px;margin:16px 0 26px;">Sign in to view your schedule and bookings.</p>
+    <button class="btn btn-primary btn-block" data-action="show-chooser">Sign In (Demo Mode)</button>
+    ${supabaseClient ? `
+    <div style="display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--ink-3);font-size:11px;">
+      <div style="flex:1;height:1px;background:var(--border);"></div>or<div style="flex:1;height:1px;background:var(--border);"></div>
+    </div>
+    <button class="btn btn-block" data-action="real-signin-passkey">${ICO.key} Sign in with Passkey</button>
+    <button class="btn btn-block btn-ghost" style="margin-top:8px;" data-action="open-real-signin">Sign in with email</button>
+    ` : ''}
+  </div></div>`;
+}
+function renderRealSignIn(){
+  const f = S.realSignInEmail;
+  if(S.realSignInSent){
+    return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
+      <div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP<small>Bookings</small></div>
+      <h2 style="font-size:1.05rem;margin:16px 0 6px;">Check your email</h2>
+      <p style="color:var(--ink-2);font-size:13px;margin:0 0 22px;">We sent a sign-in link to <strong>${esc(f)}</strong>. Click it to continue.</p>
+      <button class="btn btn-block btn-ghost" data-action="close-real-signin">Use a different email</button>
+    </div></div>`;
+  }
+  return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
+    <button class="icon-btn chooser-back" data-action="close-real-signin">${ICO.chev('l')}</button>
+    <div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP<small>Bookings</small></div>
+    <p style="color:var(--ink-2);font-size:13.5px;margin:16px 0 20px;">Enter your email and we'll send you a sign-in link.</p>
+    <div class="field" data-form="realsignin" style="text-align:left;"><input id="realSignInEmailInput" type="email" data-field="realSignInEmail" value="${esc(f)}" placeholder="you@aspmanagement.com" autofocus/></div>
+    <button class="btn btn-primary btn-block" style="margin-top:10px;" data-action="submit-magic-link">Send Sign-In Link</button>
+  </div></div>`;
+}
+function renderRealSignInNotFound(){
+  return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
+    <div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP<small>Bookings</small></div>
+    <h2 style="font-size:1.05rem;margin:16px 0 6px;">No account set up yet</h2>
+    <p style="color:var(--ink-2);font-size:13px;margin:0 0 22px;">You're signed in as <strong>${esc(S.realSession?.email||'')}</strong>, but the office hasn't added you to ASP Bookings yet. Contact the office to get set up.</p>
+    <button class="btn btn-block btn-ghost" data-action="real-signout">Sign Out</button>
+  </div></div>`;
+}
+function renderAccountChooser(){
+  return `<div class="login-wrap"><div class="login-card chooser">
+    <button class="icon-btn chooser-back" data-action="hide-chooser">${ICO.chev('l')}</button>
+    <h2 style="font-size:1.15rem;text-align:center;">Choose an account</h2>
+    <p style="text-align:center;color:var(--ink-2);font-size:12.5px;margin:4px 0 6px;">to continue to ASP Bookings</p>
+    <div class="chooser-list">
+      <div class="chooser-divider">ASP Office</div>
+      ${ADMIN_USERS.map(u=>`<button class="chooser-row" data-action="login" data-user="${u.id}">
+        <span class="avatar" data-slot="0" style="width:32px;height:32px;font-size:11px;background:var(--ink);color:var(--page);">${u.initials}</span>
+        <span><strong>${esc(u.name)}</strong><span class="chooser-email">${esc(u.email)}</span></span>
+      </button>`).join('')}
+      <div class="chooser-divider">Artists</div>
+      ${ARTISTS.map(a=>`<button class="chooser-row" data-action="login" data-user="${a.id}">
+        <span class="avatar" data-slot="${a.slot}" style="width:32px;height:32px;font-size:11px;">${a.initials}</span>
+        <span><strong>${esc(a.name)}</strong><span class="chooser-email">${esc(a.email)}</span></span>
+      </button>`).join('')}
+    </div>
+    <p style="text-align:center;color:var(--ink-3);font-size:10.5px;margin-top:16px;">Demo mode — pick any account to preview that person's view. In production, each person only ever sees their own account.</p>
+  </div></div>`;
+}
+
+/* ============ MGMT DASHBOARD ============ */
+function renderWelcomeHeader(name){
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+    <span class="mark" style="height:22px;"><i></i><i></i><i></i><i></i><i></i></span>
+    <h2 style="font-family:var(--font-display);font-size:1.4rem;margin:0;">Welcome, ${esc(name)}</h2>
+  </div>`;
+}
+function renderMgmtDashboard(){
+  const isCEO = S.user==='admin_ceo';
+  if(isCEO){
+    return `
+    ${renderWelcomeHeader(adminById(S.user).displayName)}
+    ${renderUpcomingGigsCard(S.events, {days:7, showArtist:true})}
+    ${renderOpenLeadsCard(S.events)}
+    `;
+  }
+  const open = S.events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status));
+  const awaitingDeposit = S.events.filter(e=>e.status==='contract_sent');
+  const awaitingBalance = S.events.filter(e=>e.status==='booked' && !e.balanceReceived);
+  const upcoming30 = S.events.filter(e=>!isPast(e.date) && daysUntil(e.date)<=30 && ['booked','paid'].includes(e.status));
+  const conflictPairs = allConflictPairs().filter(([a,b])=>!isPast(a.date)||!isPast(b.date));
+  const intlTrips = S.events.filter(e=>isInternational(e) && !e.intlOpportunityDismissed && !isPast(e.date) && ['booked','paid'].includes(e.status)).sort((a,b)=>a.date.localeCompare(b.date));
+  const needsTravel = S.events.filter(e=>!isPast(e.date) && ((e.flightNeeded && !e.flightBooked) || (e.groundTransportNeeded && !e.groundTransportBooked)));
+  const todayGigs = S.events.filter(e=>e.date===fmtISO(new Date()) && ['booked','paid'].includes(e.status));
+
+  return `
+  ${renderWelcomeHeader(adminById(S.user).displayName)}
+  <div class="grid stat-row" style="margin-bottom:20px;">
+    <div class="card stat-tile" style="cursor:pointer;" data-action="nav-today-gigs"><span class="u-label">Gigs Today</span><span class="val">${todayGigs.length}</span><span class="sub">${fmtDateShort(fmtISO(new Date()))}</span></div>
+    <div class="card stat-tile" style="cursor:pointer;" data-action="nav" data-view="calendar"><span class="u-label">Upcoming Gigs · 30 days</span><span class="val">${upcoming30.length}</span><span class="sub">Booked or paid, next 30 days</span></div>
+    <div class="card stat-tile" style="cursor:pointer;" data-action="nav" data-view="leads"><span class="u-label">Open Leads</span><span class="val">${open.length}</span><span class="sub">Awaiting contract / deposit</span></div>
+    <div class="card stat-tile" style="cursor:pointer;" data-action="nav" data-view="leads"><span class="u-label">Awaiting Balance</span><span class="val">${awaitingBalance.length}</span><span class="sub">Booked, balance not yet in</span></div>
+  </div>
+  <div class="grid stat-row" style="margin-bottom:20px;">
+    ${statTile('International Opportunities', intlTrips.length, 'Artist traveling — worth adding nearby bookings', 'international')}
+    ${statTile('Travel To Arrange', needsTravel.length, 'Flights or drivers still needed', 'travel')}
+    ${statTile('Daily Digest', open.length + awaitingBalance.length, 'Leads to follow up + payments due', 'daily_digest')}
+    ${statTile('Open Messages', '—', 'Not connected yet', 'messages')}
+  </div>
+
+  ${conflictPairs.length ? `
+  <div class="card card-pad" style="margin-bottom:20px;border-color:var(--crit);background:var(--crit-wash);">
+    <div style="display:flex;align-items:center;gap:8px;color:var(--crit-ink);font-weight:700;font-size:13px;">${ICO.alert} Scheduling conflicts (${conflictPairs.length})</div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px;">
+      ${conflictPairs.map(([x,y])=>{const ax=artistById(x.artistId);
+        return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--crit-ink);cursor:pointer;" data-action="open-event" data-id="${x.id}">
+        <span><strong>${esc(ax.name)}</strong> — ${fmtDateShort(x.date)} (${esc(x.clientName||x.type)}) overlaps ${fmtDateShort(y.date)} (${esc(y.clientName||y.type)})</span>
+        <span style="text-decoration:underline;">Resolve</span></div>`;}).join('')}
+    </div>
+  </div>` : ''}
+
+  <div class="section-head"><h2>Open Leads</h2><button class="btn btn-sm btn-ghost" data-action="nav" data-view="leads">View all ${ICO.chev('r')}</button></div>
+  ${renderEventTable(open.slice(0,6), {showArtist:true})}
+  `;
+}
+function statTile(label, val, sub, view){
+  const clickable = view ? `style="cursor:pointer;" data-action="nav" data-view="${view}"` : '';
+  return `<div class="card stat-tile" ${clickable}>
+    <span class="u-label">${label}</span><span class="val">${val}</span><span class="sub">${sub}</span></div>`;
+}
+function renderUpcomingGigsCard(events, opts={}){
+  const days = opts.days || 7;
+  const upcoming = events.filter(e=>!isPast(e.date) && daysUntil(e.date)<days && ['booked','paid'].includes(e.status))
+    .sort((a,b)=> a.date===b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date));
+  return `
+  <div class="section-head"><h2>Upcoming — Next ${days} Days</h2></div>
+  ${upcoming.length? `<div class="card">${upcoming.map(e=>renderDayEventRow(e, !!opts.showArtist, 'open-event', {showDate:true})).join('')}</div>`
+    : `<div class="card empty">Nothing coming up in the next ${days} days.</div>`}
+  `;
+}
+function renderOpenLeadsCard(events){
+  const open = events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status)).sort((a,b)=>a.date.localeCompare(b.date));
+  return `
+  <div class="section-head" style="margin-top:20px;"><h2>Open Leads (${open.length})</h2></div>
+  ${open.length? `<div class="card">${open.map(e=>renderDayEventRow(e, true, 'open-event', {showDate:true})).join('')}</div>`
+    : `<div class="card empty">No open leads right now.</div>`}
+  `;
+}
+function subpageBack(){
+  return `<button class="icon-btn" data-action="nav" data-view="dashboard" title="Back to Dashboard" style="margin-bottom:14px;">${ICO.chev('l')}</button>`;
+}
+function buildDailyDigestWhatsAppText(openLeads){
+  const lines = [`Good morning! Here's today's follow-up list:`, ''];
+  lines.push(`📋 Open Leads (${openLeads.length})`);
+  if(openLeads.length) openLeads.forEach(e=>{ const a=artistById(e.artistId); lines.push(`• ${a.name} — ${e.clientName||e.type}, ${fmtDateShort(e.date)} (${-daysUntil(e.createdAt)}d old)`); });
+  else lines.push('None — all caught up.');
+  lines.push('', `Let's follow up on these today!`);
+  return lines.join('\n');
+}
+function renderDailyDigestPage(){
+  const openLeads = S.events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status)).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+  const awaitingDeposit = S.events.filter(e=>e.status==='contract_sent');
+  const awaitingBalance = S.events.filter(e=>e.status==='booked' && !e.balanceReceived);
+  const row = (e, extra)=>{ const a=artistById(e.artistId); return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;" data-action="open-event" data-id="${e.id}">
+    <span><strong>${esc(a.name)}</strong> — ${esc(e.clientName||e.type)}, ${fmtDateShort(e.date)}</span>
+    <span class="u-label">${esc(extra)}</span>
+  </div>`; };
+  return `
+  ${subpageBack()}
+  <div class="section-head"><h2>Daily Digest</h2></div>
+  <p style="font-size:12.5px;color:var(--ink-3);margin:-8px 0 20px;">A preview of what the morning email will contain once it's wired to a real send — see WORKFLOWS.md §1.</p>
+
+  <div class="section-head"><h2>Open Leads Needing Follow-Up (${openLeads.length})</h2></div>
+  ${openLeads.length? `<div class="card card-pad" style="margin-bottom:20px;">${openLeads.map(e=>row(e, `${-daysUntil(e.createdAt)}d old`)).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing open — all caught up.</div>`}
+
+  <div class="section-head"><h2>Awaiting Down Payment (${awaitingDeposit.length})</h2></div>
+  ${awaitingDeposit.length? `<div class="card card-pad" style="margin-bottom:20px;">${awaitingDeposit.map(e=>row(e, money(Math.round(e.price*0.15)))).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
+
+  <div class="section-head"><h2>Awaiting Final Payment (${awaitingBalance.length})</h2></div>
+  ${awaitingBalance.length? `<div class="card card-pad" style="margin-bottom:20px;">${awaitingBalance.map(e=>row(e, money(zelleBalance(e)))).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
+
+  <button class="btn btn-primary" data-action="copy-daily-digest">${ICO.share} Copy WhatsApp Message for Ilan (Open Leads)</button>
+  `;
+}
+function renderInternationalPage(){
+  const intlTrips = S.events.filter(e=>isInternational(e) && !e.intlOpportunityDismissed && !isPast(e.date) && ['booked','paid'].includes(e.status)).sort((a,b)=>a.date.localeCompare(b.date));
+  return `
+  ${subpageBack()}
+  <div class="section-head"><h2>International Opportunities (${intlTrips.length})</h2></div>
+  ${!intlTrips.length ? `<div class="card empty">Nothing here yet.</div>` : `
+  <div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
+    ${intlTrips.map(e=>{const ae=artistById(e.artistId);
+      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border);">
+      <span style="cursor:pointer;" data-action="open-event" data-id="${e.id}"><strong>${esc(ae.name)}</strong> — ${esc(e.city)}, ${esc(e.state)}, ${fmtDateShort(e.date)}</span>
+      <span style="display:flex;align-items:center;gap:10px;flex:none;">
+        <span style="cursor:pointer;text-decoration:underline;" data-action="open-event" data-id="${e.id}">View</span>
+        <button class="icon-btn" data-action="dismiss-intl" data-id="${e.id}" title="Dismiss" style="width:22px;height:22px;">${ICO.x}</button>
+      </span></div>`;}).join('')}
+  </div>`}
+  `;
+}
+function renderTravelPage(events, opts={}){
+  const showArtist = !opts.singleArtist;
+  const upcoming = e=>!isPast(e.date);
+  const needsFlight = events.filter(e=>upcoming(e) && e.flightNeeded && !e.flightBooked);
+  const needsTransport = events.filter(e=>upcoming(e) && e.groundTransportNeeded && !e.groundTransportBooked);
+  const readyItineraries = events.filter(e=>upcoming(e) && (e.flightBooked || e.groundTransportBooked)).sort((a,b)=>a.date.localeCompare(b.date));
+  const travelRow = (e, needLabel)=>{
+    const a = artistById(e.artistId);
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;" data-action="open-event" data-id="${e.id}">
+      <span>${showArtist?`<strong>${esc(a.name)}</strong> — `:''}${esc(e.type)}${e.clientName?` (${esc(e.clientName)})`:''}, ${fmtDateShort(e.date)}</span>
+      <span class="pill pill-warn">${needLabel}</span>
+    </div>`;
+  };
+  return `
+  ${opts.singleArtist ? '' : `
+  <div class="section-head"><h2>Needs Arranging</h2></div>
+  ${(!needsFlight.length && !needsTransport.length) ? `<div class="card empty">Nothing needs arranging right now.</div>` : `
+  <div class="card card-pad" style="display:flex;flex-direction:column;gap:2px;margin-bottom:20px;">
+    ${needsFlight.map(e=>travelRow(e,'Needs flight')).join('')}
+    ${needsTransport.map(e=>travelRow(e,'Needs driver')).join('')}
+  </div>`}
+  `}
+
+  <div class="section-head"><h2>Upcoming Itineraries (${readyItineraries.length})</h2></div>
+  ${!readyItineraries.length ? `<div class="card empty">Nothing here yet.</div>` : `
+  <div class="card u-scroll-x table-cards"><table>
+    <thead><tr>${showArtist?'<th>Artist</th>':''}<th>Type</th><th>Date</th><th>Flight</th><th>Ground</th><th></th></tr></thead>
+    <tbody>
+      ${readyItineraries.map(e=>{
+        const a = artistById(e.artistId);
+        return `<tr>
+          ${showArtist?`<td data-label="Artist"><span style="display:flex;align-items:center;gap:7px;"><span class="avatar" data-slot="${a.slot}" style="width:22px;height:22px;font-size:9px;">${a.initials}</span>${esc(a.name)}</span></td>`:''}
+          <td data-label="Type">${esc(e.type)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
+          <td data-label="Flight">${e.flightBooked?`<span class="pill pill-good">Booked</span>`:'—'}</td>
+          <td data-label="Ground">${e.groundTransportBooked?`<span class="pill pill-good">Booked</span>`:'—'}</td>
+          <td data-label=""><button class="btn btn-sm" data-action="view-itinerary" data-id="${e.id}">${ICO.suitcase} Itinerary</button></td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div>`}
+  `;
+}
+
+/* ============ CALENDAR ============ */
+function renderCalendarPage(events, opts={}){
+  const filtered = S.calArtistFilter.length ? events.filter(e=>S.calArtistFilter.includes(e.artistId)) : events;
+  const isAdmin = isAdminUser(S.user);
+  const mode = opts.miniEmbed ? 'month' : (S.calViewMode||'month');
+  const todayIso = fmtISO(new Date());
+
+  const modeToggle = opts.miniEmbed ? '' : `<div class="chip-row" style="margin-left:auto;flex-wrap:nowrap;">
+    ${['month','week','day'].map(mv=>`<button class="filter-chip ${mode===mv?'sel':''}" data-action="cal-view-mode" data-mode="${mv}">${mv[0].toUpperCase()+mv.slice(1)}</button>`).join('')}
+  </div>`;
+
+  const head = (label)=>`
+    <div class="cal-head">
+      <div class="cal-nav">
+        <button class="icon-btn" data-action="cal-prev">${ICO.chev('l')}</button>
+        <strong style="font-family:var(--font-display);font-size:1.05rem;min-width:150px;text-align:center;">${label}</strong>
+        <button class="icon-btn" data-action="cal-next">${ICO.chev('r')}</button>
+        <button class="btn btn-sm btn-ghost" data-action="cal-today">Today</button>
+        ${opts.showBlockButton ? `<button class="btn btn-sm" data-action="open-block-time">${ICO.clock} Block Time</button>` : ''}
+        ${modeToggle}
+      </div>
+      ${opts.showFilter ? `<div class="chip-row">${ARTISTS.map(a=>`<button class="filter-chip ${S.calArtistFilter.includes(a.id)?'sel':''}" data-action="cal-filter" data-id="${a.id}"><span class="dot" data-slot="${a.slot}"></span>${a.name.split(' ')[0]}</button>`).join('')}</div>`:''}
+    </div>`;
+
+  if(mode==='week'){
+    const start = new Date(S.calDate); start.setDate(start.getDate()-start.getDay());
+    const days = [...Array(7)].map((_,i)=>{ const d=new Date(start); d.setDate(d.getDate()+i); return d; });
+    const rangeLabel = `${days[0].toLocaleDateString('en-US',{month:'short',day:'numeric'})} – ${days[6].toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}`;
+    return head(rangeLabel) + `<div style="display:flex;flex-direction:column;gap:10px;">
+      ${days.map(d=>{
+        const iso = fmtISO(d);
+        const evs = filtered.filter(e=>e.date===iso).sort((a,b)=>a.time.localeCompare(b.time));
+        return `<div class="card card-pad">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:${evs.length?'6px':'0'};">
+            <strong style="font-family:var(--font-display);">${d.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})}</strong>
+            ${iso===todayIso?'<span class="pill pill-accent">Today</span>':''}
+            ${isAdmin? `<button class="icon-btn" data-action="quick-add-event" data-date="${iso}" title="Add event" style="margin-left:auto;width:26px;height:26px;">${ICO.plus}</button>`:''}
+          </div>
+          ${evs.length? evs.map(e=>renderDayEventRow(e, isAdmin, 'open-event')).join('') : `<p style="color:var(--ink-3);font-size:12.5px;margin:0;">Nothing scheduled.</p>`}
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  if(mode==='day'){
+    const iso = fmtISO(S.calDate);
+    const evs = filtered.filter(e=>e.date===iso).sort((a,b)=>a.time.localeCompare(b.time));
+    return head(S.calDate.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})) + `
+      ${isAdmin? `<button class="btn btn-sm btn-primary" data-action="quick-add-event" data-date="${iso}" style="margin-bottom:12px;">${ICO.plus} Add Event</button>` : ''}
+      <div class="card card-pad">
+      ${evs.length? evs.map(e=>renderDayEventRow(e, isAdmin, 'open-event')).join('') : `<p style="color:var(--ink-3);font-size:13px;margin:0;">Nothing scheduled today.</p>`}
+    </div>`;
+  }
+
+  const month = S.calMonth;
+  const y = month.getFullYear(), m = month.getMonth();
+  const first = new Date(y,m,1); const startDow = first.getDay();
+  const daysInMonth = new Date(y,m+1,0).getDate();
+  const prevDays = new Date(y,m,0).getDate();
+  const byDate = {};
+  filtered.forEach(e=>{ (byDate[e.date] = byDate[e.date]||[]).push(e); });
+  const cells=[];
+  for(let i=startDow-1;i>=0;i--) cells.push({d:prevDays-i, out:true});
+  for(let d=1;d<=daysInMonth;d++) cells.push({d, out:false, iso: `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`});
+  { let nextDay=1; while(cells.length%7!==0) cells.push({d:nextDay++, out:true}); }
+
+  const monthLabel = month.toLocaleDateString('en-US',{month:'long', year:'numeric'});
+  return head(monthLabel) + `
+    <div class="cal-grid">
+      ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div class="cal-dow">${d}</div>`).join('')}
+      ${cells.map(c=>{
+        if(c.out) return `<div class="cal-cell out"><span class="cal-date">${c.d}</span></div>`;
+        const evs = (byDate[c.iso]||[]).sort((a,b)=>a.time.localeCompare(b.time));
+        const max = 3;
+        return `<div class="cal-cell ${c.iso===todayIso?'today':''}" data-action="open-day-view" data-date="${c.iso}" style="cursor:pointer;">
+          ${isAdmin? `<button class="cal-add-btn" data-action="quick-add-event" data-date="${c.iso}" title="Add event">${ICO.plus}</button>`:''}
+          <span class="cal-date">${c.d}</span>
+          ${evs.slice(0,max).map(e=>{const a=artistById(e.artistId); const label = opts.singleArtist? (e.clientName||e.type).split(' ')[0] : a.name.split(' ')[0]; const timePrefix = e.time==='00:00' ? '' : fmtTime(e.time).replace(':00','')+' '; return `<div class="cal-evt" data-action="open-event" data-id="${e.id}"><span class="dot" data-slot="${a.slot}"></span><span>${timePrefix}${esc(label)}</span></div>`;}).join('')}
+          ${evs.length>max? `<span class="cal-more" data-action="open-day" data-date="${c.iso}">+${evs.length-max} more</span>`:''}
+        </div>`;
+      }).join('')}
+    </div>
+    ${(!opts.noLegend) ? `<div class="legend">${ARTISTS.map(a=>`<span class="legend-item"><span class="dot" data-slot="${a.slot}"></span>${a.name}</span>`).join('')}</div>`:''}
+  `;
+}
+
+/* ============ LEADS TABLE ============ */
+function renderEventTable(events, opts={}){
+  if(!events.length) return `<div class="card empty">Nothing here yet.</div>`;
+  return `<div class="card u-scroll-x table-cards"><table>
+    <thead><tr>
+      ${opts.showArtist?'<th>Artist</th>':''}
+      <th>Client</th><th>Type</th><th>Date</th><th>Location</th><th>Price</th><th>Status</th>
+    </tr></thead>
+    <tbody>
+      ${events.map(e=>{
+        const a = artistById(e.artistId); const sm = statusMeta(e);
+        return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
+          ${opts.showArtist?`<td data-label="Artist"><span style="display:flex;align-items:center;gap:7px;"><span class="avatar" data-slot="${a.slot}" style="width:22px;height:22px;font-size:9px;">${a.initials}</span>${esc(a.name)}</span></td>`:''}
+          <td data-label="Client">${e.clientName? esc(e.clientName) : '—'}</td><td data-label="Type">${esc(e.type)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
+          <td data-label="Location">${esc(e.venue)||'—'}</td><td data-label="Price" class="u-mono">${e.unpaid? '—' : money(e.price)}</td>
+          <td data-label="Status"><span class="pill ${sm.cls}">${sm.label}</span></td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div>`;
+}
+function renderArtistFilterRow(current, action, opts={}){
+  const dotOrAvatar = a => opts.avatar
+    ? `<span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${a.initials}</span>`
+    : `<span class="dot" data-slot="${a.slot}"></span>`;
+  return `
+    <div class="chip-row artist-filter-chips" style="margin-bottom:16px;">
+      ${opts.noAll ? '' : `<button class="filter-chip ${current==='all'?'sel':''}" data-action="${action}" data-id="all">All Artists</button>`}
+      ${ARTISTS.map(a=>`<button class="filter-chip ${current===a.id?'sel':''}" data-action="${action}" data-id="${a.id}">${dotOrAvatar(a)}${esc(a.name.split(' ')[0])}</button>`).join('')}
+    </div>
+    <select class="artist-filter-select" data-action="${action}">
+      ${opts.noAll ? '' : `<option value="all" ${current==='all'?'selected':''}>All Artists</option>`}
+      ${ARTISTS.map(a=>`<option value="${a.id}" ${current===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
+    </select>
+  `;
+}
+function renderLeadsPage(){
+  const artistFilter = S.leadsArtistFilter||'all';
+  const base = artistFilter==='all' ? S.events : S.events.filter(e=>e.artistId===artistFilter);
+  const open = base.filter(e=>['lead','negotiating','contract_sent'].includes(e.status)).sort((a,b)=>a.date.localeCompare(b.date));
+  const pending = base.filter(e=>e.status==='booked' && !e.balanceReceived).sort((a,b)=>a.date.localeCompare(b.date));
+  return `
+    ${renderArtistFilterRow(artistFilter, 'filter-leads-artist')}
+    <div class="section-head"><h2>Pipeline (${open.length})</h2></div>
+    ${renderEventTable(open, {showArtist:true})}
+    <div class="section-head" style="margin-top:26px;"><h2>Booked — Balance Pending (${pending.length})</h2></div>
+    ${renderEventTable(pending, {showArtist:true})}
+  `;
+}
+
+/* ============ ARTISTS ROSTER ============ */
+function renderArtistsPage(){
+  return `<div class="section-head"><h2>Roster (${ARTISTS.length})</h2><button class="btn btn-sm btn-primary" data-action="open-add-artist">${ICO.plus} Add Artist</button></div>
+  <div class="grid grid-3">
+    ${ARTISTS.map(a=>{
+      const evs = eventsFor(a.id);
+      const upcoming = evs.filter(e=>!isPast(e.date) && ['booked','paid'].includes(e.status)).length;
+      const ytdPayout = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+e.balance,0);
+      return `<div class="card card-pad" style="cursor:pointer;display:flex;flex-direction:column;gap:10px;" data-action="open-artist" data-id="${a.id}">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="avatar" data-slot="${a.slot}" style="width:44px;height:44px;font-size:15px;">${a.initials}</span>
+          <div><strong style="font-family:var(--font-display);font-size:1.05rem;display:block;">${esc(a.name)}</strong><span class="u-label">${esc(a.role||'Artist')}</span></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--ink-2);padding-top:6px;border-top:1px solid var(--border);">
+          <span>${upcoming} upcoming</span><span class="u-mono">${money(ytdPayout)} YTD payout</span>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+function renderArtistDetailPage(artistId){
+  const a = artistById(artistId);
+  const evs = eventsFor(artistId).sort((a,b)=>a.date.localeCompare(b.date));
+  const upcoming = evs.filter(e=>!isPast(e.date));
+  return `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
+      <span class="avatar" data-slot="${a.slot}" style="width:52px;height:52px;font-size:17px;">${a.initials}</span>
+      <div><h2 style="font-size:1.5rem;">${esc(a.name)}</h2><span class="u-label">${esc(a.role||'Artist')} · Viewing as Management</span></div>
+    </div>
+    <div class="card card-pad" style="margin-bottom:20px;">${renderCalendarPage(evs, {noLegend:true, singleArtist:true, miniEmbed:true})}</div>
+    <div class="section-head"><h2>Upcoming (${upcoming.length})</h2></div>
+    ${renderEventTable(upcoming, {})}
+  `;
+}
+
+/* ============ FINANCIALS ============ */
+function renderMessagesPage(){
+  return `
+  <div class="section-head"><h2>Messages</h2></div>
+  <div class="card empty" style="padding:48px 24px;">
+    <div style="font-size:15px;font-weight:700;color:var(--ink);margin-bottom:6px;">WhatsApp isn't connected yet</div>
+    <p style="max-width:420px;margin:0 auto 18px;color:var(--ink-3);font-size:13px;line-height:1.6;">Once it's connected, client and lead conversations will show up here — reply without leaving the app, and open threads will count toward the badge on this tab.</p>
+    <button class="btn btn-primary" disabled style="opacity:.55;cursor:not-allowed;">${ICO.sms} Connect WhatsApp</button>
+  </div>
+  `;
+}
+function renderPricingPage(){
+  const artistId = S.pricingArtist || ARTISTS[0].id;
+  const artist = artistById(artistId);
+  return `
+  <p style="font-size:12.5px;color:var(--ink-3);margin:0 0 16px;max-width:640px;">Standard hourly rates by artist and event type — the reference bookkeeping quotes from before negotiating a final flat price. Overtime is always time-and-a-half (1.5×), prorated to the minute past the included hours, not a separately set rate.</p>
+  ${renderArtistFilterRow(artistId, 'pricing-artist', {noAll:true})}
+  <div class="card u-scroll-x table-cards">
+    <table>
+      <thead><tr><th>Event Type</th><th>Hourly Rate</th><th>Included Hours</th><th>Overtime (1.5×/hr, prorated)</th></tr></thead>
+      <tbody>
+        ${EVENT_TYPES.map(type=>{
+          const p = getPricing(artistId, type);
+          return `<tr>
+            <td data-label="Event Type">${esc(type)}</td>
+            <td data-label="Hourly Rate"><span class="u-mono" style="margin-right:2px;">$</span><input type="number" min="0" step="25" value="${p.hourlyRate}" data-action="set-hourly-rate" data-artist="${artistId}" data-type="${esc(type)}" style="width:90px;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-family:var(--font-mono);"/></td>
+            <td data-label="Included Hours"><input type="number" min="0" step="0.5" value="${p.includedHours}" data-action="set-included-hours" data-artist="${artistId}" data-type="${esc(type)}" style="width:70px;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-family:var(--font-mono);"/></td>
+            <td data-label="Overtime" class="u-mono">${money(p.hourlyRate*OVERTIME_MULTIPLIER)}/hr</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>
+  <p style="font-size:11px;color:var(--ink-3);margin-top:10px;">Editing ${esc(artist.name)}'s rates — changes save automatically.</p>
+  `;
+}
+function renderFinancialsPage(){
+  const filt = S.finArtistFilter==='all' ? S.events : S.events.filter(e=>e.artistId===S.finArtistFilter);
+  const booked = filt.filter(e=>['booked','paid'].includes(e.status));
+  const gross = booked.reduce((s,e)=>s+e.price,0);
+  const commission = booked.reduce((s,e)=>s+e.commission,0);
+  const payouts = booked.reduce((s,e)=>s+e.balance,0);
+  const avg = booked.length ? Math.round(gross/booked.length) : 0;
+  const openInvoices = CUSTOM_INVOICES.filter(i=>i.status==='open');
+  const openInvoiceTotal = openInvoices.reduce((s,i)=>s+invoiceTotal(i),0);
+  const payoutEligible = filt.filter(e=>e.balanceReceived);
+  const owedToArtists = payoutEligible.filter(e=>!e.artistPaidOut);
+  const owedTotal = owedToArtists.reduce((s,e)=>s+zelleBalance(e),0);
+  const paidOutTotal = payoutEligible.filter(e=>e.artistPaidOut).reduce((s,e)=>s+zelleBalance(e),0);
+
+  const months=[]; for(let i=5;i>=0;i--){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-i); months.push(d); }
+  const monthlyGross = months.map(md=>{
+    const sum = booked.filter(e=>{const ed=new Date(e.date+'T00:00:00'); return ed.getMonth()===md.getMonth()&&ed.getFullYear()===md.getFullYear();}).reduce((s,e)=>s+e.price,0);
+    return {label: md.toLocaleDateString('en-US',{month:'short'}), val:sum};
+  });
+  const maxMonthly = Math.max(...monthlyGross.map(m=>m.val),1);
+
+  return `
+  ${renderArtistFilterRow(S.finArtistFilter, 'fin-filter')}
+  <div class="grid stat-row" style="margin-bottom:20px;">
+    <div class="card stat-tile"><span class="u-label">Gross Booked</span><span class="val">${money(gross)}</span><span class="sub">${booked.length} jobs</span></div>
+    <div class="card stat-tile"><span class="u-label">ASP Commission</span><span class="val">${money(commission)}</span><span class="sub">15% of gross</span></div>
+    <div class="card stat-tile"><span class="u-label">Artist Payouts</span><span class="val">${money(payouts)}</span><span class="sub">85% via Zelle</span></div>
+    <div class="card stat-tile"><span class="u-label">Avg Job Size</span><span class="val">${money(avg)}</span><span class="sub">per booking</span></div>
+  </div>
+
+  <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
+    <div class="card stat-tile" style="cursor:pointer;" data-action="nav" data-view="financials"><span class="u-label">Open Invoices</span><span class="val">${openInvoices.length}</span><span class="sub">Non-gig billing awaiting payment</span></div>
+    <div class="card stat-tile" style="cursor:pointer;" data-action="nav" data-view="financials"><span class="u-label">Open Invoice Total</span><span class="val">${money(openInvoiceTotal)}</span><span class="sub">Across ${openInvoices.length} open invoice${openInvoices.length===1?'':'s'}</span></div>
+  </div>
+
+  <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
+    <div class="card stat-tile"><span class="u-label">Owed to Artists</span><span class="val">${money(owedTotal)}</span><span class="sub">${owedToArtists.length} gig${owedToArtists.length===1?'':'s'} paid by client, not yet paid out</span></div>
+    <div class="card stat-tile"><span class="u-label">Paid Out</span><span class="val">${money(paidOutTotal)}</span><span class="sub">Settled with artists</span></div>
+  </div>
+
+  <div class="section-head"><h2>Artist Payouts — Gig Breakdown (${payoutEligible.length})</h2></div>
+  ${payoutEligible.length? `<div class="card u-scroll-x table-cards" style="margin-bottom:22px;"><table>
+    <thead><tr><th>Artist</th><th>Client</th><th>Date</th><th>Fee</th><th>ASP Cut</th><th>Charges</th><th>Payout</th><th>Status</th><th></th></tr></thead>
+    <tbody>${payoutEligible.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const a=artistById(e.artistId); const amt=zelleBalance(e);
+      return `<tr>
+        <td data-label="Artist">${esc(a.name)}</td><td data-label="Client">${esc(e.clientName)}</td>
+        <td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
+        <td data-label="Fee" class="u-mono">${money(e.price)}</td><td data-label="ASP Cut" class="u-mono">${money(e.commission)}</td>
+        <td data-label="Charges" class="u-mono">${money(chargesTotal(e))}</td><td data-label="Payout" class="u-mono"><strong>${money(amt)}</strong></td>
+        <td data-label="Status"><span class="pill ${e.artistPaidOut?'pill-good':'pill-warn'}">${e.artistPaidOut? 'Paid Out':'Owed'}</span></td>
+        <td data-label=""><button class="btn btn-sm ${e.artistPaidOut?'btn-ghost':'btn-primary'}" data-action="toggle-artist-paidout" data-id="${e.id}">${e.artistPaidOut? 'Unmark':'Mark Paid Out'}</button></td>
+      </tr>`;}).join('')}
+    </tbody></table></div>` : `<div class="card empty" style="margin-bottom:22px;">No completed gigs yet — payouts appear here once a client's balance is received.</div>`}
+
+  <div class="card card-pad" style="margin-bottom:20px;">
+    <div class="section-head"><h2>Monthly Gross Revenue</h2></div>
+    <div class="fin-chart" style="display:flex;gap:14px;align-items:flex-end;height:120px;">
+      ${monthlyGross.map(m=>`<div style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end;">
+        <span class="u-mono" style="font-size:11px;color:var(--ink-2);">${m.val?money(m.val):''}</span>
+        <div style="width:100%;max-width:46px;height:${Math.max(4,(m.val/maxMonthly)*80)}px;background:var(--accent);border-radius:4px 4px 0 0;opacity:.85;"></div>
+        <span class="u-label">${m.label}</span>
+      </div>`).join('')}
+    </div>
+  </div>
+
+  <div class="section-head"><h2>Per-Artist Trend</h2></div>
+  <div class="grid grid-3" style="margin-bottom:22px;">
+    ${ARTISTS.map(a=>{
+      const ae = S.events.filter(e=>e.artistId===a.id && ['booked','paid'].includes(e.status));
+      const total = ae.reduce((s,e)=>s+e.price,0);
+      const spark = months.map(md=>ae.filter(e=>{const ed=new Date(e.date+'T00:00:00'); return ed.getMonth()===md.getMonth()&&ed.getFullYear()===md.getFullYear();}).reduce((s,e)=>s+e.price,0));
+      const mx = Math.max(...spark,1);
+      return `<div class="card card-pad">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span class="avatar" data-slot="${a.slot}" style="width:26px;height:26px;font-size:10px;">${a.initials}</span>
+          <strong style="font-size:13px;">${esc(a.name)}</strong>
+        </div>
+        <div class="sparkbar">${spark.map(v=>`<b style="height:${Math.max(6,(v/mx)*100)}%;"></b>`).join('')}</div>
+        <div class="u-mono" style="font-size:15px;font-weight:700;margin-top:6px;">${money(total)}</div>
+        <span class="u-label">gross, last 6 mo</span>
+      </div>`;
+    }).join('')}
+  </div>
+
+  <div class="section-head"><h2>Custom Invoices (${CUSTOM_INVOICES.length})</h2><button class="btn btn-sm btn-primary" data-action="open-new-invoice">+ New Invoice</button></div>
+  <div class="card u-scroll-x table-cards" style="margin-bottom:22px;"><table>
+    <thead><tr><th>Client</th><th>Items</th><th>Total</th><th>Date</th><th>Status</th><th></th></tr></thead>
+    <tbody>${CUSTOM_INVOICES.length? CUSTOM_INVOICES.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(inv=>{
+      const t = invoiceTotal(inv);
+      const itemsSummary = inv.items.length===1? inv.items[0].label : `${inv.items[0].label} +${inv.items.length-1} more`;
+      return `<tr class="row-link" data-action="view-invoice" data-id="${inv.id}">
+        <td data-label="Client">${esc(inv.clientName)}</td><td data-label="Items">${esc(itemsSummary)}</td>
+        <td data-label="Total" class="u-mono">${money(t)}</td><td data-label="Date" class="u-mono">${fmtDateShort(inv.createdAt)}</td>
+        <td data-label="Status"><span class="pill ${inv.status==='paid'?'pill-good':'pill-warn'}">${inv.status==='paid'?'Paid':'Open'}</span></td>
+        <td data-label="">${inv.status==='open'? `<button class="btn btn-sm" data-action="mark-invoice-paid" data-id="${inv.id}">Mark Paid</button>` : ''}</td></tr>`;
+    }).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--ink-3);padding:20px;">No custom invoices yet.</td></tr>`}
+    </tbody></table></div>
+
+  <div class="section-head"><h2>All Jobs (${booked.length})</h2><button class="btn btn-sm" data-action="export-csv">${ICO.leads} Export CSV</button></div>
+  <div class="card u-scroll-x table-cards"><table>
+    <thead><tr><th>Artist</th><th>Client</th><th>Date</th><th>Price</th><th>Commission</th><th>Payout</th><th>Status</th></tr></thead>
+    <tbody>${booked.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const a=artistById(e.artistId); const sm=statusMeta(e);
+      return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
+        <td data-label="Artist">${esc(a.name)}</td><td data-label="Client">${esc(e.clientName)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
+        <td data-label="Price" class="u-mono">${money(e.price)}</td><td data-label="Commission" class="u-mono">${money(e.commission)}</td><td data-label="Payout" class="u-mono">${money(e.balance)}</td>
+        <td data-label="Status"><span class="pill ${sm.cls}">${sm.label}</span></td></tr>`;}).join('')}
+    </tbody></table></div>
+  `;
+}
+
+/* ============ OUTSIDE BOOKINGS PAGE (own nav tab — office/bookkeeping only, not CEO) ============ */
+function renderOutsideBookingsPage(){
+  return `
+  <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
+    <div class="card stat-tile"><span class="u-label">Outside Bookings Open</span><span class="val">${OUTSIDE_BOOKINGS.filter(b=>b.status==='open').length}</span><span class="sub">Not yet paid</span></div>
+    <div class="card stat-tile"><span class="u-label">ASP Earned (Outside)</span><span class="val">${money(OUTSIDE_BOOKINGS.reduce((s,b)=>s+b.aspCut,0))}</span><span class="sub">Across ${OUTSIDE_BOOKINGS.length} booking${OUTSIDE_BOOKINGS.length===1?'':'s'}</span></div>
+  </div>
+
+  <div class="section-head"><h2>Outside Bookings (${OUTSIDE_BOOKINGS.length})</h2><button class="btn btn-sm btn-primary" data-action="open-new-outside-booking">+ New Outside Booking</button></div>
+  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Jobs that don't involve one of our own roster artists — outside acts we coordinate or refer.</p>
+  <div class="card u-scroll-x table-cards"><table>
+    <thead><tr><th>Performer</th><th>Client</th><th>Date</th><th>Total</th><th>ASP Cut</th><th>Payout to Performer</th><th>Status</th><th></th></tr></thead>
+    <tbody>${OUTSIDE_BOOKINGS.length? OUTSIDE_BOOKINGS.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(b=>{
+      return `<tr>
+        <td data-label="Performer">${esc(b.performerName)}</td><td data-label="Client">${esc(b.clientName)}</td>
+        <td data-label="Date" class="u-mono">${fmtDateShort(b.date)}</td><td data-label="Total" class="u-mono">${money(b.totalAmount)}</td>
+        <td data-label="ASP Cut" class="u-mono">${money(b.aspCut)}</td><td data-label="Payout to Performer" class="u-mono">${money(outsideBookingPayout(b))}</td>
+        <td data-label="Status"><span class="pill ${b.status==='paid'?'pill-good':'pill-warn'}">${b.status==='paid'?'Paid':'Open'}</span></td>
+        <td data-label="" style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${b.status==='open'? `<button class="btn btn-sm" data-action="mark-outside-booking-paid" data-id="${b.id}">Mark Paid</button>` : ''}
+          <button class="btn btn-sm" data-action="open-outside-doc-builder" data-id="${b.id}">${DOCUMENTS.some(d=>d.subjectType==='outside'&&d.subjectId===b.id)?'Edit Document':'Document'}</button>
+        </td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--ink-3);padding:20px;">No outside bookings yet.</td></tr>`}
+    </tbody></table></div>
+  `;
+}
+
+/* ============ DOCUMENTS PAGE (general doc builder hub — office/bookkeeping only, not CEO) ============ */
+function renderDocumentsPage(){
+  return `
+  <div class="section-head"><h2>Documents (${DOCUMENTS.length})</h2><button class="btn btn-sm btn-primary" data-action="open-new-document">${ICO.plus} New Document</button></div>
+  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Contracts, proposals, riders — for one of our own artists, an outside act, or general use. ASP letterhead and signature throughout (or SING Entertainment's, when that's the signing party).</p>
+  ${DOCUMENTS.length? `<div class="card u-scroll-x table-cards"><table>
+    <thead><tr><th>Title</th><th>For</th><th>Letterhead</th><th>Date</th><th>Status</th></tr></thead>
+    <tbody>${DOCUMENTS.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(d=>{
+      return `<tr class="row-link" data-action="open-document" data-id="${d.id}">
+        <td data-label="Title">${esc(d.title)}</td>
+        <td data-label="For">${esc(documentSubjectLabel(d))}</td>
+        <td data-label="Letterhead">${esc((DOC_BRANDS[d.brand]||DOC_BRANDS.asp).label)}</td>
+        <td data-label="Date" class="u-mono">${fmtDateShort(d.createdAt)}</td>
+        <td data-label="Status"><span class="pill ${d.signedAt?'pill-good':'pill-neutral'}">${d.signedAt?'Signed':'Draft'}</span></td>
+      </tr>`;
+    }).join('')}
+    </tbody></table></div>` : `<div class="card empty">No documents yet.</div>`}
+  `;
+}
+
+/* ============ PROJECTS ============ */
+function renderProjectFolderCard(p, opts={}){
+  const a = artistById(p.artistId);
+  const isAdmin = isAdminUser(S.user);
+  const overdue = p.dueDate && isPast(p.dueDate);
+  const coverStyle = p.coverImage? `background-image:url('${p.coverImage}');` : `background:var(--cat-${a.slot||1});`;
+  return `<div class="project-folder" data-action="open-project" data-id="${p.id}">
+    <div class="project-folder-cover" style="${coverStyle}">
+      ${!p.coverImage? `<span class="project-folder-cover-fallback">${esc((p.title||'?').trim().slice(0,1).toUpperCase())}</span>`:''}
+      ${isAdmin? `<label class="project-folder-cover-upload" data-action="upload-project-cover" data-id="${p.id}" title="Set cover image">
+        ${ICO.image}
+        <input type="file" accept="image/*" data-action="upload-project-cover" data-id="${p.id}" style="display:none;"/>
+      </label>` : ''}
+      ${p.coverImage && isAdmin? `<button class="icon-btn project-folder-cover-remove" data-action="remove-project-cover" data-id="${p.id}" title="Remove cover" style="width:24px;height:24px;">${ICO.x}</button>`:''}
+    </div>
+    <div class="project-folder-body">
+      ${opts.showArtist? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;"><span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${a.initials}</span><span style="font-size:11px;color:var(--ink-2);">${esc(a.name)}</span></div>`:''}
+      <strong style="font-family:var(--font-display);font-size:14px;display:block;">${esc(p.title)}</strong>
+      ${p.subtitle? `<div style="font-size:11.5px;color:var(--ink-2);margin-top:2px;">${esc(p.subtitle)}</div>`:''}
+      ${p.dueDate? `<div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;">
+        <span class="pill ${overdue?'pill-crit':'pill-neutral'}">${overdue?'Overdue · ':''}${fmtDateShort(p.dueDate)}</span>
+      </div>`:''}
+    </div>
+  </div>`;
+}
+function renderProjectsBoard(){
+  const isAdmin = isAdminUser(S.user);
+  const artistFilter = S.projectArtistFilter||'all';
+  const projects = artistFilter==='all' ? PROJECTS : PROJECTS.filter(p=>p.artistId===artistFilter);
+  return `
+  ${renderArtistFilterRow(artistFilter, 'filter-project-artist', {avatar:true})}
+  <div class="section-head">
+    <h2>${artistFilter==='all'? 'All Projects' : esc(artistById(artistFilter).name)+`’s Projects`} (${projects.length})</h2>
+    <div style="display:flex;gap:6px;">
+      ${isAdmin? `<button class="btn btn-sm btn-primary" data-action="open-new-project">${ICO.plus} New Project</button>`:''}
+    </div>
+  </div>
+  ${projects.length? `<div class="grid grid-folders">${projects.map(p=>renderProjectFolderCard(p, {showArtist: artistFilter==='all'})).join('')}</div>`
+    : `<div class="card empty">No projects ${artistFilter==='all'?'yet':'for '+esc(artistById(artistFilter).name)+' yet'}.</div>`}
+  `;
+}
+function renderArtistProjects(artistId){
+  const projects = PROJECTS.filter(p=>p.artistId===artistId);
+  return `
+    <div class="section-head"><h2>My Projects (${projects.length})</h2></div>
+    ${projects.length? `<div class="grid grid-folders">${projects.map(p=>renderProjectFolderCard(p)).join('')}</div>` : `<div class="card empty">No projects yet.</div>`}
+  `;
+}
+function personInitials(name){
+  return (name||'?').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase() || '?';
+}
+function renderPersonAvatar(person, size){
+  size = size||16;
+  const artist = person.kind==='internal' ? artistById(person.refId) : null;
+  if(artist) return `<span class="avatar" data-slot="${artist.slot}" style="width:${size}px;height:${size}px;font-size:${Math.round(size*0.44)}px;flex:none;">${esc(artist.initials)}</span>`;
+  return `<span class="avatar" style="width:${size}px;height:${size}px;font-size:${Math.round(size*0.44)}px;flex:none;background:var(--ink);color:var(--page);">${esc(personInitials(person.name))}</span>`;
+}
+function renderAssigneeChip(p, personId){
+  const person = personId ? (p.people||[]).find(x=>x.id===personId) : null;
+  if(!person) return `<span style="font-size:11px;color:var(--ink-3);">Unassigned</span>`;
+  const isMe = person.kind==='internal' && person.refId===S.user;
+  return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;${isMe?'font-weight:700;color:var(--accent-ink);':'color:var(--ink-2);'}">${renderPersonAvatar(person,16)}${isMe?'You':esc(person.name)}</span>`;
+}
+function renderTaskAssigneeSelect(p, t){
+  return `<select class="task-assignee-select" data-id="${p.id}" data-taskid="${t.id}" style="font-size:11px;padding:3px 5px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);max-width:120px;color:var(--ink);">
+    <option value="">Unassigned</option>
+    ${(p.people||[]).map(person=>`<option value="${person.id}" ${t.assignedTo===person.id?'selected':''}>${esc(person.name)}</option>`).join('')}
+  </select>`;
+}
+function taskAssigneeCounts(p){
+  const counts = {};
+  (p.tasks||[]).filter(t=>!t.done).forEach(t=>{
+    const key = t.assignedTo || '__unassigned';
+    counts[key] = (counts[key]||0)+1;
+  });
+  return counts;
+}
+function renderWaitingOnStrip(p){
+  const counts = taskAssigneeCounts(p);
+  const entries = Object.entries(counts);
+  if(!entries.length) return '';
+  const chips = entries.map(([key,n])=>{
+    if(key==='__unassigned') return `<button class="filter-chip ${S.taskAssigneeFilter==='__unassigned'?'sel':''}" data-action="filter-tasks-by-assignee" data-pid="__unassigned">Unassigned (${n})</button>`;
+    const person = (p.people||[]).find(x=>x.id===key);
+    if(!person) return '';
+    const isMe = person.kind==='internal' && person.refId===S.user;
+    return `<button class="filter-chip ${S.taskAssigneeFilter===key?'sel':''}" data-action="filter-tasks-by-assignee" data-pid="${key}">${isMe?'You':esc(person.name)} (${n})</button>`;
+  }).join('');
+  return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:12px;">
+    <span class="u-label" style="margin-right:2px;">Waiting on</span>${chips}
+    ${S.taskAssigneeFilter? `<button class="filter-chip" data-action="filter-tasks-by-assignee" data-pid="">Show all</button>`:''}
+  </div>`;
+}
+function renderBoardCard(pid, c){
+  const isAdmin = isAdminUser(S.user);
+  const items = c.items||[];
+  return `<div class="sticky-card" style="--card-accent:${boardCardColor(c.header)}">
+    <div class="sticky-card-head">
+      <input class="blend-input" data-action="set-board-card-header" data-id="${pid}" data-cardid="${c.id}" value="${esc(c.header)}" placeholder="Card title…" ${isAdmin?'':'readonly'}/>
+      ${isAdmin? `<button class="icon-btn" data-action="remove-board-card" data-id="${pid}" data-cardid="${c.id}" title="Remove card" style="width:24px;height:24px;flex:none;">${ICO.x}</button>`:''}
+    </div>
+    <div class="sticky-card-items">
+      ${items.length? items.map(it=>`<div class="sticky-card-item">
+        <span>${esc(it.text)}</span>
+        ${isAdmin? `<button data-action="remove-board-item" data-id="${pid}" data-cardid="${c.id}" data-itemid="${it.id}" title="Remove">${ICO.x}</button>`:''}
+      </div>`).join('') : `<p class="sticky-card-empty">Nothing yet.</p>`}
+    </div>
+    ${isAdmin? `<div style="display:flex;gap:6px;margin-top:8px;">
+      <input class="board-item-input" data-cardid="${c.id}" data-projectid="${pid}" placeholder="Type here…" style="flex:1;min-width:0;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc((S.newBoardItemText||{})[c.id]||'')}"/>
+      <button class="icon-btn" data-action="add-board-item" data-id="${pid}" data-cardid="${c.id}" style="width:28px;height:28px;flex:none;">${ICO.plus}</button>
+    </div>` : ''}
+  </div>`;
+}
+function renderProjectDetail(){
+  const p = getProject(S.projectId); if(!p) return `<div class="card empty">Project not found. <a href="#" data-action="nav" data-view="${isAdminUser(S.user)?'projects':'a_projects'}" style="color:var(--accent);">Back to Projects</a></div>`;
+  const a = artistById(p.artistId);
+  const isAdmin = isAdminUser(S.user);
+  const fin = projectFinancials(p);
+  const recordingSiblings = p.recordingEventId ? PROJECTS.filter(x=>x.recordingEventId===p.recordingEventId && x.id!==p.id) : [];
+  const recordingEvent = p.recordingEventId ? getEvent(p.recordingEventId) : null;
+  const backView = isAdmin ? 'projects' : 'a_projects';
+
+  return `
+    <button class="icon-btn" data-action="nav" data-view="${backView}" title="Back to Projects" style="margin-bottom:14px;">${ICO.chev('l')}</button>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+      <span class="avatar" data-slot="${a.slot}" style="width:44px;height:44px;flex:none;">${a.initials}</span>
+      <div style="min-width:0;flex:1;">
+      ${isAdmin? `<input class="blend-input" data-action="set-project-title" data-id="${p.id}" value="${esc(p.title)}" placeholder="Project name…" style="font-family:var(--font-display);font-size:1.3rem;font-weight:600;padding:0;"/>`
+        : `<strong style="font-family:var(--font-display);font-size:1.3rem;display:block;">${esc(p.title)}</strong>`}
+      <span class="pill pill-accent">${esc(a.name)}</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:18px;">
+        <div class="card card-pad">
+          <div class="u-label" style="margin-bottom:10px;">Project Info</div>
+          <div style="display:flex;flex-direction:column;gap:10px;font-size:12.5px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Artist</span>
+              <span style="display:flex;align-items:center;gap:6px;font-weight:600;${isAdmin?'cursor:pointer;':''}" ${isAdmin?`data-action="open-artist" data-id="${a.id}"`:''}><span class="avatar" data-slot="${a.slot}" style="width:20px;height:20px;font-size:8px;">${a.initials}</span>${esc(a.name)}</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Who it's for</span>
+              ${isAdmin? `<input data-action="set-project-subtitle" data-id="${p.id}" value="${esc(p.subtitle||'')}" placeholder="e.g. client / label" style="padding:5px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;text-align:right;max-width:160px;"/>`
+                : (p.subtitle? `<span>${esc(p.subtitle)}</span>` : `<span style="color:var(--ink-3);">Not set</span>`)}
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Target Date</span>
+              ${isAdmin? `<input type="date" data-action="set-project-due" data-id="${p.id}" value="${p.dueDate||''}" style="padding:5px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;"/>`
+                : (p.dueDate? `<span style="color:${isPast(p.dueDate)?'var(--crit)':'var(--ink-2)'};">${fmtDateShort(p.dueDate)}</span>` : `<span style="color:var(--ink-3);">Not set</span>`)}
+            </div>
+            ${recordingEvent? `<div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Recording Day</span>
+              <span style="cursor:pointer;color:var(--accent);text-decoration:underline;" data-action="open-event" data-id="${recordingEvent.id}">${fmtDateShort(recordingEvent.date)}${recordingSiblings.length? ` · +${recordingSiblings.length} other episode${recordingSiblings.length===1?'':'s'}` : ''}</span></div>` : ''}
+          </div>
+
+          <div style="margin-top:16px;">
+            <div class="u-label" style="margin-bottom:8px;">Who's Involved</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:${isAdmin?'10px':'0'};">
+              ${(p.people||[]).length? p.people.map(person=>`<span class="pill pill-neutral" style="display:inline-flex;align-items:center;gap:6px;">${renderPersonAvatar(person,15)}${esc(person.role)}: ${esc(person.name)}${isAdmin?`<button data-action="remove-person" data-id="${p.id}" data-pid="${person.id}" style="border:none;background:none;cursor:pointer;color:var(--ink-3);padding:0;display:flex;">${ICO.x}</button>`:''}</span>`).join('') : `<span style="font-size:12px;color:var(--ink-3);">Nobody added yet.</span>`}
+            </div>
+            ${isAdmin? `
+            <div class="chip-row" style="margin-bottom:8px;">
+              <button class="filter-chip ${(S.newPersonForm.kind||'internal')==='internal'?'sel':''}" data-action="set-person-kind" data-kind="internal">Internal</button>
+              <button class="filter-chip ${S.newPersonForm.kind==='external'?'sel':''}" data-action="set-person-kind" data-kind="external">External</button>
+            </div>
+            ${(S.newPersonForm.kind||'internal')==='internal' ? `
+            <div data-form="person" style="display:flex;gap:6px;flex-wrap:wrap;">
+              <select class="person-refid-select" style="flex:1;min-width:140px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;color:var(--ink);">
+                <option value="">Pick a person…</option>
+                <optgroup label="ASP Office">${ADMIN_USERS.map(u=>`<option value="${u.id}" ${S.newPersonForm.refId===u.id?'selected':''}>${esc(u.name)}</option>`).join('')}</optgroup>
+                <optgroup label="Artists">${ARTISTS.map(a=>`<option value="${a.id}" ${S.newPersonForm.refId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</optgroup>
+              </select>
+              <input data-field="role" placeholder="Role (e.g. Point of Contact)" style="flex:1;min-width:110px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.role||'')}"/>
+              <button class="btn btn-sm" data-action="add-person" data-id="${p.id}">Add</button>
+            </div>
+            ` : `
+            <div data-form="person" style="display:flex;gap:6px;flex-wrap:wrap;">
+              <input data-field="name" placeholder="Name" style="flex:1;min-width:100px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.name||'')}"/>
+              <input data-field="email" placeholder="Email (optional)" style="flex:1;min-width:130px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.email||'')}"/>
+              <input data-field="role" placeholder="Role (e.g. Guest)" style="flex:1;min-width:90px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.role||'')}"/>
+              <button class="btn btn-sm" data-action="add-person" data-id="${p.id}">Add</button>
+            </div>
+            `}
+            ` : ''}
+          </div>
+        </div>
+
+        <div class="card card-pad">
+          <div class="section-head" style="margin-bottom:12px;"><h2 style="font-size:1rem;">Board</h2></div>
+          ${(p.boardCards||[]).length? `<div class="sticky-board">${p.boardCards.map(c=>renderBoardCard(p.id,c)).join('')}</div>` : `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No cards yet — add one below.</p>`}
+          ${isAdmin? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;">
+            ${['Contacts','Musicians','Venue','Notes'].map(h=>`<button class="filter-chip" data-action="add-board-card" data-id="${p.id}" data-preset="${esc(h)}">${ICO.plus} ${esc(h)}</button>`).join('')}
+            <button class="btn btn-sm" data-action="add-board-card" data-id="${p.id}">${ICO.plus} Blank Card</button>
+          </div>` : ''}
+        </div>
+
+        <div>
+          <div class="tabbar tabbar-row" style="margin-bottom:14px;">
+            <a href="#" class="tab ${S.projectTab==='tasks'?'active':''}" data-action="set-project-tab" data-tab="tasks">Tasks</a>
+            <a href="#" class="tab ${S.projectTab==='conversation'?'active':''}" data-action="set-project-tab" data-tab="conversation">Conversation</a>
+            <a href="#" class="tab ${S.projectTab==='media'?'active':''}" data-action="set-project-tab" data-tab="media">Media</a>
+            <a href="#" class="tab ${S.projectTab==='financials'?'active':''}" data-action="set-project-tab" data-tab="financials">Financials</a>
+            <a href="#" class="tab ${S.projectTab==='activity'?'active':''}" data-action="set-project-tab" data-tab="activity">Activity</a>
+          </div>
+          <select class="tab-select" data-action="set-project-tab-select">
+            <option value="tasks" ${S.projectTab==='tasks'?'selected':''}>Tasks</option>
+            <option value="conversation" ${S.projectTab==='conversation'?'selected':''}>Conversation</option>
+            <option value="media" ${S.projectTab==='media'?'selected':''}>Media</option>
+            <option value="financials" ${S.projectTab==='financials'?'selected':''}>Financials</option>
+            <option value="activity" ${S.projectTab==='activity'?'selected':''}>Activity</option>
+          </select>
+
+          ${S.projectTab==='tasks' ? `
+          ${renderWaitingOnStrip(p)}
+          <div class="log">
+            ${p.tasks.filter(t=> !S.taskAssigneeFilter || (S.taskAssigneeFilter==='__unassigned'? !t.assignedTo : t.assignedTo===S.taskAssigneeFilter)).map(t=>{
+              const assignedPerson = t.assignedTo ? (p.people||[]).find(x=>x.id===t.assignedTo) : null;
+              const isMine = assignedPerson && assignedPerson.kind==='internal' && assignedPerson.refId===S.user;
+              return `<div class="log-item" style="align-items:center;flex-wrap:wrap;gap:8px;${isMine&&!t.done?'background:var(--accent-wash);border-radius:8px;':''}">
+              <input type="checkbox" ${t.done?'checked':''} data-action="toggle-task" data-id="${p.id}" data-taskid="${t.id}" style="width:16px;height:16px;flex:none;"/>
+              <span style="flex:1;min-width:120px;${t.done?'text-decoration:line-through;color:var(--ink-3);':''}">${esc(t.text)}</span>
+              ${isAdmin? renderTaskAssigneeSelect(p,t) : renderAssigneeChip(p, t.assignedTo)}
+              ${isAdmin?`<button class="icon-btn" data-action="remove-task" data-id="${p.id}" data-taskid="${t.id}" style="width:24px;height:24px;">${ICO.x}</button>`:''}
+            </div>`;
+            }).join('') || `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">${S.taskAssigneeFilter? 'No tasks match this filter.' : 'No tasks yet.'}</p>`}
+          </div>
+          ${isAdmin? `<div data-form="task" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
+            <input data-field="newTaskText" placeholder="Add a task…" style="flex:1;min-width:140px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newTaskText||'')}"/>
+            <select class="new-task-assignee-select" style="padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;color:var(--ink);">
+              <option value="">Unassigned</option>
+              ${(p.people||[]).map(person=>`<option value="${person.id}" ${S.newTaskAssignee===person.id?'selected':''}>${esc(person.name)}</option>`).join('')}
+            </select>
+            <button class="btn btn-sm" data-action="add-task" data-id="${p.id}">Add</button>
+          </div>`:''}
+          <p style="font-size:11.5px;color:var(--ink-3);margin:10px 0 0;">Checking off a task doesn't capture details — post the actual decision (which cities, which venue, etc.) in Conversation.</p>
+          ` : ''}
+
+          ${S.projectTab==='conversation' ? `
+          <div class="log">
+            ${(p.comments||[]).length? (p.comments||[]).map(c=>{const author = isAdminUser(c.authorId)? (adminById(c.authorId)?.name||'Office') : (artistById(c.authorId)?.name||'Artist');
+              return `<div class="log-item"><span class="log-ico">${ICO.bell}</span>
+              <span><div><strong>${esc(author)}:</strong> ${esc(c.text)}</div><div class="log-time">${new Date(c.ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</div></span></div>`;
+            }).join('') : `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No messages yet — this is where decisions and details (like which cities got picked) get logged.</p>`}
+          </div>
+          <div data-form="comment" style="display:flex;gap:6px;margin-top:10px;">
+            <input data-field="newCommentText" placeholder="Post an update or decision…" style="flex:1;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newCommentText||'')}"/>
+            <button class="btn btn-sm" data-action="add-comment" data-id="${p.id}">Post</button>
+          </div>
+          ` : ''}
+
+          ${S.projectTab==='media' ? `
+          <div class="u-label" style="margin-bottom:8px;">Images</div>
+          <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:22px 12px;border:1.5px dashed var(--border-strong);border-radius:var(--r-md);cursor:pointer;margin-bottom:14px;color:var(--ink-2);">
+            ${ICO.plus}<strong style="font-size:13px;">Upload Image</strong><span style="font-size:11px;color:var(--ink-3);">Reference photos, cover art drafts, etc.</span>
+            <input type="file" accept="image/*" data-action="upload-project-image" data-id="${p.id}" multiple style="display:none;"/>
+          </label>
+          ${p.images.length? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px;">
+            ${p.images.map(img=>`<div style="position:relative;">
+              <a href="${img.dataUrl}" target="_blank" rel="noopener" style="display:block;aspect-ratio:1;border-radius:8px;overflow:hidden;border:1px solid var(--border);"><img src="${img.dataUrl}" alt="${esc(img.name)}" style="width:100%;height:100%;object-fit:cover;"/></a>
+              <button class="icon-btn" data-action="remove-project-image" data-id="${p.id}" data-imgid="${img.id}" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.55);color:#fff;width:22px;height:22px;">${ICO.x}</button>
+            </div>`).join('')}
+          </div>` : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 20px;">No images yet.</p>`}
+
+          <div class="u-label" style="margin-bottom:8px;">Video Links</div>
+          <div class="log" style="margin-bottom:10px;">
+            ${p.links.length? p.links.map(l=>`<div class="log-item" style="align-items:center;">
+              <span class="log-ico">${ICO.share}</span>
+              <a href="${esc(l.url)}" target="_blank" rel="noopener" style="flex:1;color:var(--accent);text-decoration:none;font-size:12.5px;word-break:break-all;">${esc(l.label||l.url)}</a>
+              <button class="icon-btn" data-action="remove-project-link" data-id="${p.id}" data-linkid="${l.id}" style="width:24px;height:24px;">${ICO.x}</button>
+            </div>`).join('') : `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No links yet.</p>`}
+          </div>
+          <div data-form="projectlink" style="display:flex;gap:6px;flex-wrap:wrap;">
+            <input data-field="linkLabel" placeholder="Label (optional)" style="flex:1;min-width:100px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newLinkForm.label||'')}"/>
+            <input data-field="linkUrl" placeholder="https://…" style="flex:2;min-width:140px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newLinkForm.url||'')}"/>
+            <button class="btn btn-sm" data-action="add-project-link" data-id="${p.id}">Add</button>
+          </div>
+          ` : ''}
+
+          ${S.projectTab==='financials' ? `
+          <div class="card card-pad" style="margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;"><span>Income</span><strong style="color:var(--good);">${money(fin.income)}</strong></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-top:6px;"><span>Expenses</span><strong style="color:var(--crit);">${money(fin.expenses)}</strong></div>
+            <div style="height:1px;background:var(--border);margin:10px 0;"></div>
+            <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:700;"><span>Net</span><span style="color:${fin.net>=0?'var(--good)':'var(--crit)'};">${money(fin.net)}</span></div>
+          </div>
+
+          <div class="u-label" style="margin-bottom:8px;">Income</div>
+          <div class="log" style="margin-bottom:10px;">
+            ${(p.financials.income||[]).length? p.financials.income.map(i=>`<div class="log-item" style="align-items:center;">
+              <span style="flex:1;font-size:12.5px;">${esc(i.label)}</span><strong style="font-size:12.5px;">${money(i.amount)}</strong>
+              ${isAdmin?`<button class="icon-btn" data-action="remove-fin-item" data-id="${p.id}" data-kind="income" data-itemid="${i.id}" style="width:22px;height:22px;">${ICO.x}</button>`:''}
+            </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0;">No income logged.</p>`}
+          </div>
+          ${isAdmin? `<div data-form="finincome" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px;">
+            <input data-field="newFinIncomeLabel" placeholder="e.g. Sponsor — Continental Ballroom" style="flex:2;min-width:140px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newFinIncomeLabel||'')}"/>
+            <input data-field="newFinIncomeAmount" type="number" placeholder="Amount" style="flex:1;min-width:80px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newFinIncomeAmount||'')}"/>
+            <button class="btn btn-sm" data-action="add-fin-item" data-id="${p.id}" data-kind="income">Add</button>
+          </div>`:''}
+
+          <div class="u-label" style="margin-bottom:8px;">Expenses</div>
+          <div class="log" style="margin-bottom:10px;">
+            ${(p.financials.expenses||[]).length? p.financials.expenses.map(i=>`<div class="log-item" style="align-items:center;">
+              <span style="flex:1;font-size:12.5px;">${esc(i.label)}</span><strong style="font-size:12.5px;">${money(i.amount)}</strong>
+              ${isAdmin?`<button class="icon-btn" data-action="remove-fin-item" data-id="${p.id}" data-kind="expenses" data-itemid="${i.id}" style="width:22px;height:22px;">${ICO.x}</button>`:''}
+            </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0;">No expenses logged.</p>`}
+          </div>
+          ${isAdmin? `<div data-form="finexpense" style="display:flex;gap:6px;flex-wrap:wrap;">
+            <input data-field="newFinExpenseLabel" placeholder="e.g. Studio time" style="flex:2;min-width:140px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newFinExpenseLabel||'')}"/>
+            <input data-field="newFinExpenseAmount" type="number" placeholder="Amount" style="flex:1;min-width:80px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newFinExpenseAmount||'')}"/>
+            <button class="btn btn-sm" data-action="add-fin-item" data-id="${p.id}" data-kind="expenses">Add</button>
+          </div>`:''}
+          ` : ''}
+
+          ${S.projectTab==='activity' ? `
+          <div class="log">${p.log.slice().reverse().map(l=>`<div class="log-item">
+            <span class="log-ico">${l.type==='email'?ICO.mail:l.type==='sms'?ICO.sms:l.type==='success'?ICO.check:ICO.bell}</span>
+            <span><div>${esc(l.text)}</div><div class="log-time">${new Date(l.ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</div></span>
+          </div>`).join('')}</div>
+          ` : ''}
+        </div>
+    </div>
+  `;
+}
+function renderNewProjectModal(){
+  const f = S.newProjectForm;
+  const isBatch = f.mode==='recordingday';
+  const count = f.episodeCount || 2;
+  return `<div class="overlay center" data-action="overlay-close-newproject">
+    <div class="modal" data-stop data-form="newproject">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">${isBatch? 'New Recording Day' : 'New Project'}</h2><button class="icon-btn" data-action="close-new-project">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <div class="field"><label>Artist</label>
+          <div class="artist-pick">${ARTISTS.map(a=>`<div class="artist-opt ${f.artistId===a.id?'sel':''}" data-action="pick-project-artist" data-id="${a.id}">
+            <span class="avatar" data-slot="${a.slot}" style="width:34px;height:34px;font-size:12px;">${a.initials}</span><span>${a.name}</span></div>`).join('')}</div>
+        </div>
+        ${isBatch ? `
+        <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 14px;">Book the shared studio day once, then track each guest's episode as its own project with its own release date. <a href="#" data-action="new-project-mode" data-mode="simple" style="color:var(--accent);">Back to a plain project →</a></p>
+        <div class="field"><label>Recording Date</label><input type="date" data-field="recordingDate" value="${f.recordingDate||''}"/></div>
+        <div class="field"><label>How many episodes that day?</label>
+          <div class="chip-row">${[2,3].map(n=>`<button class="filter-chip ${count===n?'sel':''}" data-action="pick-episode-count" data-count="${n}">${n}</button>`).join('')}</div>
+        </div>
+        ${Array.from({length:count}).map((_,i)=>`<div class="field"><label>Guest ${i+1}</label><input data-field="guest${i+1}" value="${esc(f['guest'+(i+1)]||'')}" placeholder="Guest name"/></div>`).join('')}
+        <div class="field"><label>First Release Date</label><input type="date" data-field="releaseDate" value="${f.releaseDate||''}"/></div>
+        <div class="field"><label>Days Between Releases</label><input type="number" data-field="releaseCadenceDays" value="${f.releaseCadenceDays||7}"/></div>
+        <button class="btn btn-primary btn-block" data-action="confirm-add-project" style="margin-top:6px;">Book Recording Day + Create Episodes</button>
+        ` : `
+        <div class="field"><label>Title</label><input data-field="title" value="${esc(f.title||'')}" placeholder="e.g. Fall Tour 2026"/></div>
+        <div class="field"><label>Who it's for (optional)</label><input data-field="whoFor" value="${esc(f.whoFor||'')}" placeholder="e.g. client / label / event name"/></div>
+        <div class="field"><label>Target Date (optional)</label><input type="date" data-field="dueDate" value="${f.dueDate||''}"/></div>
+        <button class="btn btn-primary btn-block" data-action="confirm-add-project" style="margin-top:6px;">Create Project</button>
+        <a href="#" data-action="new-project-mode" data-mode="recordingday" style="display:block;text-align:center;font-size:12px;color:var(--ink-3);margin-top:10px;">Booking multiple podcast episodes on one recording day? →</a>
+        `}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ============ ARTIST-SIDE ============ */
+function renderArtistDashboard(artistId){
+  const a = artistById(artistId);
+  const evs = eventsFor(artistId);
+  const todayGig = evs.find(e=>e.date===fmtISO(new Date()) && ['booked','paid'].includes(e.status));
+  return `
+  ${renderWelcomeHeader(a.name.split(' ')[0])}
+  ${todayGig? `<div class="card card-pad" style="margin-bottom:20px;border-color:var(--accent);background:var(--accent-wash);">
+    <div style="display:flex;align-items:center;gap:8px;color:var(--accent-ink);font-weight:700;font-size:13px;margin-bottom:10px;">${ICO.mic} Today's Gig</div>
+    <div style="font-family:var(--font-display);font-size:1.15rem;font-weight:600;margin-bottom:4px;cursor:pointer;" data-action="open-event" data-id="${todayGig.id}">${esc(todayGig.type)}${todayGig.clientName?` — ${esc(todayGig.clientName)}`:''}</div>
+    <div style="font-size:13px;color:var(--ink-2);margin-bottom:2px;">${fmtTimeRange(todayGig.time, todayGig.endTime)}</div>
+    <div style="font-size:13px;color:${hasLocation(todayGig)?'var(--ink-2)':'var(--ink-3)'};margin-bottom:14px;">${hasLocation(todayGig)? esc(fullLocation(todayGig)) : 'Location TBD'}</div>
+    ${hasLocation(todayGig)? `<div style="display:flex;gap:8px;">
+      <a href="${gmapsUrl(todayGig)}" target="_blank" rel="noopener" class="btn btn-primary" style="flex:1;">${ICO.pin} Maps</a>
+      <a href="${wazeUrl(todayGig)}" target="_blank" rel="noopener" class="btn" style="flex:1;background:var(--surface);">${ICO.pin} Waze</a>
+    </div>` : ''}
+  </div>` : ''}
+  ${renderUpcomingGigsCard(evs, {days:7, showArtist:false})}
+  `;
+}
+function renderArtistFinancials(artistId){
+  const evs = eventsFor(artistId);
+  const booked = evs.filter(e=>['booked','paid'].includes(e.status));
+  const totalPayout = booked.reduce((s,e)=>s+e.balance,0);
+  const avgPayout = booked.length ? Math.round(totalPayout/booked.length) : 0;
+  const ytdPayout = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+e.balance,0);
+
+  const months=[]; for(let i=5;i>=0;i--){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-i); months.push(d); }
+  const monthlyPayout = months.map(md=>{
+    const sum = booked.filter(e=>{const ed=new Date(e.date+'T00:00:00'); return ed.getMonth()===md.getMonth()&&ed.getFullYear()===md.getFullYear();}).reduce((s,e)=>s+e.balance,0);
+    return {label: md.toLocaleDateString('en-US',{month:'short'}), val:sum};
+  });
+  const maxMonthly = Math.max(...monthlyPayout.map(m=>m.val),1);
+
+  return `
+  <div class="grid stat-row" style="margin-bottom:20px;">
+    <div class="card stat-tile"><span class="u-label">YTD Payout</span><span class="val">${money(ytdPayout)}</span><span class="sub">Received via Zelle</span></div>
+    <div class="card stat-tile"><span class="u-label">Total Booked</span><span class="val">${money(totalPayout)}</span><span class="sub">${booked.length} jobs</span></div>
+    <div class="card stat-tile"><span class="u-label">Avg Payout</span><span class="val">${money(avgPayout)}</span><span class="sub">per booking</span></div>
+    <div class="card stat-tile"><span class="u-label">Commission Rate</span><span class="val">15%</span><span class="sub">Kept by ASP</span></div>
+  </div>
+
+  <div class="card card-pad" style="margin-bottom:20px;">
+    <div class="section-head"><h2>Monthly Payout</h2></div>
+    <div class="fin-chart" style="display:flex;gap:14px;align-items:flex-end;height:120px;">
+      ${monthlyPayout.map(m=>`<div style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end;">
+        <span class="u-mono" style="font-size:11px;color:var(--ink-2);">${m.val?money(m.val):''}</span>
+        <div style="width:100%;max-width:46px;height:${Math.max(4,(m.val/maxMonthly)*80)}px;background:var(--accent);border-radius:4px 4px 0 0;opacity:.85;"></div>
+        <span class="u-label">${m.label}</span>
+      </div>`).join('')}
+    </div>
+  </div>
+
+  <div class="section-head"><h2>My Jobs (${booked.length})</h2></div>
+  <div class="card u-scroll-x table-cards"><table>
+    <thead><tr><th>Client</th><th>Date</th><th>Price</th><th>Payout</th><th>Status</th></tr></thead>
+    <tbody>${booked.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const sm=statusMeta(e);
+      return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
+        <td data-label="Client">${esc(e.clientName)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
+        <td data-label="Price" class="u-mono">${money(e.price)}</td><td data-label="Payout" class="u-mono">${money(e.balance)}</td>
+        <td data-label="Status"><span class="pill ${sm.cls}">${sm.label}</span></td></tr>`;}).join('')}
+    </tbody></table></div>
+  `;
+}
+function renderArtistGigs(artistId){
+  const evs = eventsFor(artistId).sort((a,b)=>a.date.localeCompare(b.date));
+  const upcoming = evs.filter(e=>!isPast(e.date));
+  const past = evs.filter(e=>isPast(e.date));
+  return `
+    <div class="section-head"><h2>Upcoming</h2></div>
+    ${renderEventTable(upcoming, {})}
+    <div class="section-head" style="margin-top:26px;"><h2>Past</h2></div>
+    ${renderEventTable(past, {})}
+  `;
+}
+
+/* ============ NEW LEAD MODAL ============ */
+function renderLeadChargesSection(f){
+  const charges = f.charges || [];
+  const preset = f.chargePreset || CHARGE_PRESETS[0];
+  return `<div class="field">
+    <label>Additional Fees (optional)</label>
+    ${charges.length? `<div class="ledger" style="margin-bottom:8px;">${charges.map((c,i)=>`<div class="ledger-row"><span>${esc(c.label)} <a href="#" data-action="remove-lead-charge" data-idx="${i}" style="color:var(--crit);text-decoration:none;margin-left:4px;">×</a></span><span class="amt">${money(c.amount)}</span></div>`).join('')}</div>`:''}
+    <div style="display:flex; gap:6px; align-items:flex-end; flex-wrap:wrap;">
+      <div class="field" style="flex:1;min-width:120px;"><label style="font-size:10px;">Type</label>
+        <select data-lead-charge-preset>${CHARGE_PRESETS.map(p=>`<option ${preset===p?'selected':''}>${p}</option>`).join('')}</select>
+      </div>
+      ${preset==='Other'? `<div class="field" style="flex:1;min-width:100px;"><label style="font-size:10px;">Label</label><input data-field="chargeCustomLabel" value="${esc(f.chargeCustomLabel||'')}" placeholder="Describe"/></div>`:''}
+      <div class="field" style="width:90px;"><label style="font-size:10px;">Amount</label><input type="number" data-field="chargeAmount" value="${f.chargeAmount||''}" placeholder="250"/></div>
+      <button class="btn btn-sm" data-action="add-lead-charge">+ Add</button>
+    </div>
+  </div>`;
+}
+function renderNewLeadModal(){
+  const f = S.newLeadForm;
+  const kind = f.kind || 'client';
+  const isInternal = kind==='internal';
+  const typeList = isInternal ? INTERNAL_EVENT_TYPES : EVENT_TYPES;
+  return `<div class="overlay center" data-action="overlay-close">
+    <div class="modal" data-stop data-form="lead">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">${isInternal?'New Internal Day':'New Lead'}</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <div class="chip-row">
+          <button class="filter-chip ${!isInternal?'sel':''}" data-action="pick-booking-kind" data-kind="client">Client Booking</button>
+          <button class="filter-chip ${isInternal?'sel':''}" data-action="pick-booking-kind" data-kind="internal">Internal Day</button>
+          <button class="filter-chip" data-action="switch-to-outside-booking">Outside Act</button>
+        </div>
+        <p style="font-size:12px;color:var(--ink-3);margin:0;">${isInternal? 'For recording days, filming days, rehearsals — no client, no payment, just pencils the artist’s time in.' : "Only the artist, client name, and date are required — everything else can be filled in once it's known."}</p>
+        <div class="field"><label>Artist</label>
+          <div class="chip-row">${ARTISTS.map(a=>`<button type="button" class="filter-chip ${f.artistId===a.id?'sel':''}" data-action="pick-artist" data-id="${a.id}"><span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${a.initials}</span>${esc(a.name.split(' ')[0])}</button>`).join('')}</div>
+        </div>
+        <div class="field-row">
+          ${!isInternal? `<div class="field"><label>Client Name</label><input data-field="clientName" value="${esc(f.clientName||'')}" placeholder="Full name"/></div>` : ''}
+          <div class="field"><label>Event Type</label><select data-action="pick-event-type">${typeList.map(t=>`<option ${f.type===t?'selected':''}>${t}</option>`).join('')}</select></div>
+        </div>
+        ${f.type==='Other'? `<div class="field"><label>Describe the Event Type</label><input data-field="customType" value="${esc(f.customType||'')}" placeholder="${isInternal?'e.g. Photo Shoot':'e.g. Bris, Vort, Studio Session'}"/></div>` : ''}
+        ${!isInternal? `<div class="field-row">
+          <div class="field"><label>Client Email</label><input data-field="clientEmail" value="${esc(f.clientEmail||'')}" placeholder="name@example.com"/></div>
+          <div class="field"><label>Client Phone</label><input data-field="clientPhone" value="${esc(f.clientPhone||'')}" placeholder="(555) 555-5555"/></div>
+        </div>` : ''}
+        <div class="field"><label>Date</label><input type="date" data-field="date" value="${f.date||''}"/></div>
+        <div class="field-row">
+          <div class="field"><label>Start Time</label><input type="time" data-field="time" value="${f.time||'19:00'}"/></div>
+          <div class="field"><label>End Time</label><input type="time" data-field="endTime" value="${f.endTime||''}"/></div>
+        </div>
+        <div class="field"><label>Venue Name</label><input data-field="venue" value="${esc(f.venue||'')}" placeholder="${isInternal?'Studio name':'Ateres Chaya Hall'}"/></div>
+        <div class="field-row">
+          <div class="field"><label>City</label><input data-field="city" value="${esc(f.city||'')}" placeholder="Lakewood"/></div>
+          <div class="field"><label>State</label><input data-field="state" value="${esc(f.state||'')}" placeholder="NJ"/></div>
+        </div>
+        <div class="field-row">
+          ${!isInternal? `<div class="field"><label>Price</label><input type="number" data-field="price" value="${f.price||''}" placeholder="4500"/></div>` : ''}
+          <div class="field" style="justify-content:flex-end;flex-direction:row;align-items:center;gap:8px;padding-top:18px;">
+            <input type="checkbox" id="flightck" data-field="flightNeeded" ${f.flightNeeded?'checked':''} style="width:16px;height:16px;"/>
+            <label for="flightck" style="text-transform:none;font-size:13px;color:var(--ink);font-weight:500;">Flight needed</label>
+          </div>
+        </div>
+        <div class="field" style="flex-direction:row;align-items:center;gap:8px;">
+          <input type="checkbox" id="transportck" data-field="groundTransportNeeded" ${f.groundTransportNeeded?'checked':''} style="width:16px;height:16px;"/>
+          <label for="transportck" style="text-transform:none;font-size:13px;color:var(--ink);font-weight:500;">Ground transport / driver needed</label>
+        </div>
+        ${!isInternal? renderLeadChargesSection(f) : ''}
+        <button class="btn btn-primary btn-block" data-action="submit-lead" style="margin-top:6px;">${isInternal? 'Add Internal Day — Pencil into Calendar' : 'Add Lead — Pencil into Calendar'}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderBlockTimeModal(){
+  const f = S.blockTimeForm;
+  const allDay = f.allDay!==false;
+  return `<div class="overlay center" data-action="overlay-close">
+    <div class="modal" data-stop data-form="blocktime" style="width:380px;">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">Block Time</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <p style="font-size:12px;color:var(--ink-3);margin:0;">Marks you unavailable — the office will see it and won't book you those dates.</p>
+        <div class="field-row">
+          <div class="field"><label>From</label><input type="date" data-field="date" value="${f.date||''}"/></div>
+          <div class="field"><label>To (optional)</label><input type="date" data-field="endDate" value="${f.endDate||''}"/></div>
+        </div>
+        <div class="field" style="flex-direction:row;align-items:center;gap:8px;">
+          <input type="checkbox" id="blockAllDay" data-field="allDay" ${allDay?'checked':''} style="width:16px;height:16px;"/>
+          <label for="blockAllDay" style="text-transform:none;font-size:13px;color:var(--ink);font-weight:500;">All day</label>
+        </div>
+        ${!allDay? `<div class="field-row">
+          <div class="field"><label>Start Time</label><input type="time" data-field="startTime" value="${f.startTime||''}"/></div>
+          <div class="field"><label>End Time</label><input type="time" data-field="endTime" value="${f.endTime||''}"/></div>
+        </div>` : ''}
+        <div class="field"><label>Note (optional)</label><input data-field="note" value="${esc(f.note||'')}" placeholder="e.g. Family vacation"/></div>
+        <button class="btn btn-primary btn-block" data-action="submit-block-time" style="margin-top:6px;">Block Time — Add to Calendar</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderAskAIModal(){
+  const history = S.askAIHistory;
+  const f = S.askAIForm;
+  const suggestions = isAdminUser(S.user) ? [
+    'How many open leads do we have?',
+    'What gigs are booked this month?',
+    'Any scheduling conflicts?',
+    'How is Benny Friedman doing?',
+  ] : [
+    'When is my next gig?',
+    'How many gigs do I have this month?',
+    'What is my YTD payout?',
+  ];
+  return `<div class="overlay center" data-action="overlay-close">
+    <div class="modal" data-stop data-form="askai" style="width:460px;display:flex;flex-direction:column;max-height:80vh;">
+      <div class="sheet-head"><h2 style="font-size:1.2rem;display:flex;align-items:center;gap:8px;">${ICO.sparkle} Ask AI</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
+      <div style="flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px;">
+        ${!history.length ? `
+          <p style="font-size:12.5px;color:var(--ink-3);margin:0;">Ask about gigs, leads, or an artist's schedule.</p>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            ${suggestions.map(s=>`<button class="btn btn-sm btn-ghost" style="justify-content:flex-start;" data-action="ask-ai-suggestion" data-q="${esc(s)}">${esc(s)}</button>`).join('')}
+          </div>
+        ` : history.map(h=>`
+          <div style="align-self:flex-end;max-width:85%;background:var(--accent);color:#fff;padding:9px 13px;border-radius:14px 14px 4px 14px;font-size:13px;">${esc(h.q)}</div>
+          <div style="align-self:flex-start;max-width:85%;background:var(--surface-2);padding:9px 13px;border-radius:14px 14px 14px 4px;font-size:13px;line-height:1.5;white-space:pre-line;">${h.a===null? markLoader(14) : esc(h.a)}</div>
+        `).join('')}
+      </div>
+      <div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;">
+        <input id="askAIInput" data-field="query" value="${esc(f.query||'')}" placeholder="Ask a question…" style="flex:1;padding:9px 14px;border-radius:999px;border:1px solid var(--border-strong);background:var(--surface);font-size:16px;"/>
+        <button class="icon-btn" style="background:var(--accent);color:#fff;border-radius:50%;" data-action="submit-ask-ai" title="Send">${ICO.chev('r')}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+const ARTIST_ROLES = ['Singer','Comedian','DJ'];
+function renderAddArtistModal(){
+  const f = S.addArtistForm;
+  const role = f.role || 'Singer';
+  return `<div class="overlay center" data-action="overlay-close-addartist">
+    <div class="modal" data-stop data-form="addartist" style="width:420px;">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">Add Artist</h2><button class="icon-btn" data-action="close-add-artist">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <div class="field"><label>Full Name</label><input data-field="name" value="${esc(f.name||'')}" placeholder="Full name" autofocus/></div>
+        <div class="field"><label>Role</label>
+          <div class="chip-row">${ARTIST_ROLES.map(r=>`<button class="filter-chip ${role===r?'sel':''}" data-action="pick-artist-role" data-role="${r}">${r}</button>`).join('')}</div>
+        </div>
+        <p style="font-size:12px;color:var(--ink-3);margin:0;">A login email and a "Welcome to ASP Management" message get generated automatically once you add them.</p>
+        <button class="btn btn-primary btn-block" data-action="confirm-add-artist">Add Artist</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function zelleBalance(ev){ return ev.balance + chargesTotal(ev); }
+function zelleQrUrl(ev, artist){
+  const zelleText = `Zelle payment to ${artist.email} — ${money(zelleBalance(ev))} for ${artist.name} (${ev.type}, ${fmtDateShort(ev.date)})`;
+  return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(zelleText)}`;
+}
+function renderZelleQrBlock(ev, artist){
+  return `<div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px;background:var(--surface-2);border-radius:var(--r-md);">
+    <img src="${zelleQrUrl(ev,artist)}" alt="Zelle QR code" width="180" height="180" style="border-radius:8px;background:#fff;padding:8px;"/>
+    <span class="u-mono" style="font-size:11.5px;color:var(--ink-2);">${esc(artist.email)}</span>
+  </div>
+  <p style="font-size:10.5px;color:var(--ink-3);margin:14px 0 0;text-align:center;">QR points to a mock Zelle reference — swap in the real Zelle deep link once ASP is online.</p>`;
+}
+function renderReminderPreview(){
+  const ev = getEvent(S.eventId); if(!ev) return '';
+  const artist = artistById(ev.artistId);
+  const balance = zelleBalance(ev);
+  return `<div class="overlay center" data-action="overlay-close-reminderpreview">
+    <div class="doc" data-stop style="width:440px;">
+      <div class="sheet-head"><h2 style="font-size:1.1rem;">Reminder Email Preview</h2><button class="icon-btn" data-action="close-reminder-preview">${ICO.x}</button></div>
+      <div class="doc-body" style="padding:24px 26px 30px;">
+        <div style="font-size:12.5px;line-height:1.6;margin-bottom:16px;">
+          <div><strong>To:</strong> ${esc(ev.clientEmail)}</div>
+          <div><strong>Subject:</strong> Balance reminder — ${esc(artist.name)}, ${esc(fmtDateShort(ev.date))}</div>
+          <hr style="border:none;border-top:1px solid var(--border);margin:10px 0;"/>
+          <p style="margin:0 0 8px;">Hi ${esc(ev.clientName.split(' ')[0])},</p>
+          <p style="margin:0 0 8px;">Just a reminder — the remaining balance of ${money(balance)} for ${esc(artist.name)}'s ${esc(ev.type)} on ${esc(fmtDate(ev.date))} is due via Zelle. Scan the code below or send to ${esc(artist.email)}.</p>
+          ${hasLocation(ev)? `<p style="margin:0 0 8px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:var(--accent);">Open in Maps</a></p>` : ''}
+        </div>
+        ${renderZelleQrBlock(ev, artist)}
+      </div>
+    </div>
+  </div>`;
+}
+function renderBookingConfirmationPreview(){
+  const ev = getEvent(S.eventId); if(!ev) return '';
+  const artist = artistById(ev.artistId);
+  const balance = zelleBalance(ev);
+  return `<div class="overlay center" data-action="overlay-close-bookingconfirmation">
+    <div class="doc" data-stop style="width:440px;">
+      <div class="sheet-head"><h2 style="font-size:1.1rem;">Booking Confirmation Preview</h2><button class="icon-btn" data-action="close-booking-confirmation">${ICO.x}</button></div>
+      <div class="doc-body" style="padding:24px 26px 30px;">
+        <div style="font-size:12.5px;line-height:1.6;margin-bottom:16px;">
+          <div><strong>To:</strong> ${esc(ev.clientEmail)}</div>
+          <div><strong>Subject:</strong> You're booked! — ${esc(artist.name)}, ${esc(fmtDateShort(ev.date))}</div>
+          <hr style="border:none;border-top:1px solid var(--border);margin:10px 0;"/>
+          <p style="margin:0 0 8px;">Hi ${esc(ev.clientName.split(' ')[0])},</p>
+          <p style="margin:0 0 8px;">You're all set — ${esc(artist.name)} is booked for your ${esc(ev.type)} on ${esc(fmtDate(ev.date))} at ${esc(fmtTime(ev.time))}.</p>
+          ${hasLocation(ev)? `<p style="margin:0 0 8px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:var(--accent);">Open in Maps</a></p>` : ''}
+          <p style="margin:0 0 8px;">Remaining balance of ${money(balance)} is due via Zelle before the event — scan the code below or send directly to ${esc(artist.email)}.</p>
+        </div>
+        ${renderZelleQrBlock(ev, artist)}
+      </div>
+    </div>
+  </div>`;
+}
+function renderWelcomeEmailPreview(){
+  const w = S.newArtistWelcome; if(!w) return '';
+  return `<div class="overlay center" data-action="overlay-close-welcome">
+    <div class="doc" data-stop style="width:480px;">
+      <div class="sheet-head"><h2 style="font-size:1.1rem;">${ICO.check} Artist Added</h2><button class="icon-btn" data-action="close-welcome">${ICO.x}</button></div>
+      <div class="doc-body" style="padding:26px 28px 30px;">
+        <p style="font-size:13px;color:var(--ink-2);margin:0 0 16px;"><strong style="color:var(--ink);">${esc(w.name)}</strong> was added to the roster with login <strong style="color:var(--ink);">${esc(w.email)}</strong>. A welcome email was sent:</p>
+        <div class="card card-pad" style="background:var(--surface-2);">
+          <div class="u-label" style="margin-bottom:8px;">Email Preview</div>
+          <div style="font-size:12.5px;line-height:1.6;">
+            <div><strong>To:</strong> ${esc(w.email)}</div>
+            <div><strong>Subject:</strong> Welcome to ASP Management</div>
+            <hr style="border:none;border-top:1px solid var(--border);margin:10px 0;"/>
+            <p style="margin:0 0 8px;">Hi ${esc(w.name.split(' ')[0])},</p>
+            <p style="margin:0 0 8px;">Welcome to ASP! Your bookings dashboard is ready — you'll see every upcoming gig, its details, and your payout breakdown in one place.</p>
+            <p style="margin:0 0 8px;">Sign in any time at ${esc(w.email)} — no separate password needed.</p>
+            <p style="margin:0;">— ASP Artist Management</p>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-block" data-action="close-welcome" style="margin-top:16px;">Done</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ============ EVENT SHEET ============ */
+function renderEventSheet(ev){
+  if(!ev) return '';
+  const a = artistById(ev.artistId);
+  const isAdmin = isAdminUser(S.user);
+  const sm = statusMeta(ev);
+  const steps = [
+    {key:'lead', label:'Lead'}, {key:'negotiating', label:'Negotiating'}, {key:'contract_sent', label:'Contract Sent'},
+    {key:'booked', label:'Booked'}, {key:'paid', label:'Paid in Full'},
+  ];
+  const order = ['lead','negotiating','contract_sent','booked','paid'];
+  const curIdx = ev.status==='paid' ? 4 : order.indexOf(ev.status);
+
+  return `<div class="overlay" data-action="overlay-close">
+    <div class="sheet" data-stop>
+      ${S.showEventMenu? `<div class="kebab-scrim"></div>`:''}
+      <div class="sheet-head">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="avatar" data-slot="${a.slot}" style="width:38px;height:38px;">${a.initials}</span>
+          <div><strong style="font-family:var(--font-display);font-size:1.2rem;display:block;">${esc(a.name)}</strong>
+          <span class="pill ${sm.cls}">${sm.label}</span></div>
+        </div>
+        <div class="kebab-menu-wrap" style="display:flex;gap:4px;align-items:center;position:relative;">
+          ${isAdmin? `<button class="icon-btn" data-action="open-edit-event" title="Edit details">${ICO.edit}</button>`:''}
+          <button class="icon-btn" data-action="toggle-event-menu">${ICO.kebab}</button>
+          ${S.showEventMenu? `<div class="kebab-dropdown">
+            <button class="kebab-item" data-action="share-event" data-id="${ev.id}">${ICO.share} Share</button>
+            <button class="kebab-item danger" data-action="delete-event" data-id="${ev.id}">${ICO.trash} Delete ${ev.unpaid?'Internal Day':ev.status==='lead'?'Lead':'Gig'}</button>
+          </div>`:''}
+          <button class="icon-btn" data-action="close-sheet">${ICO.x}</button>
+        </div>
+      </div>
+      <div class="sheet-body">
+
+        ${!ev.unpaid ? `<div class="timeline">
+          ${steps.map((s,i)=>`<div class="tl-step ${i<curIdx?'done':''} ${i===curIdx?'current':''}"><span class="tl-line"></span>
+            <span class="tl-dot">${i<curIdx?ICO.check:i+1}</span><span class="tl-label">${s.label}</span></div>`).join('')}
+        </div>` : ''}
+
+        <div class="card card-pad" style="display:flex;flex-direction:column;gap:9px;">
+          ${!ev.unpaid ? `<div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">${ICO.pin} Client</span><strong>${esc(ev.clientName)}</strong></div>` : ''}
+          <div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">Type</span><strong>${esc(ev.type)}</strong></div>
+          <div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">${ICO.clock} Date &amp; Time</span><strong class="u-mono">${fmtDate(ev.date)} · ${fmtTimeRange(ev.time, ev.endTime)}</strong></div>
+          <div style="display:flex;justify-content:space-between;font-size:13.5px;">
+            <span style="color:var(--ink-2);">${ICO.pin} Venue</span>
+            <span style="text-align:right;">
+              <strong>${ev.venue? esc(ev.venue) : `<span style="color:var(--ink-3);font-weight:500;">TBD</span>`}${(ev.city||ev.state)?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.city)}${ev.city&&ev.state?', ':''}${esc(ev.state)}</span>`:''}</strong>
+              ${hasLocation(ev)? `<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px;">
+                <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="font-size:11px;font-weight:700;color:var(--accent);text-decoration:none;">Maps</a>
+                <a href="${wazeUrl(ev)}" target="_blank" rel="noopener" style="font-size:11px;font-weight:700;color:var(--accent);text-decoration:none;">Waze</a>
+              </div>`:''}
+            </span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;">
+            <span style="color:var(--ink-2);">Dress Code</span>
+            <span style="display:flex;align-items:center;gap:6px;">
+              <strong style="text-align:right;">${ev.dressCode? esc(ev.dressCode) : `<span style="color:var(--ink-3);font-weight:500;">${isAdmin?'Not set':'TBD'}</span>`}</strong>
+              ${isAdmin? `<button class="icon-btn" data-action="open-dresscode-form" style="width:20px;height:20px;" title="Edit dress code">${ICO.edit}</button>`:''}
+            </span>
+          </div>
+          ${isAdmin && !ev.unpaid?`<div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;">${esc(ev.clientEmail)}<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.clientPhone)}</span></strong></div>`:''}
+        </div>
+
+        ${renderConflictWarning(ev)}
+        ${isInternational(ev) && !ev.intlOpportunityDismissed && !isPast(ev.date) ? `<div class="card card-pad" style="border-color:var(--accent);background:var(--accent-wash);">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;color:var(--accent-ink);font-weight:700;font-size:13px;">${ICO.plane} ${esc(a.name)} will be in ${esc(ev.city)}, ${esc(ev.state)}</div>
+            ${isAdmin?`<button class="icon-btn" data-action="dismiss-intl" data-id="${ev.id}" title="Dismiss" style="width:22px;height:22px;color:var(--accent-ink);flex:none;">${ICO.x}</button>`:''}
+          </div>
+          ${isAdmin? `<p style="font-size:12.5px;color:var(--accent-ink);margin:6px 0 0;">Worth reaching out to contacts nearby — a good window to line up more bookings while ${esc(a.name.split(' ')[0])} is already out there.</p>` : `<p style="font-size:12.5px;color:var(--accent-ink);margin:6px 0 0;">Let the office know if you have contacts nearby — good window to add more bookings on this trip.</p>`}
+        </div>` : ''}
+        ${renderFlightBlock(ev, isAdmin)}
+        ${renderGroundTransportBlock(ev, isAdmin)}
+        ${(ev.flightBooked || ev.groundTransportBooked) ? `<div style="display:flex;gap:8px;">
+          <button class="btn" style="flex:1;justify-content:flex-start;" data-action="view-itinerary" data-id="${ev.id}">${ICO.suitcase} View Itinerary</button>
+          ${isAdmin? `<button class="btn btn-sm" data-action="email-itinerary" data-id="${ev.id}">${ICO.mail} Email to Artist</button>` : ''}
+        </div>` : ''}
+        ${renderPrepSheets(ev, isAdmin)}
+        ${!isAdmin ? `<div>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-primary btn-block" data-action="gcal" data-id="${ev.id}">${ICO.cal} Add to Google Calendar</button>
+              <button class="btn btn-block" data-action="ics" data-id="${ev.id}">Download .ics</button>
+            </div>
+            <p style="font-size:11px;color:var(--ink-3);text-align:center;margin:8px 0 0;">Once ASP is online, gigs will sync to your Google Calendar automatically — no clicking needed. Add your Google account to the Apple Calendar app on iPhone and it'll show up there too.</p>
+          </div>`:''}
+
+        ${isAdmin ? renderAdminActions(ev) : ''}
+
+        ${!ev.unpaid ? `<button class="btn btn-sm btn-ghost" data-action="view-contract" data-id="${ev.id}" style="justify-content:flex-start;color:var(--ink-2);">${ICO.leads} ${ev.status==='lead'?'Preview Draft Contract':'View Contract'}</button>` : ''}
+        ${!ev.unpaid ? renderLedger(ev, isAdmin, {compact:true}) : ''}
+
+        <div>
+          <div class="section-head" style="margin-bottom:8px;"><h2 style="font-size:1rem;">Activity</h2></div>
+          <div class="log">${ev.log.slice().reverse().map(l=>`<div class="log-item">
+            <span class="log-ico ${l.type==='warning'?'warn':''}">${l.type==='email'?ICO.mail:l.type==='sms'?ICO.sms:l.type==='success'?ICO.check:l.type==='warning'?ICO.alert:ICO.bell}</span>
+            <span><div>${esc(l.text)}</div><div class="log-time">${new Date(l.ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</div></span>
+          </div>`).join('')}</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderConflictWarning(ev){
+  const conflicts = findConflicts(ev);
+  if(!conflicts.length) return '';
+  return `<div class="card card-pad" style="border-color:var(--crit);background:var(--crit-wash);">
+    <div style="display:flex;align-items:center;gap:8px;color:var(--crit-ink);font-weight:700;font-size:13px;">${ICO.alert} Scheduling conflict</div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">
+      ${conflicts.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--crit-ink);cursor:pointer;" data-action="open-event" data-id="${c.id}">
+        <span>${fmtDateShort(c.date)} — ${c.clientName ? `${esc(c.clientName)} (${esc(c.type)})` : esc(c.type)}${c.date!==ev.date?' · overlaps via flight travel':''}</span>
+        <span style="text-decoration:underline;">View</span>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+function renderFlightBlock(ev, isAdmin){
+  if(!ev.flightNeeded) return isAdmin ? `<button class="btn btn-ghost" data-action="toggle-flight" data-id="${ev.id}" style="justify-content:flex-start;color:var(--ink-2);">${ICO.checkSquare} Mark flight needed</button>` : '';
+  if(!ev.flightBooked){
+    if(!isAdmin) return '';
+    return `<div class="card card-pad" style="border-color:var(--warn);background:var(--warn-wash);">
+      <div style="display:flex;align-items:center;gap:8px;color:var(--warn-ink);font-weight:700;font-size:13px;">${ICO.plane} Flight needed — booking secretary notified</div>
+      <button class="btn btn-sm" style="margin-top:10px;" data-action="open-flight-form" data-id="${ev.id}">Add flight info</button>
+    </div>`;
+  }
+  const f = ev.flight;
+  const trackable = !!(f.flightNumber || (f.confirmation && f.confirmation!=='—'));
+  const checking = S.checkingFlightId===ev.id;
+  return `<div class="card card-pad">
+    <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--good-ink);">${ICO.plane} Flight booked</div>
+    <div class="ledger" style="margin-top:8px;">
+      <div class="ledger-row"><span>Airline</span><span class="amt">${esc(f.airline)}</span></div>
+      ${f.flightNumber?`<div class="ledger-row"><span>Flight #</span><span class="amt">${esc(f.flightNumber)}</span></div>`:''}
+      <div class="ledger-row"><span>Confirmation</span><span class="amt">${esc(f.confirmation)}</span></div>
+      <div class="ledger-row"><span>Depart</span><span class="amt">${esc(fmtFlightDateTime(f.depart))}</span></div>
+      <div class="ledger-row"><span>Arrive</span><span class="amt">${esc(fmtFlightDateTime(f.arrive))}</span></div>
+      ${f.notes?`<div class="ledger-row"><span>Notes</span><span class="amt">${esc(f.notes)}</span></div>`:''}
+    </div>
+    ${trackable? `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="u-label">Flight Tracking</span>
+          ${f.trackingStatus? `<span class="pill pill-good">${esc(f.trackingStatus)}</span>` : `<span class="pill pill-neutral">Not checked yet</span>`}
+        </div>
+        <button class="btn btn-sm" data-action="check-flight-status" data-id="${ev.id}" ${checking?'disabled':''} style="min-width:118px;justify-content:center;">${checking? markLoader(12) : 'Check for Update'}</button>
+      </div>
+      ${f.trackingStatusAt? `<div style="font-size:11px;color:var(--ink-3);margin-top:6px;">Last checked ${new Date(f.trackingStatusAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})} — emailed to ${artistById(ev.artistId).name} in an ASP-branded update.</div>` : ''}
+    </div>` : ''}
+  </div>`;
+}
+function renderGroundTransportBlock(ev, isAdmin){
+  if(!ev.groundTransportNeeded) return isAdmin ? `<button class="btn btn-ghost" data-action="toggle-ground-transport" data-id="${ev.id}" style="justify-content:flex-start;color:var(--ink-2);">${ICO.checkSquare} Mark ground transport needed</button>` : '';
+  if(!ev.groundTransportBooked){
+    if(!isAdmin) return '';
+    return `<div class="card card-pad" style="border-color:var(--warn);background:var(--warn-wash);">
+      <div style="display:flex;align-items:center;gap:8px;color:var(--warn-ink);font-weight:700;font-size:13px;">${ICO.car} Driver needed — booking secretary notified</div>
+      <button class="btn btn-sm" style="margin-top:10px;" data-action="open-transport-form" data-id="${ev.id}">Add driver info</button>
+    </div>`;
+  }
+  const g = ev.groundTransport;
+  return `<div class="card card-pad">
+    <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--good-ink);">${ICO.car} Driver booked</div>
+    <div class="ledger" style="margin-top:8px;">
+      <div class="ledger-row"><span>Driver</span><span class="amt">${esc(g.driverName)}</span></div>
+      <div class="ledger-row"><span>Phone</span><span class="amt">${esc(g.driverPhone)}</span></div>
+      <div class="ledger-row"><span>Pickup</span><span class="amt">${esc(fmtFlightDateTime(g.pickupTime))} · ${esc(g.pickupLocation)}</span></div>
+      <div class="ledger-row"><span>Drop-off</span><span class="amt">${esc(fmtFlightDateTime(g.dropoffTime))} · ${esc(g.dropoffLocation)}</span></div>
+      ${g.notes?`<div class="ledger-row"><span>Notes</span><span class="amt">${esc(g.notes)}</span></div>`:''}
+    </div>
+  </div>`;
+}
+
+function renderLedger(ev, isAdmin, opts={}){
+  const extras = ev.charges||[];
+  const extrasSum = chargesTotal(ev);
+  const total = ev.price + extrasSum;
+  const artistTotal = ev.balance + extrasSum;
+  const compact = !!opts.compact;
+  return `<div class="card card-pad" style="${compact?'padding:12px 14px;':''}">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
+      <div class="u-label">Price Breakdown</div>
+      ${isAdmin? `<button class="btn btn-sm btn-ghost" data-action="toggle-add-charge" data-id="${ev.id}" style="padding:2px 6px;">${S.showAddCharge?'Cancel':'+ Add Charge'}</button>`:''}
+    </div>
+    <div class="ledger" style="${compact?'font-size:11.5px;':''}">
+      <div class="ledger-row"><span>Performance Fee</span><span class="amt">${money(ev.price)}</span></div>
+      ${extras.map(c=>`<div class="ledger-row"><span>${esc(c.label)}${c.addedAfterSigning?` <span class="pill pill-warn" style="padding:1px 6px;font-size:9px;vertical-align:1px;">notify client</span>`:''}${isAdmin?` <a href="#" data-action="remove-charge" data-id="${ev.id}" data-chargeid="${c.id}" style="color:var(--crit);text-decoration:none;margin-left:4px;">×</a>`:''}</span><span class="amt">${money(c.amount)}</span></div>`).join('')}
+      ${S.showAddCharge? renderAddChargeRow(ev) : ''}
+      <div class="ledger-row"><span>Total charged to client</span><span class="amt">${money(total)}</span></div>
+      <div class="ledger-row"><span>ASP booking fee (15% of performance fee) ${ev.depositReceived?'· received':'· due via QuickBooks invoice'}</span><span class="amt">${money(ev.commission)}</span></div>
+      <div class="ledger-row total"><span>${isAdmin?'Artist payout (85% + charges, via Zelle)':'You walk away with'}</span><span class="amt">${money(artistTotal)}</span></div>
+      <div class="ledger-row"><span>Balance status</span><span class="amt">${ev.balanceReceived? `Received ${fmtDateShort(ev.balanceReceivedDate)}` : (ev.depositReceived? 'Pending — reminders active':'—')}</span></div>
+    </div>
+  </div>`;
+}
+
+function renderAddChargeRow(ev){
+  const f = S.addChargeForm;
+  return `<div data-form="charge" style="display:flex; gap:6px; padding:8px 0; border-bottom:1px dashed var(--border); align-items:flex-end; flex-wrap:wrap;">
+    <div class="field" style="flex:1;min-width:120px;"><label>Type</label>
+      <select data-charge-preset>${CHARGE_PRESETS.map(p=>`<option ${f.preset===p?'selected':''}>${p}</option>`).join('')}</select>
+    </div>
+    ${(f.preset||CHARGE_PRESETS[0])==='Other'? `<div class="field" style="flex:1;min-width:100px;"><label>Label</label><input data-field="customLabel" value="${esc(f.customLabel||'')}" placeholder="Describe charge"/></div>`:''}
+    <div class="field" style="width:100px;"><label>Amount</label><input type="number" data-field="amount" value="${f.amount||''}" placeholder="250"/></div>
+    <button class="btn btn-sm btn-primary" data-action="confirm-add-charge" data-id="${ev.id}">Add</button>
+  </div>`;
+}
+
+function renderPrepSheets(ev, isAdmin){
+  const files = ev.prepSheets||[];
+  return `<div class="card card-pad">
+    <div class="u-label" style="margin-bottom:8px;">Prep Sheets</div>
+    ${files.length? `<div class="log" style="margin-bottom:${isAdmin?'10px':'0'};">${files.map(f=>`
+      <div class="log-item" style="align-items:center;">
+        <span class="log-ico">${ICO.leads}</span>
+        <span style="flex:1;">${esc(f.name)}<div class="log-time">Added ${fmtDateShort(f.uploadedAt)}</div></span>
+        <a href="${f.dataUrl}" target="_blank" rel="noopener" class="btn btn-sm">View</a>
+        ${isAdmin?`<button class="icon-btn" data-action="remove-prep" data-id="${ev.id}" data-prepid="${f.id}" title="Remove">${ICO.x}</button>`:''}
+      </div>`).join('')}</div>` : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 ${isAdmin?'10px':'0'};">No prep sheets uploaded yet.</p>`}
+    ${isAdmin? `<label class="btn btn-sm" style="cursor:pointer;display:inline-flex;">Upload File<input type="file" data-action="upload-prep" data-id="${ev.id}" multiple style="display:none;"/></label>
+      <p style="font-size:10.5px;color:var(--ink-3);margin:8px 0 0;">Stored in this demo session only — swapped for real cloud storage once ASP is online.</p>` : ''}
+  </div>`;
+}
+
+
+function renderAdminActions(ev){
+  const buttons=[];
+  if(ev.status==='lead'||ev.status==='negotiating'){
+    buttons.push(`<button class="btn btn-primary btn-block" data-action="send-contract" data-id="${ev.id}">${ICO.mail} Send Contract + Invoice (15% booking fee)</button>`);
+  }
+  if(ev.status==='contract_sent'){
+    buttons.push(`<button class="btn btn-primary btn-block" data-action="mark-deposit" data-id="${ev.id}">${ICO.check} Mark Booking Fee Received — Lock In Booking</button>`);
+  }
+  if(ev.status==='booked' && !ev.balanceReceived){
+    buttons.push(`<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
+      <div class="u-label">Balance Reminders — Email + Text</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;">
+        <span>Remind every</span>
+        <select data-action="set-reminder-interval" data-id="${ev.id}" style="padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);">
+          ${[3,5,7,10,14].map(n=>`<option value="${n}" ${ev.reminderIntervalDays===n?'selected':''}>${n} days</option>`).join('')}
+        </select>
+      </div>
+      <div style="font-size:12px;color:var(--ink-2);">Last sent: ${ev.lastReminderSent? fmtDateShort(ev.lastReminderSent): 'never'}</div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-sm" data-action="send-reminder" data-id="${ev.id}" style="flex:1;min-width:0;white-space:normal;">Send reminder now</button>
+        <button class="btn btn-sm btn-primary" data-action="mark-balance" data-id="${ev.id}" style="flex:1;min-width:0;white-space:normal;">${ICO.check} Mark Balance Received</button>
+      </div>
+      <button class="btn btn-sm btn-ghost" data-action="preview-reminder" data-id="${ev.id}" style="color:var(--ink-2);">${ICO.sms} Preview reminder email (Zelle QR)</button>
+    </div>`);
+  }
+  return buttons.length? `<div style="display:flex;flex-direction:column;gap:10px;">${buttons.join('')}</div>` : '';
+}
+
+function renderFlightFormOverlay(){
+  const ev = getEvent(S.eventId); if(!ev) return '';
+  const f = S.flightForm;
+  return `<div class="overlay center" data-action="flight-overlay-close">
+    <div class="modal" data-stop data-form="flight" style="width:420px;">
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Flight Info</h2><button class="icon-btn" data-action="close-flight-form">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <div class="field"><label>Airline</label><input data-field="airline" value="${esc(f.airline||'')}" placeholder="Delta"/></div>
+        <div class="field-row">
+          <div class="field"><label>Flight #</label><input data-field="flightNumber" value="${esc(f.flightNumber||'')}" placeholder="DL1234"/></div>
+          <div class="field"><label>Confirmation #</label><input data-field="confirmation" value="${esc(f.confirmation||'')}" placeholder="CNF1234"/></div>
+        </div>
+        <p style="font-size:11px;color:var(--ink-3);margin:-2px 0 4px;">Flight # or confirmation # enables live flight tracking — the artist gets ASP-branded status updates through the app.</p>
+        <div class="u-label" style="margin-top:4px;">Departure</div>
+        <div class="field-row">
+          <div class="field"><label>Date</label><input type="date" data-field="departDate" value="${f.departDate||''}"/></div>
+          <div class="field"><label>Time</label><input type="time" data-field="departTime" value="${f.departTime||''}"/></div>
+        </div>
+        <div class="u-label" style="margin-top:4px;">Arrival</div>
+        <div class="field-row">
+          <div class="field"><label>Date</label><input type="date" data-field="arriveDate" value="${f.arriveDate||''}"/></div>
+          <div class="field"><label>Time</label><input type="time" data-field="arriveTime" value="${f.arriveTime||''}"/></div>
+        </div>
+        <button class="btn btn-primary btn-block" data-action="save-flight" data-id="${ev.id}">Save &amp; Notify Artist</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderTransportFormOverlay(){
+  const ev = getEvent(S.eventId); if(!ev) return '';
+  const f = S.transportForm;
+  return `<div class="overlay center" data-action="transport-overlay-close">
+    <div class="modal" data-stop data-form="transport" style="width:420px;">
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Ground Transport Info</h2><button class="icon-btn" data-action="close-transport-form">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <div class="field"><label>Driver Name</label><input data-field="driverName" value="${esc(f.driverName||'')}" placeholder="Yossi K."/></div>
+        <div class="field"><label>Driver Phone</label><input data-field="driverPhone" value="${esc(f.driverPhone||'')}" placeholder="(347) 555-1234"/></div>
+        <div class="u-label" style="margin-top:4px;">Pickup</div>
+        <div class="field-row">
+          <div class="field"><label>Date</label><input type="date" data-field="pickupDate" value="${f.pickupDate||''}"/></div>
+          <div class="field"><label>Time</label><input type="time" data-field="pickupTime" value="${f.pickupTime||''}"/></div>
+        </div>
+        <div class="field"><label>Pickup Location</label><input data-field="pickupLocation" value="${esc(f.pickupLocation||'')}" placeholder="Airport / home"/></div>
+        <div class="u-label" style="margin-top:4px;">Drop-off</div>
+        <div class="field-row">
+          <div class="field"><label>Date</label><input type="date" data-field="dropoffDate" value="${f.dropoffDate||''}"/></div>
+          <div class="field"><label>Time</label><input type="time" data-field="dropoffTime" value="${f.dropoffTime||''}"/></div>
+        </div>
+        <div class="field"><label>Drop-off Location</label><input data-field="dropoffLocation" value="${esc(f.dropoffLocation||'')}" placeholder="Venue"/></div>
+        <div class="field"><label>Notes</label><input data-field="notes" value="${esc(f.notes||'')}" placeholder="Sedan, one-way"/></div>
+        <button class="btn btn-primary btn-block" data-action="save-transport" data-id="${ev.id}">Save &amp; Notify Artist</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderDressCodeFormOverlay(){
+  const ev = getEvent(S.eventId); if(!ev) return '';
+  const f = S.dressCodeForm;
+  return `<div class="overlay center" data-action="dresscode-overlay-close">
+    <div class="modal" data-stop data-form="dresscode" style="width:380px;">
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Dress Code</h2><button class="icon-btn" data-action="close-dresscode-form">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <div class="field"><label>Dress Code</label><input data-field="dressCode" value="${esc(f.dressCode||'')}" placeholder="e.g. Black tie, all black"/></div>
+        <div class="chip-row">${DRESS_CODES.map(d=>`<button class="filter-chip" data-action="pick-dresscode" data-value="${esc(d)}">${esc(d)}</button>`).join('')}</div>
+        <button class="btn btn-primary btn-block" data-action="save-dresscode" data-id="${ev.id}" style="margin-top:6px;">Save &amp; Notify Artist</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderEditEventFormOverlay(){
+  const ev = getEvent(S.eventId); if(!ev) return '';
+  const f = S.editEventForm;
+  const typeList = ev.unpaid ? INTERNAL_EVENT_TYPES : EVENT_TYPES;
+  const type = f.type!==undefined? f.type : ev.type;
+  return `<div class="overlay center" data-action="editevent-overlay-close">
+    <div class="modal" data-stop data-form="editevent">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">Edit ${ev.unpaid?'Internal Day':'Details'}</h2><button class="icon-btn" data-action="close-edit-event">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <div class="field-row">
+          ${!ev.unpaid? `<div class="field"><label>Client Name</label><input data-field="clientName" value="${esc(f.clientName!==undefined?f.clientName:(ev.clientName||''))}"/></div>`:''}
+          <div class="field"><label>Event Type</label><select class="edit-event-type-select">${typeList.map(t=>`<option ${type===t?'selected':''}>${esc(t)}</option>`).join('')}${!typeList.includes(type)?`<option selected>${esc(type)}</option>`:''}</select></div>
+        </div>
+        ${!ev.unpaid? `<div class="field-row">
+          <div class="field"><label>Client Email</label><input data-field="clientEmail" value="${esc(f.clientEmail!==undefined?f.clientEmail:(ev.clientEmail||''))}"/></div>
+          <div class="field"><label>Client Phone</label><input data-field="clientPhone" value="${esc(f.clientPhone!==undefined?f.clientPhone:(ev.clientPhone||''))}"/></div>
+        </div>` : ''}
+        <div class="field"><label>Date</label><input type="date" data-field="date" value="${f.date!==undefined?f.date:ev.date}"/></div>
+        <div class="field-row">
+          <div class="field"><label>Start Time</label><input type="time" data-field="time" value="${f.time!==undefined?f.time:ev.time}"/></div>
+          <div class="field"><label>End Time</label><input type="time" data-field="endTime" value="${f.endTime!==undefined?f.endTime:(ev.endTime||'')}"/></div>
+        </div>
+        <div class="field"><label>Venue Name</label><input data-field="venue" value="${esc(f.venue!==undefined?f.venue:(ev.venue||''))}"/></div>
+        <div class="field-row">
+          <div class="field"><label>City</label><input data-field="city" value="${esc(f.city!==undefined?f.city:(ev.city||''))}"/></div>
+          <div class="field"><label>State</label><input data-field="state" value="${esc(f.state!==undefined?f.state:(ev.state||''))}"/></div>
+        </div>
+        ${!ev.unpaid? `<div class="field"><label>Price</label><input type="number" data-field="price" value="${f.price!==undefined?f.price:ev.price}"/>
+          <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Commission (15%) and payout recalculate automatically if you change this.</p>
+        </div>` : ''}
+        <button class="btn btn-primary btn-block" data-action="save-edit-event" data-id="${ev.id}" style="margin-top:6px;">Save Changes</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderNewInvoiceModal(){
+  const f = S.newInvoiceForm;
+  const items = f.items || [];
+  const total = items.reduce((s,it)=>s+(Number(it.amount)||0),0);
+  return `<div class="overlay center" data-action="overlay-close">
+    <div class="modal" data-stop data-form="newinvoice" style="width:440px;">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">New Invoice</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <p style="font-size:12px;color:var(--ink-3);margin:0;">For anything outside a gig booking — reimbursements, merch, extra fees. Branded as ASP, not tied to a specific event.</p>
+        <div class="field-row">
+          <div class="field"><label>Bill To</label><input data-field="clientName" value="${esc(f.clientName||'')}" placeholder="Client or company name"/></div>
+          <div class="field"><label>Email</label><input data-field="clientEmail" value="${esc(f.clientEmail||'')}" placeholder="name@example.com"/></div>
+        </div>
+        <div class="field">
+          <label>Line Items</label>
+          ${items.length? `<div class="ledger" style="margin-bottom:8px;">${items.map((it,i)=>`<div class="ledger-row"><span>${esc(it.label)} <a href="#" data-action="remove-invoice-item" data-idx="${i}" style="color:var(--crit);text-decoration:none;margin-left:4px;">×</a></span><span class="amt">${money(it.amount)}</span></div>`).join('')}</div>` : ''}
+          <div style="display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;">
+            <div class="field" style="flex:1;min-width:140px;"><label style="font-size:10px;">Description</label><input data-field="itemLabel" value="${esc(f.itemLabel||'')}" placeholder="e.g. Equipment rental"/></div>
+            <div class="field" style="width:100px;"><label style="font-size:10px;">Amount</label><input type="number" data-field="itemAmount" value="${f.itemAmount||''}" placeholder="250"/></div>
+            <button class="btn btn-sm" data-action="add-invoice-item">+ Add</button>
+          </div>
+        </div>
+        <div class="field"><label>Notes (optional)</label><input data-field="notes" value="${esc(f.notes||'')}" placeholder="Reference / memo"/></div>
+        <div class="ledger" style="margin:4px 0 0;"><div class="ledger-row total"><span>Total</span><span class="amt">${money(total)}</span></div></div>
+        <button class="btn btn-primary btn-block" data-action="submit-invoice" style="margin-top:6px;">Send Invoice</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderNewOutsideBookingModal(){
+  const f = S.newOutsideBookingForm;
+  const total = Number(f.totalAmount)||0;
+  const cut = Number(f.aspCut)||0;
+  return `<div class="overlay center" data-action="overlay-close">
+    <div class="modal" data-stop data-form="newoutsidebooking" style="width:440px;">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">New Outside Booking</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <p style="font-size:12px;color:var(--ink-3);margin:0;">For jobs that don't involve one of our own roster artists — an outside act we're coordinating or referring.</p>
+        <div class="field"><label>Performer</label><input data-field="performerName" value="${esc(f.performerName||'')}" placeholder="Outside act's name"/></div>
+        <div class="field-row">
+          <div class="field"><label>Client</label><input data-field="clientName" value="${esc(f.clientName||'')}" placeholder="Client or venue"/></div>
+          <div class="field"><label>Client Email (optional)</label><input data-field="clientEmail" value="${esc(f.clientEmail||'')}" placeholder="name@example.com"/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Date</label><input type="date" data-field="date" value="${f.date||''}"/></div>
+          <div class="field"><label>Venue (optional)</label><input data-field="venue" value="${esc(f.venue||'')}" placeholder="Venue name"/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Total Booking Amount</label><input type="number" data-field="totalAmount" value="${f.totalAmount||''}" placeholder="4200"/></div>
+          <div class="field"><label>ASP's Cut</label><input type="number" data-field="aspCut" value="${f.aspCut||''}" placeholder="500"/></div>
+        </div>
+        <p style="font-size:11.5px;color:var(--ink-3);margin:-4px 0 0;">If ASP collects the full amount and pays the performer out, set the cut to what ASP keeps. If ASP only bills a coordination fee (client pays the performer directly), set the cut equal to the total.</p>
+        <div class="field"><label>Notes (optional)</label><input data-field="notes" value="${esc(f.notes||'')}" placeholder="How this booking works"/></div>
+        <div class="ledger" style="margin:4px 0 0;">
+          <div class="ledger-row"><span>Payout to Performer</span><span class="amt">${money(Math.max(0,total-cut))}</span></div>
+          <div class="ledger-row total"><span>ASP Keeps</span><span class="amt">${money(cut)}</span></div>
+        </div>
+        <button class="btn btn-primary btn-block" data-action="submit-outside-booking" style="margin-top:6px;">Create Booking</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function documentBodyHtml(bodyText){
+  const blocks = (bodyText||'').split(/\n\s*\n/).map(b=>b.trim()).filter(Boolean);
+  return blocks.map(block=>{
+    const lines = block.split('\n').map(l=>l.trim()).filter(Boolean);
+    const isList = lines.length && lines.every(l=>/^[-*]\s+/.test(l));
+    if(isList) return `<ul class="doc-terms">${lines.map(l=>`<li>${esc(l.replace(/^[-*]\s+/,''))}</li>`).join('')}</ul>`;
+    return `<p style="font-size:13px;line-height:1.6;">${esc(block).replace(/\n/g,'<br/>')}</p>`;
+  }).join('');
+}
+function documentSubjectContext(subjectType, subjectId){
+  if(subjectType==='artist'){
+    const artist = artistById(subjectId);
+    const next = artist ? eventsFor(artist.id).filter(e=>!isPast(e.date) && ['booked','paid'].includes(e.status)).sort((a,b)=>a.date.localeCompare(b.date))[0] : null;
+    return { name: artist?artist.name:'', clientName: next?(next.clientName||''):'', date: next?next.date:null, venue: next?next.venue:'' };
+  }
+  if(subjectType==='outside'){
+    const b = getOutsideBooking(subjectId);
+    return b ? { name:b.performerName, clientName:b.clientName, date:b.date, venue:b.venue, totalAmount:b.totalAmount } : {};
+  }
+  return {};
+}
+function documentSubjectLabel(doc){
+  if(doc.subjectType==='artist'){ const a=artistById(doc.subjectId); return a? a.name : 'Artist'; }
+  if(doc.subjectType==='outside'){ const b=getOutsideBooking(doc.subjectId); return b? b.performerName : 'Outside Act'; }
+  return 'General';
+}
+function documentAttribution(doc){
+  if(doc.subjectType==='artist' && doc.brand==='asp'){
+    const artist = artistById(doc.subjectId);
+    if(artist) return `On behalf of ${artist.name}`;
+  }
+  return (DOC_BRANDS[doc.brand] || DOC_BRANDS.asp).signer;
+}
+function defaultDocumentTitle(subjectType, subjectId){
+  const ctx = documentSubjectContext(subjectType, subjectId);
+  if(ctx.name) return `${subjectType==='artist'?'Proposal':'Document'} — ${ctx.name}`;
+  return 'New Document';
+}
+function defaultDocumentBody(subjectType, subjectId){
+  const ctx = documentSubjectContext(subjectType, subjectId);
+  if(subjectType==='outside' && ctx.name){
+    return `This confirms the booking of ${ctx.name} for ${ctx.clientName}${ctx.venue?` at ${ctx.venue}`:''}${ctx.date?` on ${fmtDate(ctx.date)}`:''}, for a total fee of ${money(ctx.totalAmount||0)}.\n\nEdit this text freely — add terms, payment details, or anything else this document needs to say.`;
+  }
+  if(subjectType==='artist' && ctx.name){
+    return `This proposal covers ${ctx.name}'s upcoming performance${ctx.clientName?` for ${ctx.clientName}`:''}${ctx.venue?` at ${ctx.venue}`:''}${ctx.date?` on ${fmtDate(ctx.date)}`:''}.\n\nEquipment Needed:\n- \n\nRoom / Hospitality:\n- \n\nTravel:\n- \n\nEdit this text freely.`;
+  }
+  return 'Edit this text freely — add whatever this document needs to say.';
+}
+function renderDocumentBuilderModal(){
+  const existing = S.documentId ? getDocument(S.documentId) : null;
+  const isNew = !existing;
+  const f = S.documentForm;
+  const subjectType = f.subjectType!==undefined? f.subjectType : (existing?existing.subjectType:'artist');
+  const subjectId = f.subjectId!==undefined? f.subjectId : (existing?existing.subjectId:null);
+  const brand = f.brand || (existing && existing.brand) || 'asp';
+  const ctx = documentSubjectContext(subjectType, subjectId);
+  const title = f.title!==undefined? f.title : (existing? existing.title : defaultDocumentTitle(subjectType, subjectId));
+  const clientName = f.clientName!==undefined? f.clientName : (existing? existing.clientName : (ctx.clientName||''));
+  const clientSignerTitle = f.clientSignerTitle!==undefined? f.clientSignerTitle : (existing? existing.clientSignerTitle : '');
+  const bodyText = f.bodyText!==undefined? f.bodyText : (existing? existing.bodyText : defaultDocumentBody(subjectType, subjectId));
+  return `<div class="overlay center" data-action="document-overlay-close">
+    <div class="modal" data-stop data-form="document" style="width:560px;">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">${isNew?'New Document':'Edit Document'}</h2>
+        <div style="display:flex;gap:6px;">
+          ${!isNew? `<button class="icon-btn" data-action="print-document" title="Download as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>`:''}
+          <button class="icon-btn" data-action="close-sheet">${ICO.x}</button>
+        </div>
+      </div>
+      <div class="sheet-body">
+        ${isNew? `
+        <div class="field"><label>Who's This For?</label>
+          <div class="chip-row">
+            <button class="filter-chip ${subjectType==='artist'?'sel':''}" data-action="pick-document-subject-type" data-subject="artist">One of Our Artists</button>
+            <button class="filter-chip ${subjectType==='outside'?'sel':''}" data-action="pick-document-subject-type" data-subject="outside">Outside Act</button>
+            <button class="filter-chip ${subjectType==='general'?'sel':''}" data-action="pick-document-subject-type" data-subject="general">General</button>
+          </div>
+        </div>
+        ${subjectType==='artist'? `<div class="field"><label>Artist</label>
+          <select class="document-subject-select">
+            <option value="">Pick an artist…</option>
+            ${ARTISTS.map(a=>`<option value="${a.id}" ${subjectId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
+          </select>
+        </div>` : ''}
+        ${subjectType==='outside'? `<div class="field"><label>Outside Booking</label>
+          <select class="document-subject-select">
+            <option value="">Pick a booking…</option>
+            ${OUTSIDE_BOOKINGS.map(b=>`<option value="${b.id}" ${subjectId===b.id?'selected':''}>${esc(b.performerName)} — ${esc(b.clientName)}</option>`).join('')}
+          </select>
+        </div>` : ''}
+        ` : `<p style="font-size:12px;color:var(--ink-3);margin:0;">For: <strong style="color:var(--ink);">${esc(documentSubjectLabel(existing))}</strong></p>`}
+
+        <div class="field"><label>Title</label><input data-field="title" value="${esc(title)}" placeholder="e.g. Succos Proposal — Shmili Landau"/></div>
+        <div class="field"><label>Letterhead / Signing Party</label>
+          <div class="chip-row">
+            <button class="filter-chip ${brand==='asp'?'sel':''}" data-action="pick-document-brand" data-brand="asp">ASP Artist Management</button>
+            <button class="filter-chip ${brand==='sing'?'sel':''}" data-action="pick-document-brand" data-brand="sing">SING Entertainment</button>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Client Name</label><input data-field="clientName" value="${esc(clientName)}"/></div>
+          <div class="field"><label>Client Signer Title (optional)</label><input data-field="clientSignerTitle" value="${esc(clientSignerTitle)}" placeholder="e.g. Event Coordinator"/></div>
+        </div>
+        <div class="field"><label>Document Text</label>
+          <textarea data-field="bodyText" style="width:100%;min-height:180px;padding:10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:13px;font-family:var(--font-body);color:var(--ink);">${esc(bodyText)}</textarea>
+          <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Blank line = new paragraph. Lines starting with "-" become a bulleted list.</p>
+        </div>
+        ${S.showAiEditNotice? `<p style="font-size:12px;color:var(--ink-2);background:var(--surface-2);border-radius:8px;padding:8px 10px;margin:0;">AI editing needs a backend connection — not set up yet.</p>` : ''}
+        <div style="display:flex;gap:8px;">
+          <button class="btn" style="flex:1;" data-action="ai-edit-document">${ICO.sparkle} AI Editor</button>
+          <button class="btn btn-primary" style="flex:1;" data-action="save-document">Save Document</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+function renderDocumentDoc(doc){
+  if(!doc) return '';
+  const brandInfo = DOC_BRANDS[doc.brand] || DOC_BRANDS.asp;
+  return `<div class="overlay center" data-action="document-overlay-close">
+    <div class="doc" data-stop>
+      <div class="sheet-head"><h2 style="font-size:1.1rem;">Document Preview</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
+      <div class="doc-body">
+        <div class="doc-letterhead">
+          ${doc.brand==='sing'
+            ? `<img src="assets/sing-entertainment-logo-dark.svg" alt="SING Entertainment" style="height:36px;"/>`
+            : `<div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>`}
+          <span class="pill ${doc.signedAt?'pill-good':'pill-neutral'}">${doc.signedAt?'Signed':'Unsigned'}</span>
+        </div>
+        <div class="doc-title">${esc((doc.title||'Document').toUpperCase())}</div>
+        <div class="doc-sub">Prepared ${fmtDate(doc.createdAt)} &middot; ${esc(brandInfo.label)}</div>
+
+        <div class="doc-parties">
+          <div class="doc-party"><h4>For</h4><p><strong>${esc(documentSubjectLabel(doc))}</strong></p></div>
+          <div class="doc-party"><h4>Client</h4><p><strong>${esc(doc.clientName||'—')}</strong>${doc.clientSignerTitle?`<br/>${esc(doc.clientSignerTitle)}`:''}</p></div>
+        </div>
+
+        ${documentBodyHtml(doc.bodyText)}
+
+        <div class="doc-sign">
+          <div class="doc-sign-line">${doc.signedAt? `<span class="doc-signature">${esc(doc.clientName)}</span><br/>Signed electronically &middot; ${fmtDateShort(doc.signedAt)}` : `<strong>&nbsp;</strong>Client Signature &middot; Date`}</div>
+          <div class="doc-sign-line"><strong>${esc(documentAttribution(doc))}</strong></div>
+        </div>
+
+        <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderInvoiceDoc(){
+  const inv = getInvoice(S.invoiceDocId); if(!inv) return '';
+  const total = invoiceTotal(inv);
+  return `<div class="overlay center" data-action="invoice-overlay-close">
+    <div class="doc" data-stop>
+      <div class="sheet-head">
+        <h2 style="font-size:1.1rem;">Invoice ${esc(inv.id)}</h2>
+        <div style="display:flex;gap:6px;">
+          <button class="icon-btn" data-action="print-invoice" title="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
+          <button class="icon-btn" data-action="close-invoice-doc">${ICO.x}</button>
+        </div>
+      </div>
+      <div class="doc-body">
+        <div class="doc-letterhead">
+          <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
+          <span class="pill ${inv.status==='paid'?'pill-good':'pill-warn'}">${inv.status==='paid'?'Paid':'Open'}</span>
+        </div>
+        <div class="doc-title">INVOICE</div>
+        <div class="doc-sub">${esc(inv.id)} &middot; ${fmtDate(inv.createdAt)}</div>
+
+        <div class="doc-parties">
+          <div class="doc-party"><h4>From</h4><p><strong>ASP Artist Management</strong><br/>office@aspmanagement.com</p></div>
+          <div class="doc-party"><h4>Bill To</h4><p><strong>${esc(inv.clientName)}</strong><br/>${esc(inv.clientEmail)}</p></div>
+        </div>
+
+        <div class="doc-section"><h3>Items</h3>
+          <div class="ledger" style="margin-bottom:20px;">
+            ${inv.items.map(it=>`<div class="ledger-row"><span>${esc(it.label)}</span><span class="amt">${money(it.amount)}</span></div>`).join('')}
+            <div class="ledger-row total"><span>Total Due</span><span class="amt">${money(total)}</span></div>
+          </div>
+        </div>
+        ${inv.notes? `<div class="doc-section"><p style="font-size:12.5px;color:var(--ink-2);margin:0;">${esc(inv.notes)}</p></div>` : ''}
+
+        <div class="doc-section"><h3>Payment</h3>
+          <p style="font-size:12.5px;line-height:1.7;margin:0;">Payment via QuickBooks invoice, Zelle, or check made out to ASP Artist Management. Contact <span class="u-mono">office@aspmanagement.com</span> with questions.</p>
+        </div>
+
+        <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderContractDoc(){
+  const ev = getEvent(S.eventId); if(!ev) return '';
+  const artist = artistById(ev.artistId);
+  const isComedian = artist.role==='Comedian';
+  const signed = ev.depositReceived;
+  const draft = ev.status==='lead';
+  return `<div class="overlay center" data-action="contract-overlay-close">
+    <div class="doc" data-stop>
+      <div class="sheet-head">
+        <h2 style="font-size:1.1rem;">${draft?'Draft Contract Preview':'Performance Agreement'}</h2>
+        <div style="display:flex;gap:6px;">
+          <button class="icon-btn" data-action="print-contract" title="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
+          <button class="icon-btn" data-action="close-contract">${ICO.x}</button>
+        </div>
+      </div>
+      <div class="doc-body" id="contractDocBody">
+        <div class="doc-letterhead">
+          <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
+          <span class="pill ${signed?'pill-good':'pill-neutral'}">${draft? 'Draft — not yet sent' : signed? 'Signed & Booking Fee Received' : 'Awaiting Signature'}</span>
+        </div>
+        <div class="doc-title">${esc(artist.name.toUpperCase())}<br/><span style="font-size:.62em;letter-spacing:.06em;">ARTIST AGREEMENT</span></div>
+        <div class="doc-sub">Agreement ${esc(ev.id)} &middot; Prepared ${fmtDate(ev.createdAt)}</div>
+
+        <p style="font-size:13px;line-height:1.6;">This contractual agreement is made on ${fmtDate(ev.createdAt)}, between
+          <strong>${esc(artist.name)}</strong>, hereafter referred to as &ldquo;the Artist&rdquo;, and <strong>${esc(ev.clientName)}</strong>,
+          hereafter referred to as &ldquo;the Client&rdquo;. It is mutually agreed between the parties, as follows: the Client hereby
+          engages the Artist, and the Artist hereby agrees to perform the engagement, the terms and conditions of which are set forth herein.</p>
+
+        <div class="doc-parties">
+          <div class="doc-party"><h4>Performer</h4><p><strong>${esc(artist.name)}</strong><br/>Represented by ASP Artist Management</p></div>
+          <div class="doc-party"><h4>Client / Buyer</h4><p><strong>${esc(ev.clientName)}</strong><br/>${esc(ev.clientEmail)}<br/>${esc(ev.clientPhone)}</p></div>
+        </div>
+
+        <div class="doc-section"><h3>Event Details</h3>
+          <div class="doc-facts">
+            <div><span class="k">1. Place of engagement</span><span>${esc(ev.venue)||'TBD'}${(ev.city||ev.state)? `, ${esc(ev.city)}${ev.city&&ev.state?', ':''}${esc(ev.state)}` : ''}</span></div>
+            <div><span class="k">2. Date of engagement</span><span>${fmtDate(ev.date)}</span></div>
+            <div><span class="k">3. Hours of engagement</span><span>${hoursBetween(ev.time, ev.endTime) ? hoursBetween(ev.time, ev.endTime)+' hours ('+fmtTimeRange(ev.time, ev.endTime)+')' : fmtTimeRange(ev.time, ev.endTime)}</span></div>
+            <div><span class="k">4. Payment for engagement</span><span>${money(ev.price)}</span></div>
+            <div><span class="k">5. Terms of engagement</span><span>${esc(artist.name)} as performer for the engagement</span></div>
+          </div>
+        </div>
+
+        <div class="doc-section">
+          <p style="font-size:13px;margin:0 0 4px;"><strong>Artist shall provide:</strong><br/>${artist.role==='Comedian'?'Live Comedy Performance':artist.role==='DJ'?'DJ Performance':'Live Vocal Performance'}${hoursBetween(ev.time,ev.endTime)? ` for up to ${hoursBetween(ev.time,ev.endTime)} hours`:''}</p>
+          <p style="font-size:13px;margin:0;"><strong>Client shall provide:</strong><br/>Payment</p>
+        </div>
+
+        <div class="doc-section"><h3>Compensation</h3>
+          <div class="ledger" style="margin-bottom:20px;">
+            <div class="ledger-row total"><span>Total Fee</span><span class="amt">${money(ev.price + chargesTotal(ev))}</span></div>
+          </div>
+        </div>
+
+        <div class="doc-section"><h3>Terms</h3>
+          <ul class="doc-terms">
+            <li>Contract is not binding until the deposit is received.</li>
+            <li>Should the Artist be canceled within 40 days prior to the event, full payment is required.</li>
+            <li>In the event that the Artist is unable to perform, the Client will be paid back in full.</li>
+            <li>A non-refundable deposit of ${money(ev.commission)} (15%) must be paid upon signing the contract. The rest of the balance must be paid prior to the event.</li>
+            ${isComedian? `
+            <li>No waitstaff, bar staff, or venue personnel should walk through the performance area or serve food/drinks during the performance, in order to maintain audience focus and preserve the show.</li>
+            <li>Video or audio recording of the performance may not be taken or disseminated in any way without the express written consent of the Artist.</li>
+            <li>The Client grants the Artist approval rights over any and all advertisements, promotional materials, and graphics referencing the performance.</li>
+            ` : `
+            <li>A Mechitzah is required at all events with dancing.</li>
+            <li>The Artist may refuse to sing any non-Jewish or secular songs at his discretion.</li>
+            `}
+            <li>If the Artist is asked to stay beyond the agreed upon time, a ${money(OVERTIME_PER_HALF_HOUR)} per half hour charge shall be paid in overtime fees.</li>
+            <li>If the event is cancelled due to weather or travel issues, the Artist agrees to return the deposit.</li>
+            <li>Any and all changes to this agreement must be approved and initiated by both Client and Artist.</li>
+            <li>${ev.flightNeeded? 'Air travel for the Performer is arranged and confirmed separately by ASP; details are provided once booked.' : 'This engagement does not include Performer travel arrangements.'}</li>
+          </ul>
+        </div>
+
+        <div class="doc-sign">
+          <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc(ev.clientName)}</span><br/>Signed electronically &middot; ${fmtDateShort(ev.depositReceivedDate)}` : `<strong>&nbsp;</strong>Client Signature &middot; Date`}</div>
+          <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc(artist.name)}</span><br/>` : `<strong>ASP Artist Management</strong>`}For ${esc(artist.name)}</div>
+        </div>
+
+        <div class="doc-section"><h3>Payment</h3>
+          <p style="font-size:12.5px;line-height:1.7;margin:0;">
+            <strong>Booking Fee</strong> (${money(ev.commission)}) — emailed as a QuickBooks invoice upon signing; pay by card or ACH directly from the invoice.<br/>
+            <strong>Balance</strong> (${money(ev.balance + chargesTotal(ev))}) — Zelle to <span class="u-mono">${esc(artist.email)}</span>, due no later than the day of the event.<br/>
+            Prefer to pay by check? Contact <span class="u-mono">office@aspmanagement.com</span> to arrange.
+          </p>
+        </div>
+
+        <div class="doc-foot">This is a mockup document for demonstration purposes. Payment link and Zelle details are sent with the live email.</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderItineraryDoc(){
+  const ev = getEvent(S.itineraryEventId); if(!ev) return '';
+  const artist = artistById(ev.artistId);
+  const f = ev.flight, g = ev.groundTransport;
+  return `<div class="overlay center" data-action="itinerary-overlay-close">
+    <div class="doc" data-stop>
+      <div class="sheet-head">
+        <h2 style="font-size:1.1rem;">Travel Itinerary</h2>
+        <div style="display:flex;gap:6px;">
+          <button class="icon-btn" data-action="print-itinerary" title="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
+          <button class="icon-btn" data-action="close-itinerary">${ICO.x}</button>
+        </div>
+      </div>
+      <div class="doc-body">
+        <div class="doc-letterhead">
+          <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
+          <span class="pill pill-good">Itinerary</span>
+        </div>
+        <div class="doc-title">${esc(artist.name.toUpperCase())}<br/><span style="font-size:.62em;letter-spacing:.06em;">${esc((ev.type||'').toUpperCase())}${ev.unpaid?'':` — ${esc((ev.clientName||'').toUpperCase())}`}</span></div>
+        <div class="doc-sub">${fmtDate(ev.date)}${ev.venue? ` &middot; ${esc(ev.venue)}` : ''}${(ev.city||ev.state)? `, ${esc(ev.city)}${ev.city&&ev.state?', ':''}${esc(ev.state)}` : ''}</div>
+
+        ${f ? `<div class="doc-section"><h3>${ICO.plane} Flight</h3>
+          <div class="doc-facts">
+            <div><span class="k">Airline</span><span>${esc(f.airline)}</span></div>
+            <div><span class="k">Confirmation</span><span>${esc(f.confirmation)}</span></div>
+            <div><span class="k">Depart</span><span>${esc(fmtFlightDateTime(f.depart))}</span></div>
+            <div><span class="k">Arrive</span><span>${esc(fmtFlightDateTime(f.arrive))}</span></div>
+          </div>
+          ${f.notes? `<p style="font-size:12.5px;color:var(--ink-2);margin:0;">${esc(f.notes)}</p>` : ''}
+        </div>` : ''}
+
+        ${g ? `<div class="doc-section"><h3>${ICO.car} Ground Transport</h3>
+          <div class="doc-facts">
+            <div><span class="k">Driver</span><span>${esc(g.driverName)}</span></div>
+            <div><span class="k">Driver Phone</span><span>${esc(g.driverPhone)}</span></div>
+            <div><span class="k">Pickup</span><span>${esc(fmtFlightDateTime(g.pickupTime))} &middot; ${esc(g.pickupLocation)}</span></div>
+            <div><span class="k">Drop-off</span><span>${esc(fmtFlightDateTime(g.dropoffTime))} &middot; ${esc(g.dropoffLocation)}</span></div>
+          </div>
+          ${g.notes? `<p style="font-size:12.5px;color:var(--ink-2);margin:0;">${esc(g.notes)}</p>` : ''}
+        </div>` : ''}
+
+        ${!f && !g ? `<p style="font-size:13px;color:var(--ink-3);">No travel arranged yet.</p>` : ''}
+
+        <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ============ ACTIONS ============ */
+function doSendContract(id){
+  const ev = getEvent(id); ev.status='contract_sent';
+  logEvent(ev,'email',`Contract + QuickBooks invoice (15% booking fee) emailed to ${ev.clientEmail}.`);
+  toast(`Contract & invoice sent to ${ev.clientName}.`, 'email'); saveEvents(); openEvent(id);
+}
+function doMarkDeposit(id){
+  const ev = getEvent(id); ev.status='booked'; ev.depositReceived=true; ev.depositReceivedDate=fmtISO(new Date());
+  const balance = zelleBalance(ev);
+  logEvent(ev,'success','Bookkeeping marked booking fee received — job officially booked & locked on calendar.');
+  logEvent(ev,'email',`Booking confirmation emailed to client with gig details, remaining balance (${money(balance)}), and a Zelle QR code.`);
+  logEvent(ev,'email',`Booking-confirmed notification emailed to ${artistById(ev.artistId).name}, Ilan, and Moshe.`);
+  toast('Booking locked in — client, artist, Ilan & Moshe notified.', 'success');
+  S.showBookingConfirmation = true;
+  saveEvents(); render();
+}
+function doToggleFlight(id){
+  const ev = getEvent(id); ev.flightNeeded=true;
+  logEvent(ev,'email','Flight needed — emailed to the booking secretary with gig details.');
+  toast('Booking secretary notified: flight needed.', 'email'); saveEvents(); openEvent(id);
+}
+function doSaveFlight(id){
+  const ev = getEvent(id); const f=S.flightForm;
+  const depart = f.departDate? `${f.departDate} ${f.departTime||'00:00'}` : '—';
+  const arrive = f.arriveDate? `${f.arriveDate} ${f.arriveTime||'00:00'}` : '—';
+  ev.flight = {airline:f.airline||'—', flightNumber:(f.flightNumber||'').trim(), confirmation:f.confirmation||'—', depart, arrive, trackingIdx:-1, trackingStatus:null, trackingStatusAt:null};
+  ev.flightBooked = true;
+  logEvent(ev,'email',`Flight booked & added to itinerary — Moshe and ${artistById(ev.artistId).name} notified.`);
+  toast('Flight saved — Moshe & artist notified.', 'success'); S.showFlightForm=false; saveEvents(); openEvent(id);
+}
+const FLIGHT_STATUS_SEQUENCE = ['On time', 'Gate assigned', 'Boarding', 'Departed on time', 'In flight', 'Landed on time'];
+function doCheckFlightStatus(id){
+  S.checkingFlightId = id;
+  render();
+  setTimeout(()=>{
+    const ev = getEvent(id);
+    if(ev && ev.flight){
+      ev.flight.trackingIdx = Math.min((ev.flight.trackingIdx??-1)+1, FLIGHT_STATUS_SEQUENCE.length-1);
+      ev.flight.trackingStatus = FLIGHT_STATUS_SEQUENCE[ev.flight.trackingIdx];
+      ev.flight.trackingStatusAt = new Date().toISOString();
+      logEvent(ev,'email',`Flight status update for ${artistById(ev.artistId).name} — ${ev.flight.trackingStatus} — emailed via ASP-branded update.`);
+      saveEvents();
+      toast(`Flight status: ${ev.flight.trackingStatus} — artist notified.`, 'email');
+    }
+    S.checkingFlightId = null;
+    render();
+  }, 650);
+}
+function doToggleGroundTransport(id){
+  const ev = getEvent(id); ev.groundTransportNeeded=true;
+  logEvent(ev,'email','Ground transport needed — emailed to the booking secretary with gig details.');
+  toast('Booking secretary notified: ground transport needed.', 'email'); saveEvents(); openEvent(id);
+}
+function doSaveGroundTransport(id){
+  const ev = getEvent(id); const f=S.transportForm;
+  const pickupTime = f.pickupDate? `${f.pickupDate} ${f.pickupTime||'00:00'}` : '—';
+  const dropoffTime = f.dropoffDate? `${f.dropoffDate} ${f.dropoffTime||'00:00'}` : '—';
+  ev.groundTransport = {driverName:f.driverName||'—', driverPhone:f.driverPhone||'—', pickupTime, pickupLocation:f.pickupLocation||'—', dropoffTime, dropoffLocation:f.dropoffLocation||'—', notes:f.notes||''};
+  ev.groundTransportBooked = true;
+  logEvent(ev,'email',`Driver booked & added to itinerary — Moshe and ${artistById(ev.artistId).name} notified.`);
+  toast('Driver saved — Moshe & artist notified.', 'success'); S.showTransportForm=false; saveEvents(); openEvent(id);
+}
+function doSaveDressCode(id){
+  const ev = getEvent(id); const f = S.dressCodeForm;
+  ev.dressCode = (f.dressCode||'').trim();
+  logEvent(ev, 'system', ev.dressCode? `Dress code set: ${ev.dressCode} — ${artistById(ev.artistId).name} notified.` : 'Dress code cleared.');
+  toast(ev.dressCode? 'Dress code saved — artist notified.' : 'Dress code cleared.', 'success');
+  S.showDressCodeForm=false; saveEvents(); openEvent(id);
+}
+function doSaveEditEvent(id){
+  const ev = getEvent(id); if(!ev) return;
+  const f = S.editEventForm;
+  if(!ev.unpaid){
+    if(f.clientName!==undefined) ev.clientName = f.clientName.trim();
+    if(f.clientEmail!==undefined) ev.clientEmail = f.clientEmail.trim();
+    if(f.clientPhone!==undefined) ev.clientPhone = f.clientPhone.trim();
+  }
+  if(f.type!==undefined) ev.type = f.type;
+  if(f.date!==undefined) ev.date = f.date;
+  if(f.time!==undefined) ev.time = f.time;
+  if(f.endTime!==undefined) ev.endTime = f.endTime || null;
+  if(f.venue!==undefined) ev.venue = f.venue.trim();
+  if(f.city!==undefined) ev.city = f.city.trim();
+  if(f.state!==undefined) ev.state = f.state.trim();
+  if(!ev.unpaid && f.price!==undefined){
+    const price = Number(f.price)||0;
+    ev.price = price;
+    ev.commission = Math.round(price*0.15);
+    ev.balance = price - ev.commission;
+  }
+  logEvent(ev, 'system', 'Details updated by office.');
+  toast('Changes saved.', 'success');
+  S.showEditEvent=false; S.editEventForm={}; saveEvents(); openEvent(id);
+}
+function doSubmitInvoice(){
+  const f = S.newInvoiceForm;
+  const clientName = (f.clientName||'').trim();
+  const clientEmail = (f.clientEmail||'').trim();
+  const items = f.items || [];
+  if(!clientName){ toast('Enter who this invoice is billed to.', 'error'); return; }
+  if(!items.length){ toast('Add at least one line item.', 'error'); return; }
+  const inv = makeInvoice(clientName, clientEmail, items, (f.notes||'').trim(), 'open', 0);
+  CUSTOM_INVOICES.unshift(inv);
+  saveCustomInvoices();
+  toast(`Invoice sent to ${clientName}.`, 'success');
+  S.showNewInvoice=false; S.newInvoiceForm={}; render();
+}
+function doMarkInvoicePaid(id){
+  const inv = getInvoice(id); if(!inv) return;
+  inv.status = 'paid'; inv.paidAt = fmtISO(new Date());
+  inv.log.push({ts:new Date().toISOString(), type:'success', text:'Marked paid.'});
+  saveCustomInvoices();
+  toast('Invoice marked paid.', 'success');
+  render();
+}
+function doSubmitOutsideBooking(){
+  const f = S.newOutsideBookingForm;
+  const performerName = (f.performerName||'').trim();
+  const clientName = (f.clientName||'').trim();
+  const totalAmount = Number(f.totalAmount)||0;
+  const aspCut = Number(f.aspCut)||0;
+  if(!performerName){ toast('Enter the performer\'s name.', 'system'); return; }
+  if(!clientName){ toast('Enter who the client is.', 'system'); return; }
+  if(!f.date){ toast('Pick a date.', 'system'); return; }
+  if(!totalAmount){ toast('Enter the total booking amount.', 'system'); return; }
+  const booking = makeOutsideBooking(performerName, clientName, (f.clientEmail||'').trim(), f.date, (f.venue||'').trim(), '', '', totalAmount, aspCut, (f.notes||'').trim(), 'open', 0);
+  OUTSIDE_BOOKINGS.unshift(booking);
+  saveOutsideBookings();
+  toast(`Outside booking created for ${performerName}.`, 'success');
+  S.showNewOutsideBooking=false; S.newOutsideBookingForm={}; render();
+}
+function doMarkOutsideBookingPaid(id){
+  const b = getOutsideBooking(id); if(!b) return;
+  b.status = 'paid';
+  b.log.push({ts:new Date().toISOString(), type:'success', text:'Marked paid.'});
+  saveOutsideBookings();
+  toast('Outside booking marked paid.', 'success');
+  render();
+}
+function doSaveDocument(){
+  const f = S.documentForm;
+  const existing = S.documentId ? getDocument(S.documentId) : null;
+  const subjectType = f.subjectType!==undefined? f.subjectType : (existing?existing.subjectType:'general');
+  const subjectId = f.subjectId!==undefined? f.subjectId : (existing? existing.subjectId : null);
+  if(subjectType!=='general' && !subjectId){ toast("Pick who this document is for.", 'system'); return; }
+  const brand = f.brand || (existing && existing.brand) || 'asp';
+  const doc = existing || { id:'DOC-'+(DOCID++), createdAt: fmtISO(new Date()), signedAt: null };
+  doc.subjectType = subjectType;
+  doc.subjectId = subjectId;
+  doc.brand = brand;
+  doc.title = (f.title!==undefined? f.title : (existing?existing.title:'')).trim() || defaultDocumentTitle(subjectType, subjectId);
+  const ctx = documentSubjectContext(subjectType, subjectId);
+  doc.clientName = (f.clientName!==undefined? f.clientName : (existing?existing.clientName:(ctx.clientName||''))).trim();
+  doc.clientSignerTitle = (f.clientSignerTitle!==undefined? f.clientSignerTitle : (existing?existing.clientSignerTitle:'')).trim();
+  doc.bodyText = f.bodyText!==undefined? f.bodyText : (existing? existing.bodyText : defaultDocumentBody(subjectType, subjectId));
+  if(!existing){ DOCUMENTS.unshift(doc); }
+  saveDocuments();
+  S.documentId = doc.id;
+  S.documentForm = {};
+  toast('Document saved.', 'success');
+  render();
+}
+function doOpenOutsideBookingDoc(bookingId){
+  closeAllOverlays();
+  const existing = DOCUMENTS.find(d=>d.subjectType==='outside' && d.subjectId===bookingId);
+  if(existing){ S.documentId = existing.id; S.documentForm = {}; }
+  else { S.documentId = null; S.documentForm = {subjectType:'outside', subjectId:bookingId}; }
+  S.showDocumentBuilder = true;
+  render();
+}
+function doEmailItinerary(id){
+  const ev = getEvent(id);
+  logEvent(ev,'email',`Travel itinerary emailed to ${artistById(ev.artistId).name}.`);
+  toast('Itinerary emailed to artist.', 'email'); saveEvents(); openEvent(id);
+}
+function doSendReminder(id){
+  const ev = getEvent(id); ev.lastReminderSent = fmtISO(new Date());
+  logEvent(ev,'email',`Balance reminder emailed to ${ev.clientEmail} (Zelle link included).`);
+  logEvent(ev,'sms',`Balance reminder texted to ${ev.clientPhone} (Zelle link included).`);
+  toast('Reminder sent — email and text.', 'email'); saveEvents(); openEvent(id);
+}
+function doMarkBalance(id){
+  const ev = getEvent(id); ev.balanceReceived=true; ev.balanceReceivedDate=fmtISO(new Date()); ev.status='paid';
+  logEvent(ev,'success','Bookkeeping marked balance received via Zelle — reminders stopped.');
+  toast('Balance marked received. Reminders stopped.', 'success'); saveEvents(); openEvent(id);
+}
+function doToggleArtistPaidOut(id){
+  const ev = getEvent(id);
+  ev.artistPaidOut = !ev.artistPaidOut;
+  ev.artistPaidOutDate = ev.artistPaidOut ? fmtISO(new Date()) : null;
+  logEvent(ev, ev.artistPaidOut?'success':'system', ev.artistPaidOut? `Marked paid out to ${artistById(ev.artistId).name} (${money(zelleBalance(ev))}).` : 'Payout unmarked.');
+  saveEvents();
+  toast(ev.artistPaidOut? 'Marked paid out.' : 'Payout unmarked.', 'success');
+  render();
+}
+function doAddCharge(id){
+  const f = S.addChargeForm;
+  const preset = f.preset || CHARGE_PRESETS[0];
+  const label = preset==='Other' ? (f.customLabel||'').trim() : preset;
+  const amount = Number(f.amount);
+  if(!label || !amount || amount<=0){ toast('Enter a charge type and an amount.', 'system'); return; }
+  const ev = getEvent(id);
+  const postSigning = ev.depositReceived;
+  ev.charges = ev.charges || [];
+  ev.charges.push({id:'CH-'+Date.now(), label, amount, addedAfterSigning: postSigning});
+  logEvent(ev,'system',`Charge added: ${label} (${money(amount)}).`);
+  if(postSigning){
+    const newTotal = ev.price + chargesTotal(ev);
+    logEvent(ev,'warning',`Added after signing — client's total changed. New total: ${money(newTotal)}.`);
+    logEvent(ev,'email',`Updated total emailed to client: ${money(newTotal)} (was ${money(newTotal-amount)}).`);
+  }
+  saveEvents(); S.showAddCharge=false; S.addChargeForm={};
+  toast(postSigning? 'Charge added — client notified of the updated total.' : 'Charge added to contract.', 'system');
+  openEvent(id);
+}
+function doRemoveCharge(id, chargeId){
+  const ev = getEvent(id);
+  const removed = (ev.charges||[]).find(c=>c.id===chargeId);
+  ev.charges = (ev.charges||[]).filter(c=>c.id!==chargeId);
+  if(removed) logEvent(ev,'system',`Charge removed: ${removed.label} (${money(removed.amount)}).`);
+  saveEvents(); openEvent(id);
+}
+function doUploadPrep(id, files){
+  const ev = getEvent(id);
+  ev.prepSheets = ev.prepSheets || [];
+  let remaining = files.length, succeeded = 0;
+  Array.from(files).forEach(file=>{
+    const reader = new FileReader();
+    const finish = ()=>{
+      remaining--;
+      if(remaining===0){
+        saveEvents();
+        if(succeeded){ logEvent(ev,'system', `Prep sheet${succeeded===1?'':'s'} uploaded.`); toast('Prep sheet uploaded — artist notified.', 'success'); }
+        openEvent(id);
+      }
+    };
+    reader.onload = ()=>{
+      ev.prepSheets.push({id:'PS-'+Date.now()+Math.random().toString(36).slice(2,6), name:file.name, dataUrl:reader.result, uploadedAt:fmtISO(new Date())});
+      succeeded++;
+      finish();
+    };
+    reader.onerror = ()=>{ toast(`Could not read ${file.name}.`, 'system'); finish(); };
+    reader.readAsDataURL(file);
+  });
+}
+function doRemovePrep(id, prepId){
+  const ev = getEvent(id);
+  ev.prepSheets = (ev.prepSheets||[]).filter(f=>f.id!==prepId);
+  saveEvents(); openEvent(id);
+}
+function doShareEvent(id){
+  S.showEventMenu = false;
+  const ev = getEvent(id); const a = artistById(ev.artistId);
+  const text = `${a.name} — ${ev.type}\n${fmtDate(ev.date)} · ${fmtTimeRange(ev.time, ev.endTime)}\n${fullLocation(ev)}`;
+  if(navigator.share){
+    navigator.share({title:`${a.name} — ${ev.type}`, text}).catch(()=>{});
+  } else if(navigator.clipboard){
+    navigator.clipboard.writeText(text).then(()=>toast('Gig details copied to clipboard.', 'system')).catch(()=>toast('Could not copy — try again.', 'system'));
+  } else {
+    toast('Sharing not supported in this browser.', 'system');
+  }
+  render();
+}
+function doCopyDailyDigest(){
+  const openLeads = S.events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status));
+  const text = buildDailyDigestWhatsAppText(openLeads);
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(text).then(()=>toast('Copied — paste it to Ilan on WhatsApp.', 'success')).catch(()=>toast('Could not copy — try again.', 'system'));
+  } else {
+    toast('Clipboard not supported in this browser.', 'system');
+  }
+}
+function doDeleteEvent(id){
+  const ev = getEvent(id);
+  const what = ev.unpaid ? `this ${ev.type} for ${artistById(ev.artistId).name}` : `this ${ev.status==='lead'?'lead':'gig'} for ${ev.clientName} (${artistById(ev.artistId).name})`;
+  if(!confirm(`Delete ${what}? This can't be undone.`)) return;
+  S.events = S.events.filter(e=>e.id!==id);
+  saveEvents();
+  toast('Deleted.', 'system');
+  closeSheet();
+}
+function doAddArtist(){
+  const name = (S.addArtistForm.name||'').trim();
+  if(!name){ toast('Enter a name.', 'system'); return; }
+  const parts = name.split(/\s+/);
+  const first = parts[0].toLowerCase().replace(/[^a-z]/g,'');
+  const last = (parts[1]||'').toLowerCase().replace(/[^a-z]/g,'');
+  let id = first || 'artist';
+  if(ARTISTS.some(a=>a.id===id)) id = first + (last? last[0] : '');
+  let uniq = id, n = 2;
+  while(ARTISTS.some(a=>a.id===uniq)){ uniq = id + n; n++; }
+  id = uniq;
+  const email = `${first}${last? '.'+last : ''}@aspmanagement.com`;
+  const initials = (parts[0][0] + (parts[1]? parts[1][0] : '')).toUpperCase();
+  const slot = (ARTISTS.length % 6) + 1;
+  const role = ARTIST_ROLES.includes(S.addArtistForm.role) ? S.addArtistForm.role : 'Singer';
+  const artist = {id, name, slot, initials, email, role};
+  ARTISTS.push(artist); saveArtists();
+  S.showAddArtist = false; S.addArtistForm = {};
+  S.newArtistWelcome = {name, email};
+  toast(`${name} added — welcome email sent to ${email}.`, 'email');
+  render();
+}
+function logProjectEvent(p, type, text){ p.log.push({ts:new Date().toISOString(), type, text}); }
+function doAddProject(){
+  const f = S.newProjectForm;
+  const isBatch = f.mode==='recordingday';
+  const type = 'General';
+  if(!f.artistId){ toast('Pick an artist.', 'system'); return; }
+  const artist = artistById(f.artistId);
+
+  if(isBatch){
+    if(!f.recordingDate){ toast('Pick a recording date.', 'system'); return; }
+    const count = f.episodeCount || 2;
+    const ev = {
+      id:'EV-'+(EVID++), artistId: artist.id, type:'Recording Day', unpaid:true,
+      clientName:null, clientEmail:'', clientPhone:'',
+      date: f.recordingDate, time:'10:00', endTime:null,
+      venue:'', city:'', state:'',
+      price:0, commission:0, balance:0, status:'scheduled', depositReceived:false, depositReceivedDate:null,
+      balanceReceived:false, balanceReceivedDate:null, reminderIntervalDays: defaultReminderCadence(f.recordingDate), lastReminderSent:null,
+      flightNeeded:false, flightBooked:false, flight:null,
+      groundTransportNeeded:false, groundTransportBooked:false, groundTransport:null,
+      charges:[], dressCode:'', prepSheets:[], createdAt: fmtISO(new Date()),
+      log:[{ts:new Date().toISOString(), type:'system', text:`Recording Day scheduled for ${artist.name} — ${count} episode project${count===1?'':'s'}.`}],
+    };
+    if(findConflicts(ev).length) toast(`⚠ Scheduling conflict — ${artist.name} already has something this date.`, 'system');
+    S.events.unshift(ev); saveEvents();
+    const cadence = Number(f.releaseCadenceDays)||7;
+    const firstRelease = f.releaseDate || fmtISO(addDays(new Date(f.recordingDate+'T00:00:00'), 7));
+    const created = [];
+    for(let i=0;i<count;i++){
+      const guest = (f['guest'+(i+1)]||'').trim();
+      const due = fmtISO(addDays(new Date(firstRelease+'T00:00:00'), i*cadence));
+      const proj = makeProject(artist, type, guest? `Episode — ${guest}` : `Episode ${i+1} — ${fmtDateShort(f.recordingDate)}`, 1, 1, due, {
+        subtitle: guest? `Guest: ${guest}` : '',
+        people: guest? [{id:'PPL-'+Math.random().toString(36).slice(2,7), role:'Guest', name:guest}] : [],
+        recordingEventId: ev.id,
+      });
+      PROJECTS.unshift(proj); created.push(proj);
+    }
+    saveProjects();
+    toast(`Recording Day booked — ${count} episode project${count===1?'':'s'} created.`, 'success');
+    S.newProjectForm={};
+    S.projectArtistFilter = artist.id;
+    navigate('project_detail', {projectId: created[0].id});
+    return;
+  }
+
+  if(!(f.title||'').trim()){ toast('Enter a title.', 'system'); return; }
+  const proj = makeProject(artist, type, f.title.trim(), 0, 0, f.dueDate||null, {subtitle:(f.whoFor||'').trim()});
+  PROJECTS.unshift(proj); saveProjects();
+  S.newProjectForm={};
+  toast(`Project created for ${artist.name}.`, 'success');
+  S.projectArtistFilter = artist.id;
+  navigate('project_detail', {projectId: proj.id});
+}
+function doAddPerson(id){
+  const f = S.newPersonForm;
+  const kind = f.kind || 'internal';
+  const role = (f.role||'').trim();
+  if(!role){ toast('Enter a role.', 'system'); return; }
+  const p = getProject(id);
+  p.people = p.people || [];
+  let name, refId=null, email='';
+  if(kind==='internal'){
+    const person = adminById(f.refId) || artistById(f.refId);
+    if(!person){ toast('Pick a person.', 'system'); return; }
+    name = person.name; refId = f.refId; email = person.email || '';
+  } else {
+    name = (f.name||'').trim();
+    if(!name){ toast('Enter a name.', 'system'); return; }
+    email = (f.email||'').trim();
+  }
+  p.people.push({id:'PPL-'+Math.random().toString(36).slice(2,7), role, name, kind, refId, email, phone:''});
+  logProjectEvent(p,'system', `${role} added: ${name}`);
+  S.newPersonForm = {kind}; saveProjects(); render();
+}
+function doRemovePerson(id, personId){
+  const p = getProject(id);
+  p.people = (p.people||[]).filter(x=>x.id!==personId);
+  (p.tasks||[]).forEach(t=>{ if(t.assignedTo===personId) t.assignedTo = null; });
+  saveProjects(); render();
+}
+function doAddFinItem(id, kind){
+  const p = getProject(id);
+  const label = (kind==='income'? S.newFinIncomeLabel : S.newFinExpenseLabel || '').trim();
+  const amount = Number(kind==='income'? S.newFinIncomeAmount : S.newFinExpenseAmount) || 0;
+  if(!label || !amount){ toast('Enter a label and an amount.', 'system'); return; }
+  p.financials = p.financials || {income:[], expenses:[]};
+  p.financials[kind].push({id:'FIN-'+Math.random().toString(36).slice(2,9), label, amount});
+  logProjectEvent(p,'system', `${kind==='income'?'Income':'Expense'} added: ${label} (${money(amount)}).`);
+  if(kind==='income'){ S.newFinIncomeLabel=''; S.newFinIncomeAmount=''; } else { S.newFinExpenseLabel=''; S.newFinExpenseAmount=''; }
+  saveProjects(); render();
+}
+function doRemoveFinItem(id, kind, itemId){
+  const p = getProject(id);
+  p.financials[kind] = (p.financials[kind]||[]).filter(i=>i.id!==itemId);
+  saveProjects(); render();
+}
+function doToggleTask(id, taskId){
+  const p = getProject(id); const t = p.tasks.find(t=>t.id===taskId);
+  if(t){ t.done = !t.done; saveProjects(); render(); }
+}
+function doRemoveTask(id, taskId){
+  const p = getProject(id);
+  p.tasks = p.tasks.filter(t=>t.id!==taskId);
+  saveProjects(); render();
+}
+function doAddTask(id){
+  const text = (S.newTaskText||'').trim(); if(!text) return;
+  const p = getProject(id);
+  const assignedTo = S.newTaskAssignee || null;
+  p.tasks.push({id:'T-'+Math.random().toString(36).slice(2,9), stage:p.stage, text, done:false, assignedTo});
+  const person = assignedTo ? (p.people||[]).find(x=>x.id===assignedTo) : null;
+  logProjectEvent(p,'system', person? `Task added: ${text} (assigned to ${person.name})` : `Task added: ${text}`);
+  if(person && person.email) logProjectEvent(p,'email', `Notified ${person.name} by email — new task assigned: "${text}".`);
+  S.newTaskText=''; S.newTaskAssignee=''; saveProjects(); render();
+}
+function doAssignTask(id, taskId, personId){
+  const p = getProject(id);
+  const t = (p.tasks||[]).find(x=>x.id===taskId);
+  if(!t) return;
+  const newId = personId || null;
+  if(t.assignedTo===newId) return;
+  t.assignedTo = newId;
+  if(newId){
+    const person = (p.people||[]).find(x=>x.id===newId);
+    if(person){
+      logProjectEvent(p, person.email?'email':'system', `Task "${t.text}" assigned to ${person.name}.${person.email? ' Notified by email.' : ''}`);
+    }
+  } else {
+    logProjectEvent(p,'system', `Task "${t.text}" unassigned.`);
+  }
+  saveProjects(); render();
+}
+function doUploadProjectImage(id, files){
+  const p = getProject(id);
+  p.images = p.images || [];
+  let remaining = files.length, succeeded = 0;
+  Array.from(files).forEach(file=>{
+    const reader = new FileReader();
+    const finish = ()=>{
+      remaining--;
+      if(remaining===0){
+        saveProjects();
+        if(succeeded){ logProjectEvent(p,'system', `${succeeded} image${succeeded===1?'':'s'} uploaded.`); toast('Image uploaded.', 'success'); }
+        render();
+      }
+    };
+    reader.onload = ()=>{ p.images.push({id:'IMG-'+Date.now()+Math.random().toString(36).slice(2,6), name:file.name, dataUrl:reader.result}); succeeded++; finish(); };
+    reader.onerror = ()=>{ toast(`Could not read ${file.name}.`, 'system'); finish(); };
+    reader.readAsDataURL(file);
+  });
+}
+function doRemoveProjectImage(id, imgId){
+  const p = getProject(id);
+  p.images = (p.images||[]).filter(i=>i.id!==imgId);
+  saveProjects(); render();
+}
+function doUploadProjectCover(id, file){
+  const p = getProject(id);
+  const reader = new FileReader();
+  reader.onload = ()=>{ p.coverImage = reader.result; saveProjects(); render(); };
+  reader.onerror = ()=>{ toast(`Could not read ${file.name}.`, 'system'); };
+  reader.readAsDataURL(file);
+}
+function doAddBoardCard(id, preset){
+  const p = getProject(id);
+  p.boardCards = p.boardCards || [];
+  p.boardCards.push({id:'BC-'+Math.random().toString(36).slice(2,9), header: preset||'', items:[]});
+  saveProjects(); render();
+}
+function doRemoveBoardCard(id, cardId){
+  const p = getProject(id);
+  p.boardCards = (p.boardCards||[]).filter(c=>c.id!==cardId);
+  saveProjects(); render();
+}
+function doAddBoardItem(pid, cardId){
+  const text = ((S.newBoardItemText||{})[cardId]||'').trim();
+  if(!text) return;
+  const p = getProject(pid);
+  const c = (p.boardCards||[]).find(x=>x.id===cardId);
+  if(!c) return;
+  c.items = c.items || [];
+  c.items.push({id:'BI-'+Math.random().toString(36).slice(2,9), text});
+  S.newBoardItemText[cardId] = '';
+  saveProjects(); render();
+}
+function doRemoveBoardItem(pid, cardId, itemId){
+  const p = getProject(pid);
+  const c = (p.boardCards||[]).find(x=>x.id===cardId);
+  if(c) c.items = (c.items||[]).filter(i=>i.id!==itemId);
+  saveProjects(); render();
+}
+function doAddProjectLink(id){
+  const url = (S.newLinkForm.url||'').trim(); if(!url) return;
+  const p = getProject(id);
+  p.links = p.links || [];
+  p.links.push({id:'LNK-'+Math.random().toString(36).slice(2,9), label:(S.newLinkForm.label||'').trim(), url});
+  logProjectEvent(p,'system', `Link added: ${S.newLinkForm.label||url}`);
+  S.newLinkForm={}; saveProjects(); render();
+}
+function doRemoveProjectLink(id, linkId){
+  const p = getProject(id);
+  p.links = (p.links||[]).filter(l=>l.id!==linkId);
+  saveProjects(); render();
+}
+function doAddComment(id){
+  const text = (S.newCommentText||'').trim(); if(!text) return;
+  const p = getProject(id);
+  p.comments = p.comments || [];
+  p.comments.push({id:'C-'+Math.random().toString(36).slice(2,9), authorId:S.user, text, ts:new Date().toISOString()});
+  S.newCommentText=''; saveProjects(); render();
+}
+function doSubmitLead(){
+  const f = S.newLeadForm;
+  const isInternal = f.kind==='internal';
+  if(!f.artistId || !f.date || (!isInternal && !(f.clientName||'').trim())){
+    toast(isInternal? 'Pick an artist and a date.' : 'Pick an artist and enter a client name and date.', 'system'); return;
+  }
+  const price = isInternal ? 0 : (Number(f.price)||0);
+  const commission = isInternal ? 0 : Math.round(price*0.15);
+  const typeList = isInternal ? INTERNAL_EVENT_TYPES : EVENT_TYPES;
+  const resolvedType = (f.type==='Other'? (f.customType||'').trim()||'Other' : f.type)||typeList[0];
+  const ev = {
+    id:'EV-'+(EVID++), artistId:f.artistId, type: resolvedType,
+    unpaid: isInternal,
+    clientName: isInternal? null : f.clientName,
+    clientEmail: isInternal? '' : (f.clientEmail||''), clientPhone: isInternal? '' : (f.clientPhone||''),
+    date: f.date, time: f.time||'19:00', endTime: f.endTime||null,
+    venue: f.venue||'', city: f.city||'', state: f.state||'',
+    price, commission, balance: price-commission, status: isInternal? 'scheduled':'lead', depositReceived:false, depositReceivedDate:null,
+    balanceReceived:false, balanceReceivedDate:null, reminderIntervalDays: defaultReminderCadence(f.date), lastReminderSent:null,
+    flightNeeded: !!f.flightNeeded, flightBooked:false, flight:null,
+    groundTransportNeeded: !!f.groundTransportNeeded, groundTransportBooked:false, groundTransport:null,
+    charges: isInternal? [] : (f.charges||[]), dressCode: isInternal? '' : (f.dressCode||''), prepSheets:[], createdAt: fmtISO(new Date()),
+    log:[{ts:new Date().toISOString(), type:'system', text: isInternal? `${resolvedType} scheduled for ${artistById(f.artistId).name}.` : `Lead created for ${artistById(f.artistId).name} — client info entered by management.`}],
+  };
+  S.events.unshift(ev); saveEvents();
+  toast(isInternal? `Internal day added — penciled in on ${artistById(f.artistId).name}'s calendar.` : `Lead added — penciled in on ${artistById(f.artistId).name}'s calendar.`, 'success');
+  if(findConflicts(ev).length) toast(`⚠ Scheduling conflict — ${artistById(f.artistId).name} already has something this date.`, 'system');
+  S.showNewLead=false; S.newLeadForm={}; openEvent(ev.id);
+}
+function doSubmitBlockTime(){
+  const f = S.blockTimeForm;
+  if(!f.date){ toast('Pick a date.', 'system'); return; }
+  const allDay = f.allDay!==false;
+  if(!allDay && (!f.startTime || !f.endTime)){ toast('Enter a start and end time, or check All day.', 'system'); return; }
+  if(!allDay && f.startTime>=f.endTime){ toast('End time must be after the start time.', 'system'); return; }
+  const artist = artistById(S.user);
+  const start = new Date(f.date+'T00:00:00');
+  const end = f.endDate ? new Date(f.endDate+'T00:00:00') : start;
+  if(end < start){ toast('End date is before the start date.', 'system'); return; }
+  const dates = [];
+  for(let d=new Date(start); d<=end; d.setDate(d.getDate()+1)) dates.push(fmtISO(new Date(d)));
+  let hadConflict = false;
+  dates.forEach(date=>{
+    const ev = {
+      id:'EV-'+(EVID++), artistId:S.user, type:'Unavailable', unpaid:true,
+      clientName:null, clientEmail:'', clientPhone:'',
+      date, time: allDay?'00:00':f.startTime, endTime: allDay?null:f.endTime,
+      venue:'', city:'', state:'',
+      price:0, commission:0, balance:0, status:'scheduled', depositReceived:false, depositReceivedDate:null,
+      balanceReceived:false, balanceReceivedDate:null, reminderIntervalDays:5, lastReminderSent:null,
+      flightNeeded:false, flightBooked:false, flight:null,
+      groundTransportNeeded:false, groundTransportBooked:false, groundTransport:null,
+      charges:[], dressCode:'', prepSheets:[], createdAt: fmtISO(new Date()),
+      log:[{ts:new Date().toISOString(), type:'system', text:`${artist.name} blocked ${allDay?'this date':`${fmtTime(f.startTime)}–${fmtTime(f.endTime)}`}${f.note?': '+f.note:''}.`}],
+    };
+    if(findConflicts(ev).length) hadConflict = true;
+    S.events.unshift(ev);
+  });
+  saveEvents();
+  toast(dates.length>1? `${dates.length} days blocked on your calendar.` : 'Date blocked on your calendar.', 'success');
+  if(hadConflict) toast(`⚠ You already have something booked in that range.`, 'system');
+  S.showBlockTime=false; S.blockTimeForm={}; render();
+}
+
+function answerAskAI(q, isAdmin){
+  const ql = q.toLowerCase();
+  const upcoming = (evs)=>evs.filter(e=>!isPast(e.date) && ['booked','paid'].includes(e.status));
+  if(!isAdmin){
+    const evs = eventsFor(S.user);
+    const nextGig = upcoming(evs).sort((a,b)=>a.date.localeCompare(b.date))[0];
+    const ytd = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+e.balance,0);
+    if(ql.includes('next gig') || ql.includes('next booking')) return nextGig ? `Your next gig is ${nextGig.type} for ${nextGig.clientName||'you'} on ${fmtDateShort(nextGig.date)}.` : `You don't have any upcoming gigs booked yet.`;
+    if(ql.includes('this month')){ const n=new Date(); const thisMonth = upcoming(evs).filter(e=>{const d=new Date(e.date+'T00:00:00'); return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear();}); return `You have ${thisMonth.length} gig${thisMonth.length===1?'':'s'} this month.`; }
+    if(ql.includes('ytd') || ql.includes('payout') || ql.includes('earn')) return `You've been paid ${money(ytd)} so far this year.`;
+    return `I can help with your gigs, next booking, this month's schedule, or your YTD payout — try asking one of those.`;
+  }
+  const open = S.events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status));
+  const awaitingBalance = S.events.filter(e=>e.status==='booked' && !e.balanceReceived);
+  const conflictPairs = allConflictPairs().filter(([a,b])=>!isPast(a.date)||!isPast(b.date));
+  const needsTravel = S.events.filter(e=>!isPast(e.date) && ((e.flightNeeded&&!e.flightBooked)||(e.groundTransportNeeded&&!e.groundTransportBooked)));
+  const matchedArtist = ARTISTS.find(a=>ql.includes(a.name.toLowerCase()) || ql.includes(a.name.split(' ')[0].toLowerCase()));
+  if(matchedArtist){
+    const evs = eventsFor(matchedArtist.id);
+    const up = upcoming(evs).sort((a,b)=>a.date.localeCompare(b.date));
+    const ytd = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+e.balance,0);
+    return `${matchedArtist.name}: ${up.length} upcoming gig${up.length===1?'':'s'}${up[0]?`, next on ${fmtDateShort(up[0].date)}`:''}. YTD payout: ${money(ytd)}.`;
+  }
+  if(ql.includes('conflict')) return conflictPairs.length ? `There ${conflictPairs.length===1?'is':'are'} ${conflictPairs.length} scheduling conflict${conflictPairs.length===1?'':'s'} right now — check the Dashboard for details.` : `No scheduling conflicts right now.`;
+  if(ql.includes('lead')) return `There ${open.length===1?'is':'are'} ${open.length} open lead${open.length===1?'':'s'} awaiting contract or deposit.`;
+  if(ql.includes('balance')) return `${awaitingBalance.length} booked gig${awaitingBalance.length===1?'':'s'} still awaiting balance payment.`;
+  if(ql.includes('flight') || ql.includes('travel') || ql.includes('driver')) return needsTravel.length ? `${needsTravel.length} upcoming gig${needsTravel.length===1?'':'s'} still need a flight or driver arranged — see the Travel page.` : `All upcoming travel is arranged.`;
+  if(ql.includes('this month') || ql.includes('booked')){ const n=new Date(); const thisMonth = S.events.filter(e=>{const d=new Date(e.date+'T00:00:00'); return ['booked','paid'].includes(e.status) && d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear();}); return `${thisMonth.length} gig${thisMonth.length===1?'':'s'} booked this month.`; }
+  return `I can help with leads, balances, conflicts, travel, or ask about a specific artist (e.g. "How is Benny doing?").`;
+}
+function doAskAI(){
+  const q = (S.askAIForm.query||'').trim();
+  if(!q) return;
+  const entry = {q, a:null};
+  S.askAIHistory.push(entry);
+  S.askAIForm = {};
+  render();
+  setTimeout(()=>{
+    entry.a = answerAskAI(q, isAdminUser(S.user));
+    render();
+  }, 550);
+}
+
+/* ============ EVENT BINDING ============ */
+function bindGlobal(){
+  const staleFlight = document.getElementById('flightOverlayHost');
+  if(staleFlight) staleFlight.remove();
+  if(S.showFlightForm){
+    const holder = document.createElement('div');
+    holder.id = 'flightOverlayHost';
+    holder.innerHTML = renderFlightFormOverlay();
+    document.body.appendChild(holder);
+  }
+  const staleTransport = document.getElementById('transportOverlayHost');
+  if(staleTransport) staleTransport.remove();
+  if(S.showTransportForm){
+    const holder = document.createElement('div');
+    holder.id = 'transportOverlayHost';
+    holder.innerHTML = renderTransportFormOverlay();
+    document.body.appendChild(holder);
+  }
+  const staleDressCode = document.getElementById('dressCodeOverlayHost');
+  if(staleDressCode) staleDressCode.remove();
+  if(S.showDressCodeForm){
+    const holder = document.createElement('div');
+    holder.id = 'dressCodeOverlayHost';
+    holder.innerHTML = renderDressCodeFormOverlay();
+    document.body.appendChild(holder);
+  }
+  const staleEditEvent = document.getElementById('editEventOverlayHost');
+  if(staleEditEvent) staleEditEvent.remove();
+  if(S.showEditEvent){
+    const holder = document.createElement('div');
+    holder.id = 'editEventOverlayHost';
+    holder.innerHTML = renderEditEventFormOverlay();
+    document.body.appendChild(holder);
+  }
+  const staleContract = document.getElementById('contractPrintHost');
+  if(staleContract) staleContract.remove();
+  if(S.showContract){
+    const holder = document.createElement('div');
+    holder.id = 'contractPrintHost';
+    holder.innerHTML = renderContractDoc();
+    document.body.appendChild(holder);
+  }
+  const staleItinerary = document.getElementById('itineraryPrintHost');
+  if(staleItinerary) staleItinerary.remove();
+  if(S.showItinerary){
+    const holder = document.createElement('div');
+    holder.id = 'itineraryPrintHost';
+    holder.innerHTML = renderItineraryDoc();
+    document.body.appendChild(holder);
+  }
+  const staleInvoiceDoc = document.getElementById('invoicePrintHost');
+  if(staleInvoiceDoc) staleInvoiceDoc.remove();
+  if(S.showInvoiceDoc){
+    const holder = document.createElement('div');
+    holder.id = 'invoicePrintHost';
+    holder.innerHTML = renderInvoiceDoc();
+    document.body.appendChild(holder);
+  }
+  const staleDocumentDoc = document.getElementById('documentPrintHost');
+  if(staleDocumentDoc) staleDocumentDoc.remove();
+  if(S.showDocumentBuilder && S.documentId){
+    const doc = getDocument(S.documentId);
+    if(doc){
+      const holder = document.createElement('div');
+      holder.id = 'documentPrintHost';
+      // Unlike contract/itinerary/invoice, this doc has a separate interactive builder modal
+      // on screen at the same time -- the print host must stay invisible until an actual print
+      // (the @media print block above forces it back to display:block, print-only).
+      holder.style.display = 'none';
+      holder.innerHTML = renderDocumentDoc(doc);
+      document.body.appendChild(holder);
+    }
+  }
+  document.querySelectorAll('[data-field]').forEach(el=>{
+    el.addEventListener('input', e=>{
+      const key = el.getAttribute('data-field');
+      const form = el.closest('[data-form]')?.getAttribute('data-form');
+      if(form==='task'){ S.newTaskText = el.value; return; }
+      if(form==='comment'){ S.newCommentText = el.value; return; }
+      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S };
+      const target = formTargets[form] || S.newLeadForm;
+      target[key] = el.type==='checkbox'? el.checked : el.value;
+      if(el.type==='checkbox') render();
+    });
+  });
+  const askAIInput = document.getElementById('askAIInput');
+  if(askAIInput){
+    askAIInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doAskAI(); } });
+    askAIInput.focus();
+    const v = askAIInput.value; askAIInput.value=''; askAIInput.value=v;
+  }
+  const realSignInEmailInput = document.getElementById('realSignInEmailInput');
+  if(realSignInEmailInput) realSignInEmailInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doSubmitMagicLink(); } });
+  document.body.onclick = (e)=>{
+    const t = e.target.closest('[data-action]');
+    if(S.showEventMenu && !e.target.closest('.kebab-menu-wrap')){
+      S.showEventMenu = false;
+      render();
+    }
+    if(!t) return;
+    if(t.tagName==='A' && t.getAttribute('href')==='#') e.preventDefault();
+    const action = t.getAttribute('data-action');
+    const id = t.getAttribute('data-id');
+    if(action==='overlay-close' && e.target===t){ closeSheet(); return; }
+    if(action==='overlay-close') return;
+    switch(action){
+      case 'login': S.user = t.getAttribute('data-user'); S.view = isAdminUser(S.user)?'dashboard':'a_dashboard'; S.showChooser=false; S.showMobileMenu=false; pendingViewTransition=true; pendingViewDirection='right'; syncURL(); render(); break;
+      case 'logout': if(S.realSession && supabaseClient) supabaseClient.auth.signOut(); S.user=null; S.realSession=null; S.realPasskeys=null; S.eventId=null; S.showNewLead=false; S.showChooser=false; S.showMobileMenu=false; history.pushState(null,'',location.pathname+location.search); render(); break;
+      case 'show-chooser': S.showChooser=true; render(); break;
+      case 'hide-chooser': S.showChooser=false; render(); break;
+      case 'open-real-signin': S.showRealSignIn=true; S.realSignInSent=false; render(); break;
+      case 'close-real-signin': S.showRealSignIn=false; S.realSignInSent=false; S.realSignInEmail=''; render(); break;
+      case 'submit-magic-link': doSubmitMagicLink(); break;
+      case 'real-signin-passkey': doRealSignInPasskey(); break;
+      case 'real-signout': doRealSignOut(); break;
+      case 'open-mobile-menu': S.showMobileMenu=true; render(); break;
+      case 'close-mobile-menu': S.showMobileMenu=false; render(); break;
+      case 'mobilemenu-close': if(e.target===t){ S.showMobileMenu=false; render(); } break;
+      case 'nav': navigate(t.getAttribute('data-view')); break;
+      case 'nav-today-gigs': navigate(isAdminUser(S.user)?'calendar':'a_calendar', {calViewMode:'day', calDate:(()=>{const d=new Date(); d.setHours(0,0,0,0); return d;})()}); break;
+      case 'open-event': openEvent(id); break;
+      case 'open-day': closeAllOverlays(); S.dayListDate = t.getAttribute('data-date'); render(); break;
+      case 'close-daylist': S.dayListDate = null; render(); break;
+      case 'dayoverlay-close': if(e.target===t){ S.dayListDate=null; render(); } break;
+      case 'open-event-from-day': S.dayListDate = null; openEvent(id); break;
+      case 'open-artist': navigate('artist_detail', {artistDetailId:id}); break;
+      case 'open-new-lead': closeAllOverlays(); S.newLeadForm={date:'',time:'19:00'}; S.showNewLead=true; render(); break;
+      case 'quick-add-event': closeAllOverlays(); S.newLeadForm={date:t.getAttribute('data-date'),time:'19:00'}; S.showNewLead=true; render(); break;
+      case 'open-block-time': closeAllOverlays(); S.blockTimeForm={}; S.showBlockTime=true; render(); break;
+      case 'submit-block-time': doSubmitBlockTime(); break;
+      case 'open-ask-ai': closeAllOverlays(); S.showAskAI=true; render(); break;
+      case 'submit-ask-ai': doAskAI(); break;
+      case 'ask-ai-suggestion': S.askAIForm={query:t.getAttribute('data-q')}; doAskAI(); break;
+      case 'close-sheet': closeSheet(); break;
+      case 'pick-artist': S.newLeadForm.artistId = id; applyStandardPricing(); render(); break;
+      case 'pick-booking-kind': { const kind = t.getAttribute('data-kind'); S.newLeadForm.kind = kind; S.newLeadForm.type = null; render(); break; }
+      case 'switch-to-outside-booking': { const carryDate = S.newLeadForm.date; closeAllOverlays(); S.newOutsideBookingForm={date:carryDate||''}; S.showNewOutsideBooking=true; render(); break; }
+      case 'submit-lead': doSubmitLead(); break;
+      case 'add-lead-charge': {
+        const f = S.newLeadForm;
+        const preset = f.chargePreset || CHARGE_PRESETS[0];
+        const label = preset==='Other' ? (f.chargeCustomLabel||'').trim() : preset;
+        const amount = Number(f.chargeAmount);
+        if(!label || !amount || amount<=0){ toast('Enter a fee type and amount.', 'system'); break; }
+        f.charges = f.charges || [];
+        f.charges.push({label, amount});
+        f.chargeCustomLabel=''; f.chargeAmount=''; f.chargePreset=CHARGE_PRESETS[0];
+        render(); break;
+      }
+      case 'remove-lead-charge': {
+        S.newLeadForm.charges.splice(Number(t.getAttribute('data-idx')), 1);
+        render(); break;
+      }
+      case 'cal-prev':
+        if(S.calViewMode==='week') S.calDate.setDate(S.calDate.getDate()-7);
+        else if(S.calViewMode==='day') S.calDate.setDate(S.calDate.getDate()-1);
+        else S.calMonth.setMonth(S.calMonth.getMonth()-1);
+        render(); break;
+      case 'cal-next':
+        if(S.calViewMode==='week') S.calDate.setDate(S.calDate.getDate()+7);
+        else if(S.calViewMode==='day') S.calDate.setDate(S.calDate.getDate()+1);
+        else S.calMonth.setMonth(S.calMonth.getMonth()+1);
+        render(); break;
+      case 'cal-today':
+        S.calMonth = (()=>{const d=new Date(); d.setDate(1); return d;})();
+        S.calDate = (()=>{const d=new Date(); d.setHours(0,0,0,0); return d;})();
+        render(); break;
+      case 'cal-view-mode': {
+        const mode = t.getAttribute('data-mode');
+        if(mode==='month' && S.calViewMode!=='month'){ S.calMonth = new Date(S.calDate.getFullYear(), S.calDate.getMonth(), 1); }
+        else if(mode!=='month' && S.calViewMode==='month'){ S.calDate = new Date(S.calMonth.getFullYear(), S.calMonth.getMonth(), 1); }
+        S.calViewMode = mode; render(); break;
+      }
+      case 'open-day-view': S.calViewMode='day'; S.calDate=new Date(t.getAttribute('data-date')+'T00:00:00'); render(); break;
+      case 'cal-filter': {
+        const i = S.calArtistFilter.indexOf(id);
+        if(i>-1) S.calArtistFilter.splice(i,1); else S.calArtistFilter.push(id);
+        render(); break;
+      }
+      case 'fin-filter': S.finArtistFilter = id; render(); break;
+      case 'filter-leads-artist': S.leadsArtistFilter = id; render(); break;
+      case 'pricing-artist': S.pricingArtist = id; render(); break;
+      case 'send-contract': doSendContract(id); break;
+      case 'mark-deposit': doMarkDeposit(id); break;
+      case 'toggle-flight': doToggleFlight(id); break;
+      case 'open-flight-form': S.flightForm={}; S.showFlightForm=true; render(); break;
+      case 'close-flight-form': S.showFlightForm=false; render(); break;
+      case 'flight-overlay-close': if(e.target===t) { S.showFlightForm=false; render(); } break;
+      case 'save-flight': doSaveFlight(id); break;
+      case 'check-flight-status': doCheckFlightStatus(id); break;
+      case 'toggle-ground-transport': doToggleGroundTransport(id); break;
+      case 'open-transport-form': S.transportForm={}; S.showTransportForm=true; render(); break;
+      case 'close-transport-form': S.showTransportForm=false; render(); break;
+      case 'transport-overlay-close': if(e.target===t) { S.showTransportForm=false; render(); } break;
+      case 'save-transport': doSaveGroundTransport(id); break;
+      case 'open-dresscode-form': { const ev=getEvent(S.eventId); S.dressCodeForm={dressCode:ev?.dressCode||''}; S.showDressCodeForm=true; render(); break; }
+      case 'close-dresscode-form': S.showDressCodeForm=false; render(); break;
+      case 'dresscode-overlay-close': if(e.target===t) { S.showDressCodeForm=false; render(); } break;
+      case 'pick-dresscode': S.dressCodeForm.dressCode = t.getAttribute('data-value'); render(); break;
+      case 'save-dresscode': doSaveDressCode(id); break;
+      case 'open-edit-event': S.editEventForm={}; S.showEditEvent=true; render(); break;
+      case 'close-edit-event': S.showEditEvent=false; render(); break;
+      case 'editevent-overlay-close': if(e.target===t) { S.showEditEvent=false; render(); } break;
+      case 'save-edit-event': doSaveEditEvent(id); break;
+      case 'toggle-add-charge': S.showAddCharge=!S.showAddCharge; S.addChargeForm={}; render(); break;
+      case 'confirm-add-charge': doAddCharge(id); break;
+      case 'remove-charge': doRemoveCharge(id, t.getAttribute('data-chargeid')); break;
+      case 'remove-prep': doRemovePrep(id, t.getAttribute('data-prepid')); break;
+      case 'view-contract': S.showContract=true; render(); break;
+      case 'close-contract': S.showContract=false; render(); break;
+      case 'contract-overlay-close': if(e.target===t) { S.showContract=false; render(); } break;
+      case 'print-contract': window.print(); break;
+      case 'view-itinerary': S.itineraryEventId=id; S.showItinerary=true; render(); break;
+      case 'close-itinerary': S.showItinerary=false; S.itineraryEventId=null; render(); break;
+      case 'itinerary-overlay-close': if(e.target===t) { S.showItinerary=false; S.itineraryEventId=null; render(); } break;
+      case 'print-itinerary': window.print(); break;
+      case 'email-itinerary': doEmailItinerary(id); break;
+      case 'open-new-invoice': closeAllOverlays(); S.newInvoiceForm={items:[]}; S.showNewInvoice=true; render(); break;
+      case 'add-invoice-item': {
+        const f = S.newInvoiceForm; const label=(f.itemLabel||'').trim(); const amt=Number(f.itemAmount);
+        if(!label || !amt || amt<=0){ toast('Enter a description and amount.', 'error'); break; }
+        f.items = f.items || []; f.items.push({id:'LI-'+randInt(1,999999), label, amount:amt});
+        f.itemLabel=''; f.itemAmount=''; render(); break;
+      }
+      case 'remove-invoice-item': { const f=S.newInvoiceForm; f.items.splice(Number(t.getAttribute('data-idx')),1); render(); break; }
+      case 'submit-invoice': doSubmitInvoice(); break;
+      case 'view-invoice': closeAllOverlays(); S.invoiceDocId=id; S.showInvoiceDoc=true; render(); break;
+      case 'close-invoice-doc': S.showInvoiceDoc=false; S.invoiceDocId=null; render(); break;
+      case 'invoice-overlay-close': if(e.target===t) { S.showInvoiceDoc=false; S.invoiceDocId=null; render(); } break;
+      case 'print-invoice': window.print(); break;
+      case 'mark-invoice-paid': doMarkInvoicePaid(id); break;
+      case 'open-new-outside-booking': closeAllOverlays(); S.newOutsideBookingForm={}; S.showNewOutsideBooking=true; render(); break;
+      case 'submit-outside-booking': doSubmitOutsideBooking(); break;
+      case 'mark-outside-booking-paid': doMarkOutsideBookingPaid(id); break;
+      case 'open-outside-doc-builder': doOpenOutsideBookingDoc(id); break;
+      case 'open-new-document': closeAllOverlays(); S.documentId=null; S.documentForm={subjectType:'artist'}; S.showDocumentBuilder=true; render(); break;
+      case 'open-document': closeAllOverlays(); S.documentId=id; S.documentForm={}; S.showDocumentBuilder=true; render(); break;
+      case 'document-overlay-close': if(e.target===t){ closeAllOverlays(); render(); } break;
+      case 'pick-document-subject-type': S.documentForm.subjectType = t.getAttribute('data-subject'); S.documentForm.subjectId = null; render(); break;
+      case 'pick-document-brand': S.documentForm.brand = t.getAttribute('data-brand'); render(); break;
+      case 'save-document': doSaveDocument(); break;
+      case 'print-document': doSaveDocument(); window.print(); break;
+      case 'ai-edit-document': S.showAiEditNotice = true; render(); break;
+      case 'send-reminder': doSendReminder(id); break;
+      case 'preview-reminder': S.showReminderPreview=true; render(); break;
+      case 'close-reminder-preview': S.showReminderPreview=false; render(); break;
+      case 'overlay-close-reminderpreview': if(e.target===t){ S.showReminderPreview=false; render(); } break;
+      case 'close-booking-confirmation': S.showBookingConfirmation=false; render(); break;
+      case 'overlay-close-bookingconfirmation': if(e.target===t){ S.showBookingConfirmation=false; render(); } break;
+      case 'mark-balance': doMarkBalance(id); break;
+      case 'toggle-artist-paidout': doToggleArtistPaidOut(id); break;
+      case 'gcal': window.open(gcalUrl(getEvent(id)), '_blank'); break;
+      case 'ics': downloadIcs(getEvent(id)); break;
+      case 'dismiss-intl': { const ev=getEvent(id); ev.intlOpportunityDismissed=true; saveEvents(); toast('Dismissed.', 'system'); render(); break; }
+      case 'reset-demo': if(confirm('Reset all demo data back to the seeded example set?')) resetDemo(); break;
+      case 'load-real-projects': S.showMobileMenu=false; doLoadRealProjects(); break;
+      case 'set-theme': setThemePref(t.getAttribute('data-theme-pref')); break;
+      case 'toggle-notif': { const st=getUserSettings(S.user); const key=t.getAttribute('data-key'); const channel=t.getAttribute('data-channel')||'inApp'; st.notify[key][channel]=!st.notify[key][channel]; saveAllSettings(); render(); break; }
+      case 'add-passkey': { const st=getUserSettings(S.user); const n=st.passkeys.length+1; st.passkeys.push({id:'pk-'+randInt(1,999999), label:`Passkey ${n}`, addedAt: fmtISO(new Date())}); saveAllSettings(); toast('Passkey added.', 'success'); render(); break; }
+      case 'remove-passkey': { const st=getUserSettings(S.user); if(st.passkeys.length>1){ st.passkeys = st.passkeys.filter(pk=>pk.id!==id); saveAllSettings(); toast('Passkey removed.', 'system'); render(); } break; }
+      case 'add-real-passkey': doAddRealPasskey(); break;
+      case 'remove-real-passkey': doRemoveRealPasskey(id); break;
+      case 'connect-calendar': { const st=getUserSettings(S.user); const who=isAdminUser(S.user)?adminById(S.user):artistById(S.user); st.calendarConnected=true; st.calendarEmail=who.email; saveAllSettings(); toast('Google Calendar connected.', 'success'); render(); break; }
+      case 'disconnect-calendar': { const st=getUserSettings(S.user); st.calendarConnected=false; saveAllSettings(); toast('Google Calendar disconnected.', 'system'); render(); break; }
+      case 'export-csv': exportCSV(); break;
+      case 'filter-project-artist': S.projectArtistFilter = t.getAttribute('data-id'); render(); break;
+      case 'open-project': navigate('project_detail', {projectId:id}); break;
+      case 'toggle-task': doToggleTask(id, t.getAttribute('data-taskid')); break;
+      case 'remove-task': doRemoveTask(id, t.getAttribute('data-taskid')); break;
+      case 'add-task': doAddTask(id); break;
+      case 'set-project-tab': S.projectTab = t.getAttribute('data-tab'); render(); break;
+      case 'add-comment': doAddComment(id); break;
+      case 'remove-project-image': doRemoveProjectImage(id, t.getAttribute('data-imgid')); break;
+      case 'add-project-link': doAddProjectLink(id); break;
+      case 'remove-project-link': doRemoveProjectLink(id, t.getAttribute('data-linkid')); break;
+      case 'add-person': doAddPerson(id); break;
+      case 'remove-person': doRemovePerson(id, t.getAttribute('data-pid')); break;
+      case 'set-person-kind': S.newPersonForm = {kind: t.getAttribute('data-kind')}; render(); break;
+      case 'filter-tasks-by-assignee': { const pid = t.getAttribute('data-pid'); S.taskAssigneeFilter = (pid && pid!==S.taskAssigneeFilter) ? pid : null; render(); break; }
+      case 'add-fin-item': doAddFinItem(id, t.getAttribute('data-kind')); break;
+      case 'remove-fin-item': doRemoveFinItem(id, t.getAttribute('data-kind'), t.getAttribute('data-itemid')); break;
+      case 'add-board-card': doAddBoardCard(id, t.getAttribute('data-preset')); break;
+      case 'remove-board-card': doRemoveBoardCard(id, t.getAttribute('data-cardid')); break;
+      case 'remove-board-item': doRemoveBoardItem(id, t.getAttribute('data-cardid'), t.getAttribute('data-itemid')); break;
+      case 'add-board-item': doAddBoardItem(id, t.getAttribute('data-cardid')); break;
+      case 'remove-project-cover': { const p=getProject(id); p.coverImage=null; saveProjects(); toast('Cover removed.', 'system'); render(); break; }
+      case 'open-new-project': { const presetArtist = S.projectArtistFilter!=='all'? S.projectArtistFilter : null; closeAllOverlays(); S.newProjectForm={artistId: presetArtist}; S.showNewProject=true; render(); break; }
+      case 'close-new-project': S.showNewProject=false; render(); break;
+      case 'overlay-close-newproject': if(e.target===t){ S.showNewProject=false; render(); } break;
+      case 'pick-project-artist': S.newProjectForm.artistId = id; render(); break;
+      case 'new-project-mode': S.newProjectForm.mode = t.getAttribute('data-mode'); render(); break;
+      case 'pick-episode-count': S.newProjectForm.episodeCount = Number(t.getAttribute('data-count')); render(); break;
+      case 'confirm-add-project': doAddProject(); break;
+      case 'open-add-artist': closeAllOverlays(); S.addArtistForm={}; S.showAddArtist=true; render(); break;
+      case 'close-add-artist': S.showAddArtist=false; render(); break;
+      case 'overlay-close-addartist': if(e.target===t){ S.showAddArtist=false; render(); } break;
+      case 'confirm-add-artist': doAddArtist(); break;
+      case 'pick-artist-role': S.addArtistForm.role = t.getAttribute('data-role'); render(); break;
+      case 'close-welcome': S.newArtistWelcome=null; render(); break;
+      case 'overlay-close-welcome': if(e.target===t){ S.newArtistWelcome=null; render(); } break;
+      case 'open-add-real-user': closeAllOverlays(); S.addRealUserForm={}; S.showAddRealUser=true; render(); break;
+      case 'close-add-real-user': S.showAddRealUser=false; render(); break;
+      case 'overlay-close-addrealuser': if(e.target===t){ S.showAddRealUser=false; render(); } break;
+      case 'pick-real-user-kind': S.addRealUserForm.kind = t.getAttribute('data-kind'); render(); break;
+      case 'pick-real-artist-role': S.addRealUserForm.artistRole = t.getAttribute('data-role'); render(); break;
+      case 'pick-real-admin-role': S.addRealUserForm.adminRole = t.getAttribute('data-role'); render(); break;
+      case 'confirm-add-real-user': doAddRealUser(); break;
+      case 'toggle-event-menu': S.showEventMenu = !S.showEventMenu; render(); break;
+      case 'share-event': doShareEvent(id); break;
+      case 'copy-daily-digest': doCopyDailyDigest(); break;
+      case 'delete-event': doDeleteEvent(id); break;
+      case 'install-app': if(deferredInstallPrompt){ deferredInstallPrompt.prompt(); deferredInstallPrompt.userChoice.finally(()=>{ deferredInstallPrompt=null; }); } break;
+      case 'dismiss-install': localStorage.setItem('aspInstallDismissedAt', String(Date.now())); S.showInstallBanner=false; render(); break;
+    }
+  };
+  document.querySelectorAll('[data-action="set-reminder-interval"]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ const ev=getEvent(sel.getAttribute('data-id')); ev.reminderIntervalDays=Number(sel.value); saveEvents(); toast('Reminder interval updated.', 'system'); });
+  });
+  document.querySelectorAll('[data-charge-preset]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.addChargeForm.preset = sel.value; render(); });
+  });
+  document.querySelectorAll('[data-lead-charge-preset]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.newLeadForm.chargePreset = sel.value; render(); });
+  });
+  document.querySelectorAll('[data-action="pick-event-type"]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.newLeadForm.type = sel.value; applyStandardPricing(); render(); });
+  });
+  document.querySelectorAll('[data-action="upload-prep"]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{ if(inp.files.length) doUploadPrep(inp.getAttribute('data-id'), inp.files); });
+  });
+  document.querySelectorAll('[data-action="upload-project-image"]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{ if(inp.files.length) doUploadProjectImage(inp.getAttribute('data-id'), inp.files); });
+  });
+  document.querySelectorAll('[data-action="set-project-due"]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{ const p=getProject(inp.getAttribute('data-id')); p.dueDate = inp.value||null; saveProjects(); toast('Target date updated.', 'system'); });
+  });
+  document.querySelectorAll('[data-action="set-hourly-rate"]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{ setPricing(inp.getAttribute('data-artist'), inp.getAttribute('data-type'), {hourlyRate:Number(inp.value)||0}); toast('Rate updated.', 'system'); render(); });
+  });
+  document.querySelectorAll('[data-action="set-included-hours"]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{ setPricing(inp.getAttribute('data-artist'), inp.getAttribute('data-type'), {includedHours:Number(inp.value)||0}); toast('Rate updated.', 'system'); render(); });
+  });
+  document.querySelectorAll('[data-action="upload-project-cover"]').forEach(inp=>{
+    if(inp.tagName!=='INPUT') return;
+    inp.addEventListener('change', ()=>{ if(inp.files.length) doUploadProjectCover(inp.getAttribute('data-id'), inp.files[0]); });
+  });
+  document.querySelectorAll('[data-action="set-project-title"]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{ const v=inp.value.trim(); const p=getProject(inp.getAttribute('data-id')); if(v){ p.title=v; saveProjects(); } render(); });
+  });
+  document.querySelectorAll('[data-action="set-project-subtitle"]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{ const p=getProject(inp.getAttribute('data-id')); p.subtitle = inp.value.trim(); saveProjects(); });
+  });
+  document.querySelectorAll('[data-action="set-board-card-header"]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{ const p=getProject(inp.getAttribute('data-id')); const c=(p.boardCards||[]).find(x=>x.id===inp.getAttribute('data-cardid')); if(c){ c.header = inp.value; saveProjects(); render(); } });
+  });
+  document.querySelectorAll('.board-item-input').forEach(inp=>{
+    inp.addEventListener('input', ()=>{ S.newBoardItemText[inp.getAttribute('data-cardid')] = inp.value; });
+    inp.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doAddBoardItem(inp.getAttribute('data-projectid'), inp.getAttribute('data-cardid')); } });
+  });
+  document.querySelectorAll('.artist-filter-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const action = sel.getAttribute('data-action'), id = sel.value;
+      if(action==='filter-project-artist') S.projectArtistFilter = id;
+      else if(action==='fin-filter') S.finArtistFilter = id;
+      else if(action==='filter-leads-artist') S.leadsArtistFilter = id;
+      else if(action==='pricing-artist') S.pricingArtist = id;
+      render();
+    });
+  });
+  document.querySelectorAll('.tab-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.projectTab = sel.value; render(); });
+  });
+  document.querySelectorAll('.person-refid-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.newPersonForm.refId = sel.value; });
+  });
+  document.querySelectorAll('.document-subject-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.documentForm.subjectId = sel.value || null; render(); });
+  });
+  document.querySelectorAll('.edit-event-type-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.editEventForm.type = sel.value; });
+  });
+  document.querySelectorAll('.new-task-assignee-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.newTaskAssignee = sel.value; });
+  });
+  document.querySelectorAll('.task-assignee-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ doAssignTask(sel.getAttribute('data-id'), sel.getAttribute('data-taskid'), sel.value); });
+  });
+}
+
+applyHashToState();
+render();
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
+}
+
+(function(){
+  const opener = document.getElementById('opener');
+  if(!opener) return;
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){ opener.remove(); return; }
+  const mark = opener.querySelector('.opener-mark');
+  let done = false;
+  function finish(){
+    if(done) return; done = true;
+    opener.classList.add('leaving');
+    setTimeout(()=>opener.remove(), 900);
+  }
+  setTimeout(()=>{ mark.classList.add('activate'); }, 750);
+  const autoTimer = setTimeout(finish, 2700);
+  opener.addEventListener('click', ()=>{ clearTimeout(autoTimer); finish(); });
+  window.addEventListener('keydown', function skipKey(e){
+    if(e.key==='Enter'||e.key===' '||e.key==='Escape'){ clearTimeout(autoTimer); finish(); window.removeEventListener('keydown', skipKey); }
+  });
+})();
+
+// ---- workspace contract (Phase 1a: shape only, still eager-executing above) ----
+window.Workspaces = window.Workspaces || {};
+window.Workspaces.asp = { id: 'asp', mount(){}, unmount(){} };
+// Debug-console parity with the old inline-script global scope (harness itself avoids
+// relying on this -- see test-harness/README.md -- but interactive debugging used it).
+window.S = S;
+})();
