@@ -16,7 +16,7 @@ ARTIST_IDS = ["baruch", "benny", "moshe", "yaakov", "eli", "dovie"]
 MOBILE_ADMIN_NAV = ["dashboard", "calendar", "leads", "projects", "financials"]
 MOBILE_ARTIST_NAV = ["a_calendar", "a_gigs", "a_dashboard", "a_travel", "a_financials"]
 
-MGMT_NAV_ITEMS = ["dashboard", "calendar", "leads", "artists", "travel", "projects", "pricing", "financials", "outside_bookings", "documents", "messages"]
+MGMT_NAV_ITEMS = ["dashboard", "calendar", "leads", "artists", "travel", "projects", "pricing", "financials", "outside_bookings", "documents", "contracts", "messages"]
 ARTIST_NAV_ITEMS = ["a_dashboard", "a_calendar", "a_gigs", "a_travel", "a_financials", "a_projects"]
 
 CEO_HIDDEN_NAV_VIEWS = ("outside_bookings", "documents")

@@ -494,6 +494,8 @@ let S = {
   newGigContactForm:{},
   showGigInfoDoc:false,
   gigInfoDocEventId:null,
+  contractSearchQuery:'',
+  contractDocEventId:null,
   showNewInvoice:false,
   newInvoiceForm:{},
   showNewOutsideBooking:false,
@@ -892,7 +894,7 @@ S.showInstallBanner = shouldShowInstallBanner();
 
 function closeAllOverlays(){
   S.eventId=null; S.projectId=null; S.showNewLead=false; S.showAddArtist=false; S.newArtistWelcome=null;
-  S.dayListDate=null; S.showNewProject=false; S.showFlightForm=false; S.showContract=false;
+  S.dayListDate=null; S.showNewProject=false; S.showFlightForm=false; S.showContract=false; S.contractDocEventId=null;
   S.showTransportForm=false; S.showItinerary=false; S.itineraryEventId=null; S.showBlockTime=false; S.showAskAI=false; S.showDressCodeForm=false;
   S.showEditEvent=false;
   S.showGigInfoForm=false; S.gigInfoForm={}; S.newGigContactForm={}; S.showGigInfoDoc=false; S.gigInfoDocEventId=null;
@@ -1168,7 +1170,7 @@ function pageTitle(){
   if(S.view==='project_detail'){ const p=getProject(S.projectId); return p ? p.title : 'Project'; }
   const t = {
     dashboard:'Dashboard', calendar:'Calendar', leads:'Open Leads', artists:'Artists', financials:'Financials', projects:'Projects', pricing:'Pricing',
-    travel:'Travel', international:'International Opportunities', daily_digest:'Daily Digest', messages:'Messages', outside_bookings:'Outside Bookings', documents:'Documents',
+    travel:'Travel', international:'International Opportunities', daily_digest:'Daily Digest', messages:'Messages', outside_bookings:'Outside Bookings', documents:'Documents', contracts:'Contracts',
     artist_detail: artistById(S.artistDetailId)?.name || '',
     a_dashboard:'My Dashboard', a_calendar:'Calendar', a_gigs:'My Gigs', a_travel:'Travel', a_financials:'Financials', a_projects:'My Projects', settings:'Settings',
   };
@@ -1191,6 +1193,7 @@ const MGMT_NAV_ITEMS = [
   ['artists','Artists',ICO.artists], ['travel','Travel',ICO.suitcase], ['projects','Projects',ICO.kanban], ['pricing','Pricing',ICO.tag], ['financials','Financials',ICO.money],
   ['outside_bookings','Outside Bookings',ICO.leads],
   ['documents','Documents',ICO.leads],
+  ['contracts','Contracts',ICO.leads],
   ['messages','Messages',ICO.sms],
 ];
 // Outside Bookings and Documents are office/bookkeeping work, not something Ilan (CEO) needs on
@@ -1311,6 +1314,7 @@ function renderView(){
     if(S.view==='financials') return renderFinancialsPage();
     if(S.view==='outside_bookings') return renderOutsideBookingsPage();
     if(S.view==='documents') return renderDocumentsPage();
+    if(S.view==='contracts') return renderContractsPage();
     if(S.view==='messages') return renderMessagesPage();
     if(S.view==='projects') return renderProjectsBoard();
     if(S.view==='pricing') return renderPricingPage();
@@ -2078,6 +2082,45 @@ function renderDocumentsPage(){
       </tr>`;
     }).join('')}
     </tbody></table></div>` : `<div class="card empty">No documents yet.</div>`}
+  `;
+}
+
+/* ============ CONTRACTS (searchable) ============ */
+// Every booking's contract is generated live from its own event data (renderContractDoc, reused
+// unchanged here) -- this page is a find-it-fast index, not a second copy of contract content,
+// so there's nothing here that can drift out of sync with the real event. Scoped to events that
+// actually have a real (non-draft) contract out -- contract_sent/booked/paid -- since a lead
+// still being negotiated doesn't have one yet.
+function contractedEvents(){
+  return S.events.filter(e=>!e.unpaid && ['contract_sent','booked','paid'].includes(e.status));
+}
+function renderContractsPage(){
+  const q = (S.contractSearchQuery||'').trim().toLowerCase();
+  const rows = contractedEvents()
+    .filter(e=>{
+      if(!q) return true;
+      const a = artistById(e.artistId);
+      return (e.clientName||'').toLowerCase().includes(q) || a.name.toLowerCase().includes(q);
+    })
+    .sort((a,b)=>b.date.localeCompare(a.date));
+  return `
+  <div class="section-head"><h2>Contracts (${rows.length})</h2></div>
+  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Every booking with a contract out, searchable by client or artist — find one without digging through the gig itself.</p>
+  <div class="field" style="max-width:340px;margin-bottom:14px;">
+    <input id="contractSearchInput" value="${esc(S.contractSearchQuery||'')}" placeholder="Search client or artist..."/>
+  </div>
+  ${rows.length? `<div class="card u-scroll-x table-cards"><table>
+    <thead><tr><th>Client</th><th>Artist</th><th>Date</th><th>Status</th></tr></thead>
+    <tbody>${rows.map(e=>{
+      const a = artistById(e.artistId); const sm = statusMeta(e);
+      return `<tr class="row-link" data-action="open-contract-from-list" data-id="${e.id}">
+        <td data-label="Client">${esc(e.clientName||e.type)}</td>
+        <td data-label="Artist">${esc(a.name)}</td>
+        <td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
+        <td data-label="Status"><span class="pill ${sm.cls||'pill-neutral'}">${esc(sm.label)}</span></td>
+      </tr>`;
+    }).join('')}
+    </tbody></table></div>` : `<div class="card empty">${q? 'No contracts match that search.' : 'No contracts sent yet.'}</div>`}
   `;
 }
 
@@ -3494,7 +3537,11 @@ function renderInvoiceDoc(){
 }
 
 function renderContractDoc(){
-  const ev = getEvent(S.eventId); if(!ev) return '';
+  // contractDocEventId lets the Contracts list open a contract without touching S.eventId --
+  // S.eventId truthy is what makes the full event sheet render (see render()), so reusing it
+  // here would silently pop that open behind the doc too (the exact bug the Travel-page
+  // itinerary shortcut hit before -- see S.itineraryEventId for the same fix).
+  const ev = getEvent(S.contractDocEventId || S.eventId); if(!ev) return '';
   const artist = artistById(ev.artistId);
   const isComedian = artist.role==='Comedian';
   const signed = ev.depositReceived;
@@ -4416,6 +4463,12 @@ function bindGlobal(){
     askAIInput.focus();
     const v = askAIInput.value; askAIInput.value=''; askAIInput.value=v;
   }
+  const contractSearchInput = document.getElementById('contractSearchInput');
+  if(contractSearchInput){
+    contractSearchInput.addEventListener('input', ()=>{ S.contractSearchQuery = contractSearchInput.value; render(); });
+    contractSearchInput.focus();
+    const v = contractSearchInput.value; contractSearchInput.value=''; contractSearchInput.value=v;
+  }
   const realSignInEmailInput = document.getElementById('realSignInEmailInput');
   if(realSignInEmailInput) realSignInEmailInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doSubmitMagicLink(); } });
   document.body.onclick = (e)=>{
@@ -4545,8 +4598,9 @@ function bindGlobal(){
       case 'remove-charge': doRemoveCharge(id, t.getAttribute('data-chargeid')); break;
       case 'remove-prep': doRemovePrep(id, t.getAttribute('data-prepid')); break;
       case 'view-contract': S.showContract=true; render(); break;
-      case 'close-contract': S.showContract=false; render(); break;
-      case 'contract-overlay-close': if(e.target===t) { S.showContract=false; render(); } break;
+      case 'open-contract-from-list': S.contractDocEventId=id; S.showContract=true; render(); break;
+      case 'close-contract': S.showContract=false; S.contractDocEventId=null; render(); break;
+      case 'contract-overlay-close': if(e.target===t) { S.showContract=false; S.contractDocEventId=null; render(); } break;
       case 'print-contract': window.print(); break;
       case 'view-itinerary': S.itineraryEventId=id; S.showItinerary=true; render(); break;
       case 'close-itinerary': S.showItinerary=false; S.itineraryEventId=null; render(); break;
