@@ -489,6 +489,11 @@ let S = {
   showEditEvent:false,
   editEventForm:{},
   dressCodeForm:{},
+  showGigInfoForm:false,
+  gigInfoForm:{},
+  newGigContactForm:{},
+  showGigInfoDoc:false,
+  gigInfoDocEventId:null,
   showNewInvoice:false,
   newInvoiceForm:{},
   showNewOutsideBooking:false,
@@ -890,6 +895,7 @@ function closeAllOverlays(){
   S.dayListDate=null; S.showNewProject=false; S.showFlightForm=false; S.showContract=false;
   S.showTransportForm=false; S.showItinerary=false; S.itineraryEventId=null; S.showBlockTime=false; S.showAskAI=false; S.showDressCodeForm=false;
   S.showEditEvent=false;
+  S.showGigInfoForm=false; S.gigInfoForm={}; S.newGigContactForm={}; S.showGigInfoDoc=false; S.gigInfoDocEventId=null;
   S.showNewInvoice=false; S.showInvoiceDoc=false; S.invoiceDocId=null; S.showNewOutsideBooking=false;
   S.showDocumentBuilder=false; S.documentId=null; S.showAiEditNotice=false;
   S.showAddCharge=false; S.showEventMenu=false; S.projectTab='tasks'; S.taskAssigneeFilter=null; S.showReminderPreview=false; S.showBookingConfirmation=false;
@@ -2835,6 +2841,7 @@ function renderEventSheet(ev){
           ${isAdmin? `<button class="btn btn-sm" data-action="email-itinerary" data-id="${ev.id}">${ICO.mail} Email to Artist</button>` : ''}
         </div>` : ''}
         ${renderPrepSheets(ev, isAdmin)}
+        ${renderGigInfoCard(ev, isAdmin)}
         ${!isAdmin ? `<div>
             <div style="display:flex;gap:8px;">
               <button class="btn btn-primary btn-block" data-action="gcal" data-id="${ev.id}">${ICO.cal} Add to Google Calendar</button>
@@ -2977,6 +2984,107 @@ function renderPrepSheets(ev, isAdmin){
       </div>`).join('')}</div>` : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 ${isAdmin?'10px':'0'};">No prep sheets uploaded yet.</p>`}
     ${isAdmin? `<label class="btn btn-sm" style="cursor:pointer;display:inline-flex;">Upload File<input type="file" data-action="upload-prep" data-id="${ev.id}" multiple style="display:none;"/></label>
       <p style="font-size:10.5px;color:var(--ink-3);margin:8px 0 0;">Stored in this demo session only — swapped for real cloud storage once ASP is online.</p>` : ''}
+  </div>`;
+}
+
+/* ============ GIG INFO SHEET ============ */
+// Paste/write free-text gig info + a contact list (name/role/phone/email, click-to-copy),
+// available from the event sheet the same place Prep Sheets is -- printable via the same
+// print-host pattern as the Contract/Itinerary docs (renderItineraryDoc above).
+function gigInfoSheetOf(ev){ return ev.gigInfoSheet || {text:'', contacts:[], updatedAt:null}; }
+function renderContactCopyRow(c, ev){
+  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border);font-size:12.5px;">
+    <span style="flex:1;min-width:0;"><strong>${esc(c.name)}</strong>${c.role?` <span style="color:var(--ink-3);">· ${esc(c.role)}</span>`:''}</span>
+    <span style="display:flex;gap:6px;flex:none;">
+      ${c.phone? `<button class="btn btn-sm btn-ghost" data-action="copy-text" data-value="${esc(c.phone)}" title="Copy phone">${esc(c.phone)}</button>`:''}
+      ${c.email? `<button class="btn btn-sm btn-ghost" data-action="copy-text" data-value="${esc(c.email)}" title="Copy email">${esc(c.email)}</button>`:''}
+    </span>
+  </div>`;
+}
+function renderGigInfoCard(ev, isAdmin){
+  if(ev.unpaid) return '';
+  const sheet = gigInfoSheetOf(ev);
+  const hasContent = sheet.text || (sheet.contacts||[]).length;
+  return `<div class="card card-pad">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;">
+      <div class="u-label">Gig Info Sheet</div>
+      ${isAdmin? `<button class="btn btn-sm btn-ghost" data-action="open-giginfo-form" data-id="${ev.id}" style="padding:2px 6px;">${hasContent?'Edit':'+ Add'}</button>`:''}
+    </div>
+    ${!hasContent? `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No gig info sheet yet.</p>` : `
+      ${sheet.text? `<p style="font-size:12.5px;color:var(--ink);white-space:pre-wrap;margin:0 0 10px;">${esc(sheet.text)}</p>` : ''}
+      ${(sheet.contacts||[]).length? `<div style="margin-bottom:10px;">${sheet.contacts.map(c=>renderContactCopyRow(c, ev)).join('')}</div>` : ''}
+      <button class="btn btn-sm" data-action="view-giginfo" data-id="${ev.id}">${ICO.leads} View / Print</button>
+      ${sheet.updatedAt? `<span style="font-size:10.5px;color:var(--ink-3);margin-left:8px;">Updated ${fmtDateShort(sheet.updatedAt)}</span>`:''}
+    `}
+  </div>`;
+}
+function renderGigInfoFormOverlay(){
+  const ev = getEvent(S.eventId); if(!ev) return '';
+  const sheet = gigInfoSheetOf(ev);
+  const f = S.gigInfoForm;
+  const contacts = sheet.contacts||[];
+  const cf = S.newGigContactForm;
+  return `<div class="overlay center" data-action="giginfo-overlay-close">
+    <div class="modal" data-stop data-form="giginfo" style="width:480px;">
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Gig Info Sheet</h2><button class="icon-btn" data-action="close-giginfo-form">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <div class="field"><label>Gig Info</label>
+          <textarea data-field="text" rows="8" placeholder="Paste or write everything the artist needs to know — schedule, sound check, meal info, special requests...">${esc(f.text!==undefined?f.text:sheet.text)}</textarea>
+        </div>
+        <div class="field">
+          <label>Contacts</label>
+          ${contacts.length? `<div style="margin-bottom:8px;">${contacts.map(c=>`
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12.5px;padding:4px 0;">
+              <span>${esc(c.name)}${c.role?` · ${esc(c.role)}`:''} ${c.phone?`— ${esc(c.phone)}`:''} ${c.email?`— ${esc(c.email)}`:''}</span>
+              <button class="icon-btn" data-action="remove-gig-contact" data-id="${ev.id}" data-contactid="${c.id}" title="Remove" style="width:20px;height:20px;">${ICO.x}</button>
+            </div>`).join('')}</div>` : ''}
+          <div data-form="gigcontact" style="display:flex; gap:6px; padding:8px 0; border-top:1px dashed var(--border); align-items:flex-end; flex-wrap:wrap;">
+            <div class="field" style="flex:1;min-width:100px;"><label style="font-size:10px;">Name</label><input data-field="name" value="${esc(cf.name||'')}" placeholder="Venue coordinator"/></div>
+            <div class="field" style="flex:1;min-width:100px;"><label style="font-size:10px;">Role</label><input data-field="role" value="${esc(cf.role||'')}" placeholder="Optional"/></div>
+            <div class="field" style="flex:1;min-width:110px;"><label style="font-size:10px;">Phone</label><input data-field="phone" value="${esc(cf.phone||'')}" placeholder="(555) 555-5555"/></div>
+            <div class="field" style="flex:1;min-width:130px;"><label style="font-size:10px;">Email</label><input data-field="email" value="${esc(cf.email||'')}" placeholder="name@example.com"/></div>
+            <button class="btn btn-sm" data-action="add-gig-contact" data-id="${ev.id}">+ Add</button>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-block" data-action="save-giginfo" data-id="${ev.id}" style="margin-top:6px;">Save &amp; Notify Artist</button>
+      </div>
+    </div>
+  </div>`;
+}
+function renderGigInfoDoc(){
+  const ev = getEvent(S.gigInfoDocEventId); if(!ev) return '';
+  const artist = artistById(ev.artistId);
+  const sheet = gigInfoSheetOf(ev);
+  return `<div class="overlay center" data-action="giginfo-doc-overlay-close">
+    <div class="doc" data-stop>
+      <div class="sheet-head">
+        <h2 style="font-size:1.1rem;">Gig Info Sheet</h2>
+        <div style="display:flex;gap:6px;">
+          <button class="icon-btn" data-action="print-giginfo" title="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
+          <button class="icon-btn" data-action="close-giginfo-doc">${ICO.x}</button>
+        </div>
+      </div>
+      <div class="doc-body">
+        <div class="doc-letterhead">
+          <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
+          <span class="pill pill-good">Gig Info</span>
+        </div>
+        <div class="doc-title">${esc(artist.name.toUpperCase())}<br/><span style="font-size:.62em;letter-spacing:.06em;">${esc((ev.type||'').toUpperCase())}${ev.unpaid?'':` — ${esc((ev.clientName||'').toUpperCase())}`}</span></div>
+        <div class="doc-sub">${fmtDate(ev.date)}${ev.venue? ` &middot; ${esc(ev.venue)}` : ''}${(ev.city||ev.state)? `, ${esc(ev.city)}${ev.city&&ev.state?', ':''}${esc(ev.state)}` : ''}</div>
+
+        ${sheet.text? `<div class="doc-section"><h3>Details</h3><p style="font-size:12.5px;color:var(--ink-2);white-space:pre-wrap;margin:0;">${esc(sheet.text)}</p></div>` : ''}
+
+        ${(sheet.contacts||[]).length? `<div class="doc-section"><h3>Contacts</h3>
+          <div class="doc-facts">
+            ${sheet.contacts.map(c=>`<div><span class="k">${esc(c.name)}${c.role?` (${esc(c.role)})`:''}</span><span>${esc(c.phone||'')}${c.phone&&c.email?' · ':''}${esc(c.email||'')}</span></div>`).join('')}
+          </div>
+        </div>` : ''}
+
+        ${!sheet.text && !(sheet.contacts||[]).length? `<p style="font-size:13px;color:var(--ink-3);">No gig info added yet.</p>` : ''}
+
+        <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -3601,6 +3709,38 @@ function doSaveDressCode(id){
   toast(ev.dressCode? 'Dress code saved — artist notified.' : 'Dress code cleared.', 'success');
   S.showDressCodeForm=false; saveEvents(); openEvent(id);
 }
+function doAddGigContact(id){
+  const ev = getEvent(id); if(!ev) return;
+  const f = S.newGigContactForm;
+  const name = (f.name||'').trim();
+  if(!name){ toast('Enter a name for the contact.', 'system'); return; }
+  const sheet = ev.gigInfoSheet || (ev.gigInfoSheet = {text:'', contacts:[], updatedAt:null});
+  sheet.contacts = sheet.contacts || [];
+  sheet.contacts.push({ id:'GC-'+Math.random().toString(36).slice(2,9), name, role:(f.role||'').trim(), phone:(f.phone||'').trim(), email:(f.email||'').trim() });
+  S.newGigContactForm = {};
+  saveEvents(); render();
+}
+function doRemoveGigContact(id, contactId){
+  const ev = getEvent(id); if(!ev || !ev.gigInfoSheet) return;
+  ev.gigInfoSheet.contacts = (ev.gigInfoSheet.contacts||[]).filter(c=>c.id!==contactId);
+  saveEvents(); render();
+}
+function doSaveGigInfo(id){
+  const ev = getEvent(id); if(!ev) return;
+  const f = S.gigInfoForm;
+  const sheet = ev.gigInfoSheet || (ev.gigInfoSheet = {text:'', contacts:[], updatedAt:null});
+  sheet.text = (f.text!==undefined? f.text : sheet.text).trim();
+  sheet.updatedAt = fmtISO(new Date());
+  logEvent(ev, 'email', `Gig info sheet updated — ${artistById(ev.artistId).name} notified.`);
+  toast('Gig info sheet saved — artist notified.', 'success');
+  S.showGigInfoForm=false; S.gigInfoForm={}; S.newGigContactForm={}; saveEvents(); openEvent(id);
+}
+function doCopyText(value){
+  if(!value) return;
+  const done = ()=> toast('Copied to clipboard.', 'success');
+  if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(value).then(done).catch(done);
+  else done();
+}
 function doSaveEditEvent(id){
   const ev = getEvent(id); if(!ev) return;
   const f = S.editEventForm;
@@ -4203,6 +4343,22 @@ function bindGlobal(){
     holder.innerHTML = renderEditEventFormOverlay();
     document.body.appendChild(holder);
   }
+  const staleGigInfoForm = document.getElementById('gigInfoOverlayHost');
+  if(staleGigInfoForm) staleGigInfoForm.remove();
+  if(S.showGigInfoForm){
+    const holder = document.createElement('div');
+    holder.id = 'gigInfoOverlayHost';
+    holder.innerHTML = renderGigInfoFormOverlay();
+    document.body.appendChild(holder);
+  }
+  const staleGigInfoDoc = document.getElementById('gigInfoPrintHost');
+  if(staleGigInfoDoc) staleGigInfoDoc.remove();
+  if(S.showGigInfoDoc){
+    const holder = document.createElement('div');
+    holder.id = 'gigInfoPrintHost';
+    holder.innerHTML = renderGigInfoDoc();
+    document.body.appendChild(holder);
+  }
   const staleContract = document.getElementById('contractPrintHost');
   if(staleContract) staleContract.remove();
   if(S.showContract){
@@ -4248,7 +4404,7 @@ function bindGlobal(){
       const form = el.closest('[data-form]')?.getAttribute('data-form');
       if(form==='task'){ S.newTaskText = el.value; return; }
       if(form==='comment'){ S.newCommentText = el.value; return; }
-      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S };
+      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm };
       const target = formTargets[form] || S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
       if(el.type==='checkbox') render();
@@ -4369,6 +4525,17 @@ function bindGlobal(){
       case 'dresscode-overlay-close': if(e.target===t) { S.showDressCodeForm=false; render(); } break;
       case 'pick-dresscode': S.dressCodeForm.dressCode = t.getAttribute('data-value'); render(); break;
       case 'save-dresscode': doSaveDressCode(id); break;
+      case 'open-giginfo-form': { const ev=getEvent(S.eventId); const sheet=gigInfoSheetOf(ev||{}); S.gigInfoForm={text:sheet.text}; S.newGigContactForm={}; S.showGigInfoForm=true; render(); break; }
+      case 'close-giginfo-form': S.showGigInfoForm=false; S.newGigContactForm={}; render(); break;
+      case 'giginfo-overlay-close': if(e.target===t) { S.showGigInfoForm=false; S.newGigContactForm={}; render(); } break;
+      case 'add-gig-contact': doAddGigContact(id); break;
+      case 'remove-gig-contact': doRemoveGigContact(id, t.getAttribute('data-contactid')); break;
+      case 'save-giginfo': doSaveGigInfo(id); break;
+      case 'view-giginfo': S.gigInfoDocEventId=id; S.showGigInfoDoc=true; render(); break;
+      case 'close-giginfo-doc': S.showGigInfoDoc=false; S.gigInfoDocEventId=null; render(); break;
+      case 'giginfo-doc-overlay-close': if(e.target===t) { S.showGigInfoDoc=false; S.gigInfoDocEventId=null; render(); } break;
+      case 'print-giginfo': window.print(); break;
+      case 'copy-text': doCopyText(t.getAttribute('data-value')); break;
       case 'open-edit-event': S.editEventForm={}; S.showEditEvent=true; render(); break;
       case 'close-edit-event': S.showEditEvent=false; render(); break;
       case 'editevent-overlay-close': if(e.target===t) { S.showEditEvent=false; render(); } break;

@@ -380,10 +380,10 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
 .doc-signature{ display:inline-block; font-family:"Snell Roundhand","Segoe Script","Brush Script MT",cursive; font-size:1.9rem; font-weight:400; color:var(--ink); line-height:1.1; transform:rotate(-2deg); margin-bottom:2px; }
 .doc-foot{ margin-top:28px; padding-top:14px; border-top:1px solid var(--border); font-size:10.5px; color:var(--ink-3); text-align:center; }
 @media print{
-  body > *:not(#contractPrintHost):not(#itineraryPrintHost):not(#invoicePrintHost):not(#documentPrintHost){ display:none !important; }
-  #contractPrintHost, #contractPrintHost .overlay, #itineraryPrintHost, #itineraryPrintHost .overlay, #invoicePrintHost, #invoicePrintHost .overlay, #documentPrintHost, #documentPrintHost .overlay{ position:static !important; background:transparent !important; inset:auto !important; display:block !important; padding:0 !important; }
-  #contractPrintHost .doc, #itineraryPrintHost .doc, #invoicePrintHost .doc, #documentPrintHost .doc{ box-shadow:none; max-height:none; width:100%; animation:none; }
-  #contractPrintHost .sheet-head, #itineraryPrintHost .sheet-head, #invoicePrintHost .sheet-head, #documentPrintHost .sheet-head{ display:none; }
+  body > *:not(#contractPrintHost):not(#itineraryPrintHost):not(#invoicePrintHost):not(#documentPrintHost):not(#gigInfoPrintHost){ display:none !important; }
+  #contractPrintHost, #contractPrintHost .overlay, #itineraryPrintHost, #itineraryPrintHost .overlay, #invoicePrintHost, #invoicePrintHost .overlay, #documentPrintHost, #documentPrintHost .overlay, #gigInfoPrintHost, #gigInfoPrintHost .overlay{ position:static !important; background:transparent !important; inset:auto !important; display:block !important; padding:0 !important; }
+  #contractPrintHost .doc, #itineraryPrintHost .doc, #invoicePrintHost .doc, #documentPrintHost .doc, #gigInfoPrintHost .doc{ box-shadow:none; max-height:none; width:100%; animation:none; }
+  #contractPrintHost .sheet-head, #itineraryPrintHost .sheet-head, #invoicePrintHost .sheet-head, #documentPrintHost .sheet-head, #gigInfoPrintHost .sheet-head{ display:none; }
 }
 @media (max-width: 860px){
   body{ font-size:14px; }
