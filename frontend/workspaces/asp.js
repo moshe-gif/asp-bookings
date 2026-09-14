@@ -1569,7 +1569,7 @@ function renderMgmtDashboard(){
   <div class="grid stat-row" style="margin-bottom:20px;">
     ${statTile('International Opportunities', intlTrips.length, 'Artist traveling — worth adding nearby bookings', 'international')}
     ${statTile('Travel To Arrange', needsTravel.length, 'Flights or drivers still needed', 'travel')}
-    ${statTile('Daily Digest', open.length + awaitingBalance.length, 'Leads to follow up + payments due', 'daily_digest')}
+    ${statTile('Daily Digest', new Set([...open, ...awaitingBalance, ...altPaymentFollowUps()].map(e=>e.id)).size, 'Leads to follow up + payments due', 'daily_digest')}
     ${statTile('Open Messages', '—', 'Not connected yet', 'messages')}
   </div>
 
@@ -1626,6 +1626,7 @@ function renderDailyDigestPage(){
   const openLeads = S.events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status)).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
   const awaitingDeposit = S.events.filter(e=>e.status==='contract_sent');
   const awaitingBalance = S.events.filter(e=>e.status==='booked' && !e.balanceReceived);
+  const altPayment = altPaymentFollowUps();
   const row = (e, extra)=>{ const a=artistById(e.artistId); return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;" data-action="open-event" data-id="${e.id}">
     <span><strong>${esc(a.name)}</strong> — ${esc(e.clientName||e.type)}, ${fmtDateShort(e.date)}</span>
     <span class="u-label">${esc(extra)}</span>
@@ -1639,10 +1640,14 @@ function renderDailyDigestPage(){
   ${openLeads.length? `<div class="card card-pad" style="margin-bottom:20px;">${openLeads.map(e=>row(e, `${-daysUntil(e.createdAt)}d old`)).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing open — all caught up.</div>`}
 
   <div class="section-head"><h2>Awaiting Down Payment (${awaitingDeposit.length})</h2></div>
-  ${awaitingDeposit.length? `<div class="card card-pad" style="margin-bottom:20px;">${awaitingDeposit.map(e=>row(e, money(Math.round(e.price*0.15)))).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
+  ${awaitingDeposit.length? `<div class="card card-pad" style="margin-bottom:20px;">${awaitingDeposit.map(e=>row(e, money(e.commission))).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
 
   <div class="section-head"><h2>Awaiting Final Payment (${awaitingBalance.length})</h2></div>
   ${awaitingBalance.length? `<div class="card card-pad" style="margin-bottom:20px;">${awaitingBalance.map(e=>row(e, money(zelleBalance(e)))).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
+
+  <div class="section-head"><h2>Payment Follow-Up — Alternative Method (${altPayment.length})</h2></div>
+  <p style="font-size:11.5px;color:var(--ink-3);margin:-14px 0 8px;">Not on QuickBooks/Zelle — no automated reminder, follow up directly.</p>
+  ${altPayment.length? `<div class="card card-pad" style="margin-bottom:20px;">${altPayment.map(e=>row(e, `${paymentMethodLabel(e)} · ${money(e.depositReceived? zelleBalance(e) : e.commission)}`)).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
 
   <button class="btn btn-primary" data-action="copy-daily-digest">${ICO.share} Copy WhatsApp Message for Ilan (Open Leads)</button>
   `;
@@ -2651,6 +2656,27 @@ function renderAddArtistModal(){
 }
 
 function zelleBalance(ev){ return ev.balance + chargesTotal(ev); }
+/* ============ PAYMENT METHOD (deposit exceptions) ============ */
+// Default is 'standard' (QuickBooks invoice for the deposit + Zelle for the balance, per
+// WORKFLOWS.md). No paymentMethod field at all means standard too -- undefined behaves as
+// 'standard' everywhere it's read, same convention as the rest of this file's optional fields,
+// so existing saved events never need a migration.
+const PAYMENT_METHODS = [
+  ['standard', 'Standard (QuickBooks + Zelle)'],
+  ['cash', 'Cash'],
+  ['check', 'Check'],
+  ['other', 'Other'],
+];
+function isStandardPayment(ev){ return !ev.paymentMethod || ev.paymentMethod === 'standard'; }
+function paymentMethodLabel(ev){
+  const m = PAYMENT_METHODS.find(([k])=>k===(ev.paymentMethod||'standard'));
+  return m ? m[1] : 'Other';
+}
+// Any active (not internal, not fully paid) event on a non-standard payment method needs a
+// manual follow-up -- there's no automated QuickBooks invoice or Zelle reminder to carry it.
+function altPaymentFollowUps(){
+  return S.events.filter(e=>!e.unpaid && !isStandardPayment(e) && ['contract_sent','booked'].includes(e.status));
+}
 function zelleQrUrl(ev, artist){
   const zelleText = `Zelle payment to ${artist.email} — ${money(zelleBalance(ev))} for ${artist.name} (${ev.type}, ${fmtDateShort(ev.date)})`;
   return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(zelleText)}`;
@@ -2675,10 +2701,10 @@ function renderReminderPreview(){
           <div><strong>Subject:</strong> Balance reminder — ${esc(artist.name)}, ${esc(fmtDateShort(ev.date))}</div>
           <hr style="border:none;border-top:1px solid var(--border);margin:10px 0;"/>
           <p style="margin:0 0 8px;">Hi ${esc(ev.clientName.split(' ')[0])},</p>
-          <p style="margin:0 0 8px;">Just a reminder — the remaining balance of ${money(balance)} for ${esc(artist.name)}'s ${esc(ev.type)} on ${esc(fmtDate(ev.date))} is due via Zelle. Scan the code below or send to ${esc(artist.email)}.</p>
+          <p style="margin:0 0 8px;">Just a reminder — the remaining balance of ${money(balance)} for ${esc(artist.name)}'s ${esc(ev.type)} on ${esc(fmtDate(ev.date))} is due${isStandardPayment(ev)? ' via Zelle. Scan the code below or send to '+esc(artist.email) : ` (${esc(paymentMethodLabel(ev))})`}.</p>
           ${hasLocation(ev)? `<p style="margin:0 0 8px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:var(--accent);">Open in Maps</a></p>` : ''}
         </div>
-        ${renderZelleQrBlock(ev, artist)}
+        ${isStandardPayment(ev)? renderZelleQrBlock(ev, artist) : ''}
       </div>
     </div>
   </div>`;
@@ -2698,9 +2724,9 @@ function renderBookingConfirmationPreview(){
           <p style="margin:0 0 8px;">Hi ${esc(ev.clientName.split(' ')[0])},</p>
           <p style="margin:0 0 8px;">You're all set — ${esc(artist.name)} is booked for your ${esc(ev.type)} on ${esc(fmtDate(ev.date))} at ${esc(fmtTime(ev.time))}.</p>
           ${hasLocation(ev)? `<p style="margin:0 0 8px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:var(--accent);">Open in Maps</a></p>` : ''}
-          <p style="margin:0 0 8px;">Remaining balance of ${money(balance)} is due via Zelle before the event — scan the code below or send directly to ${esc(artist.email)}.</p>
+          <p style="margin:0 0 8px;">Remaining balance of ${money(balance)} is due before the event${isStandardPayment(ev)? ' via Zelle — scan the code below or send directly to '+esc(artist.email) : ` (${esc(paymentMethodLabel(ev))})`}.</p>
         </div>
-        ${renderZelleQrBlock(ev, artist)}
+        ${isStandardPayment(ev)? renderZelleQrBlock(ev, artist) : ''}
       </div>
     </div>
   </div>`;
@@ -2791,6 +2817,7 @@ function renderEventSheet(ev){
             </span>
           </div>
           ${isAdmin && !ev.unpaid?`<div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;">${esc(ev.clientEmail)}<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.clientPhone)}</span></strong></div>`:''}
+          ${isAdmin && !ev.unpaid && !isStandardPayment(ev) ? `<div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">${ICO.money} Payment Method</span><strong style="text-align:right;color:var(--warn-ink);">${esc(paymentMethodLabel(ev))}${ev.paymentMethodNote?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.paymentMethodNote)}</span>`:''}</strong></div>` : ''}
         </div>
 
         ${renderConflictWarning(ev)}
@@ -2918,9 +2945,9 @@ function renderLedger(ev, isAdmin, opts={}){
       ${extras.map(c=>`<div class="ledger-row"><span>${esc(c.label)}${c.addedAfterSigning?` <span class="pill pill-warn" style="padding:1px 6px;font-size:9px;vertical-align:1px;">notify client</span>`:''}${isAdmin?` <a href="#" data-action="remove-charge" data-id="${ev.id}" data-chargeid="${c.id}" style="color:var(--crit);text-decoration:none;margin-left:4px;">×</a>`:''}</span><span class="amt">${money(c.amount)}</span></div>`).join('')}
       ${S.showAddCharge? renderAddChargeRow(ev) : ''}
       <div class="ledger-row"><span>Total charged to client</span><span class="amt">${money(total)}</span></div>
-      <div class="ledger-row"><span>ASP booking fee (15% of performance fee) ${ev.depositReceived?'· received':'· due via QuickBooks invoice'}</span><span class="amt">${money(ev.commission)}</span></div>
+      <div class="ledger-row"><span>ASP booking fee ${ev.depositReceived?'· received':`· due via ${esc(paymentMethodLabel(ev))}`}</span><span class="amt">${money(ev.commission)}</span></div>
       <div class="ledger-row total"><span>${isAdmin?'Artist payout (85% + charges, via Zelle)':'You walk away with'}</span><span class="amt">${money(artistTotal)}</span></div>
-      <div class="ledger-row"><span>Balance status</span><span class="amt">${ev.balanceReceived? `Received ${fmtDateShort(ev.balanceReceivedDate)}` : (ev.depositReceived? 'Pending — reminders active':'—')}</span></div>
+      <div class="ledger-row"><span>Balance status</span><span class="amt">${ev.balanceReceived? `Received ${fmtDateShort(ev.balanceReceivedDate)}` : (ev.depositReceived? (isStandardPayment(ev)?'Pending — reminders active':'Pending — follow up directly'):'—')}</span></div>
     </div>
   </div>`;
 }
@@ -2957,26 +2984,28 @@ function renderPrepSheets(ev, isAdmin){
 function renderAdminActions(ev){
   const buttons=[];
   if(ev.status==='lead'||ev.status==='negotiating'){
-    buttons.push(`<button class="btn btn-primary btn-block" data-action="send-contract" data-id="${ev.id}">${ICO.mail} Send Contract + Invoice (15% booking fee)</button>`);
+    buttons.push(`<button class="btn btn-primary btn-block" data-action="send-contract" data-id="${ev.id}">${ICO.mail} Send Contract + Invoice (${money(ev.commission)} booking fee)</button>`);
   }
   if(ev.status==='contract_sent'){
     buttons.push(`<button class="btn btn-primary btn-block" data-action="mark-deposit" data-id="${ev.id}">${ICO.check} Mark Booking Fee Received — Lock In Booking</button>`);
   }
   if(ev.status==='booked' && !ev.balanceReceived){
+    const standard = isStandardPayment(ev);
     buttons.push(`<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
-      <div class="u-label">Balance Reminders — Email + Text</div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;">
+      <div class="u-label">Balance ${standard?'Reminders — Email + Text':`— ${esc(paymentMethodLabel(ev))}`}</div>
+      ${standard? `<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;">
         <span>Remind every</span>
         <select data-action="set-reminder-interval" data-id="${ev.id}" style="padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);">
           ${[3,5,7,10,14].map(n=>`<option value="${n}" ${ev.reminderIntervalDays===n?'selected':''}>${n} days</option>`).join('')}
         </select>
       </div>
-      <div style="font-size:12px;color:var(--ink-2);">Last sent: ${ev.lastReminderSent? fmtDateShort(ev.lastReminderSent): 'never'}</div>
+      <div style="font-size:12px;color:var(--ink-2);">Last sent: ${ev.lastReminderSent? fmtDateShort(ev.lastReminderSent): 'never'}</div>` : `
+      <div style="font-size:12px;color:var(--warn-ink);">Alternative payment method — no automated reminder. Follow up directly; this booking also shows under Payment Follow-Up on the Daily Digest.</div>`}
       <div style="display:flex;gap:8px;">
-        <button class="btn btn-sm" data-action="send-reminder" data-id="${ev.id}" style="flex:1;min-width:0;white-space:normal;">Send reminder now</button>
+        ${standard? `<button class="btn btn-sm" data-action="send-reminder" data-id="${ev.id}" style="flex:1;min-width:0;white-space:normal;">Send reminder now</button>` : ''}
         <button class="btn btn-sm btn-primary" data-action="mark-balance" data-id="${ev.id}" style="flex:1;min-width:0;white-space:normal;">${ICO.check} Mark Balance Received</button>
       </div>
-      <button class="btn btn-sm btn-ghost" data-action="preview-reminder" data-id="${ev.id}" style="color:var(--ink-2);">${ICO.sms} Preview reminder email (Zelle QR)</button>
+      ${standard? `<button class="btn btn-sm btn-ghost" data-action="preview-reminder" data-id="${ev.id}" style="color:var(--ink-2);">${ICO.sms} Preview reminder email (Zelle QR)</button>` : ''}
     </div>`);
   }
   return buttons.length? `<div style="display:flex;flex-direction:column;gap:10px;">${buttons.join('')}</div>` : '';
@@ -3082,8 +3111,18 @@ function renderEditEventFormOverlay(){
           <div class="field"><label>State</label><input data-field="state" value="${esc(f.state!==undefined?f.state:(ev.state||''))}"/></div>
         </div>
         ${!ev.unpaid? `<div class="field"><label>Price</label><input type="number" data-field="price" value="${f.price!==undefined?f.price:ev.price}"/>
-          <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Commission (15%) and payout recalculate automatically if you change this.</p>
+          <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Payout recalculates automatically if you change this. The deposit below stays as set unless you change it too.</p>
         </div>` : ''}
+        ${!ev.unpaid? (()=>{
+          const paymentMethod = f.paymentMethod!==undefined ? f.paymentMethod : (ev.paymentMethod||'standard');
+          return `<div class="field-row">
+          <div class="field"><label>Deposit / Booking Fee</label><input type="number" data-field="commission" value="${f.commission!==undefined?f.commission:ev.commission}"/></div>
+          <div class="field"><label>Payment Method</label><select class="edit-event-payment-select">${PAYMENT_METHODS.map(([k,l])=>`<option value="${k}" ${paymentMethod===k?'selected':''}>${esc(l)}</option>`).join('')}</select></div>
+        </div>
+        ${paymentMethod!=='standard'? `<div class="field"><label>Payment Note (optional)</label><input data-field="paymentMethodNote" value="${esc(f.paymentMethodNote!==undefined?f.paymentMethodNote:(ev.paymentMethodNote||''))}" placeholder="e.g. paying cash at the event"/>
+          <p style="font-size:11px;color:var(--warn-ink);margin:4px 0 0;">Alternative payment method — no automated QuickBooks invoice or Zelle reminder for this booking. It'll show up under Payment Follow-Up until marked paid.</p>
+        </div>` : ''}`;
+        })() : ''}
         <button class="btn btn-primary btn-block" data-action="save-edit-event" data-id="${ev.id}" style="margin-top:6px;">Save Changes</button>
       </div>
     </div>
@@ -3405,7 +3444,7 @@ function renderContractDoc(){
             <li>Contract is not binding until the deposit is received.</li>
             <li>Should the Artist be canceled within 40 days prior to the event, full payment is required.</li>
             <li>In the event that the Artist is unable to perform, the Client will be paid back in full.</li>
-            <li>A non-refundable deposit of ${money(ev.commission)} (15%) must be paid upon signing the contract. The rest of the balance must be paid prior to the event.</li>
+            <li>A non-refundable deposit of ${money(ev.commission)} must be paid upon signing the contract${isStandardPayment(ev)?' via QuickBooks invoice':` (${esc(paymentMethodLabel(ev))})`}. The rest of the balance must be paid prior to the event.</li>
             ${isComedian? `
             <li>No waitstaff, bar staff, or venue personnel should walk through the performance area or serve food/drinks during the performance, in order to maintain audience focus and preserve the show.</li>
             <li>Video or audio recording of the performance may not be taken or disseminated in any way without the express written consent of the Artist.</li>
@@ -3492,14 +3531,18 @@ function renderItineraryDoc(){
 /* ============ ACTIONS ============ */
 function doSendContract(id){
   const ev = getEvent(id); ev.status='contract_sent';
-  logEvent(ev,'email',`Contract + QuickBooks invoice (15% booking fee) emailed to ${ev.clientEmail}.`);
+  const depositVia = isStandardPayment(ev) ? 'QuickBooks invoice' : paymentMethodLabel(ev);
+  logEvent(ev,'email',`Contract + ${money(ev.commission)} booking fee (via ${depositVia}) emailed to ${ev.clientEmail}.`);
   toast(`Contract & invoice sent to ${ev.clientName}.`, 'email'); saveEvents(); openEvent(id);
 }
 function doMarkDeposit(id){
   const ev = getEvent(id); ev.status='booked'; ev.depositReceived=true; ev.depositReceivedDate=fmtISO(new Date());
   const balance = zelleBalance(ev);
-  logEvent(ev,'success','Bookkeeping marked booking fee received — job officially booked & locked on calendar.');
-  logEvent(ev,'email',`Booking confirmation emailed to client with gig details, remaining balance (${money(balance)}), and a Zelle QR code.`);
+  const standard = isStandardPayment(ev);
+  logEvent(ev,'success',`Bookkeeping marked booking fee received (${paymentMethodLabel(ev)}) — job officially booked & locked on calendar.`);
+  logEvent(ev,'email', standard
+    ? `Booking confirmation emailed to client with gig details, remaining balance (${money(balance)}), and a Zelle QR code.`
+    : `Booking confirmation emailed to client with gig details and remaining balance (${money(balance)}) — payment method: ${paymentMethodLabel(ev)}, follow up directly.`);
   logEvent(ev,'email',`Booking-confirmed notification emailed to ${artistById(ev.artistId).name}, Ilan, and Moshe.`);
   toast('Booking locked in — client, artist, Ilan & Moshe notified.', 'success');
   S.showBookingConfirmation = true;
@@ -3573,13 +3616,27 @@ function doSaveEditEvent(id){
   if(f.venue!==undefined) ev.venue = f.venue.trim();
   if(f.city!==undefined) ev.city = f.city.trim();
   if(f.state!==undefined) ev.state = f.state.trim();
+  const notes = [];
   if(!ev.unpaid && f.price!==undefined){
-    const price = Number(f.price)||0;
-    ev.price = price;
-    ev.commission = Math.round(price*0.15);
-    ev.balance = price - ev.commission;
+    ev.price = Number(f.price)||0;
+    // Only auto-recompute the deposit at 15% if this same save doesn't also set an explicit
+    // deposit amount -- an explicit value (below) always wins, same "manual override beats the
+    // formula" convention as reminderIntervalDays (see WORKFLOWS.md §4).
+    if(f.commission===undefined) ev.commission = Math.round(ev.price*0.15);
   }
-  logEvent(ev, 'system', 'Details updated by office.');
+  if(!ev.unpaid && f.commission!==undefined){
+    const oldCommission = ev.commission;
+    ev.commission = Math.max(0, Number(f.commission)||0);
+    if(ev.commission!==oldCommission) notes.push(`deposit changed from ${money(oldCommission)} to ${money(ev.commission)}`);
+  }
+  if(!ev.unpaid) ev.balance = ev.price - ev.commission;
+  if(!ev.unpaid && f.paymentMethod!==undefined){
+    const oldMethod = ev.paymentMethod || 'standard';
+    ev.paymentMethod = f.paymentMethod;
+    if(ev.paymentMethod!==oldMethod) notes.push(`payment method changed to ${paymentMethodLabel(ev)}`);
+  }
+  if(!ev.unpaid && f.paymentMethodNote!==undefined) ev.paymentMethodNote = f.paymentMethodNote.trim();
+  logEvent(ev, 'system', notes.length? `Details updated by office — ${notes.join('; ')}.` : 'Details updated by office.');
   toast('Changes saved.', 'success');
   S.showEditEvent=false; S.editEventForm={}; saveEvents(); openEvent(id);
 }
@@ -3666,13 +3723,14 @@ function doEmailItinerary(id){
 }
 function doSendReminder(id){
   const ev = getEvent(id); ev.lastReminderSent = fmtISO(new Date());
-  logEvent(ev,'email',`Balance reminder emailed to ${ev.clientEmail} (Zelle link included).`);
-  logEvent(ev,'sms',`Balance reminder texted to ${ev.clientPhone} (Zelle link included).`);
+  const via = isStandardPayment(ev) ? ' (Zelle link included)' : ` (payment method: ${paymentMethodLabel(ev)})`;
+  logEvent(ev,'email',`Balance reminder emailed to ${ev.clientEmail}${via}.`);
+  logEvent(ev,'sms',`Balance reminder texted to ${ev.clientPhone}${via}.`);
   toast('Reminder sent — email and text.', 'email'); saveEvents(); openEvent(id);
 }
 function doMarkBalance(id){
   const ev = getEvent(id); ev.balanceReceived=true; ev.balanceReceivedDate=fmtISO(new Date()); ev.status='paid';
-  logEvent(ev,'success','Bookkeeping marked balance received via Zelle — reminders stopped.');
+  logEvent(ev,'success',`Bookkeeping marked balance received (${paymentMethodLabel(ev)}) — reminders stopped.`);
   toast('Balance marked received. Reminders stopped.', 'success'); saveEvents(); openEvent(id);
 }
 function doToggleArtistPaidOut(id){
@@ -4488,6 +4546,9 @@ function bindGlobal(){
   });
   document.querySelectorAll('.document-subject-select').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.documentForm.subjectId = sel.value || null; render(); });
+  });
+  document.querySelectorAll('.edit-event-payment-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.editEventForm.paymentMethod = sel.value; render(); });
   });
   document.querySelectorAll('.edit-event-type-select').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.editEventForm.type = sel.value; });
