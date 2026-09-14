@@ -4813,4 +4813,10 @@ window.Workspaces.asp = { id: 'asp', mount(){}, unmount(){} };
 // Debug-console parity with the old inline-script global scope (harness itself avoids
 // relying on this -- see test-harness/README.md -- but interactive debugging used it).
 window.S = S;
+// Exposed so a host shell (e.g. Moshe's Desk) can reuse this exact client instance instead of
+// creating a second one against the same Supabase project -- Supabase's SDK warns that two
+// GoTrueClient instances sharing one storage key can produce undefined auth behavior. This
+// workspace still creates its own client unconditionally above (stays self-sufficient for the
+// plain asp-bookings site, which has no shell present at all); this is purely additive.
+window.supabaseClient = supabaseClient;
 })();
