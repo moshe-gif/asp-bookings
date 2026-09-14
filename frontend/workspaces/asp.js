@@ -1479,12 +1479,23 @@ function renderSettingsPage(){
 }
 
 /* ============ LOGIN ============ */
+// A host shell (e.g. Moshe's Desk) can set window.ASP_BRAND_OVERRIDE = {name, tagline} before
+// this script loads to relabel the login screen -- this file's own login flow is real (magic
+// link/passkey/roster lookup all happen here), so a host reusing it shouldn't have to fork the
+// whole login UI just to change two words. Unset here (undefined) on the plain ASP site --
+// zero behavior change there.
+function loginWordmark(){
+  const brand = window.ASP_BRAND_OVERRIDE || {};
+  const name = brand.name || 'ASP';
+  const tagline = brand.tagline || 'Bookings';
+  return `<div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(name)}<small>${esc(tagline)}</small></div>`;
+}
 function renderLogin(){
   if(S.showChooser) return renderAccountChooser();
   if(S.showRealSignIn) return renderRealSignIn();
   if(S.realSignInNotFound) return renderRealSignInNotFound();
   return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
-    <div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP<small>Bookings</small></div>
+    ${loginWordmark()}
     <p style="color:var(--ink-2);font-size:13.5px;margin:16px 0 26px;">Sign in to view your schedule and bookings.</p>
     ${window.ASP_DISABLE_DEMO_MODE ? '' : `<button class="btn btn-primary btn-block" data-action="show-chooser">Sign In (Demo Mode)</button>`}
     ${supabaseClient ? `
@@ -1500,7 +1511,7 @@ function renderRealSignIn(){
   const f = S.realSignInEmail;
   if(S.realSignInSent){
     return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
-      <div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP<small>Bookings</small></div>
+      ${loginWordmark()}
       <h2 style="font-size:1.05rem;margin:16px 0 6px;">Check your email</h2>
       <p style="color:var(--ink-2);font-size:13px;margin:0 0 22px;">We sent a sign-in link to <strong>${esc(f)}</strong>. Click it to continue.</p>
       <button class="btn btn-block btn-ghost" data-action="close-real-signin">Use a different email</button>
@@ -1508,7 +1519,7 @@ function renderRealSignIn(){
   }
   return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
     <button class="icon-btn chooser-back" data-action="close-real-signin">${ICO.chev('l')}</button>
-    <div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP<small>Bookings</small></div>
+    ${loginWordmark()}
     <p style="color:var(--ink-2);font-size:13.5px;margin:16px 0 20px;">Enter your email and we'll send you a sign-in link.</p>
     <div class="field" data-form="realsignin" style="text-align:left;"><input id="realSignInEmailInput" type="email" data-field="realSignInEmail" value="${esc(f)}" placeholder="you@aspmanagement.com" autofocus/></div>
     <button class="btn btn-primary btn-block" style="margin-top:10px;" data-action="submit-magic-link">Send Sign-In Link</button>
@@ -1516,7 +1527,7 @@ function renderRealSignIn(){
 }
 function renderRealSignInNotFound(){
   return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
-    <div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP<small>Bookings</small></div>
+    ${loginWordmark()}
     <h2 style="font-size:1.05rem;margin:16px 0 6px;">No account set up yet</h2>
     <p style="color:var(--ink-2);font-size:13px;margin:0 0 22px;">You're signed in as <strong>${esc(S.realSession?.email||'')}</strong>, but the office hasn't added you to ASP Bookings yet. Contact the office to get set up.</p>
     <button class="btn btn-block btn-ghost" data-action="real-signout">Sign Out</button>
