@@ -2579,6 +2579,19 @@ function renderLeadChargesSection(f){
     </div>
   </div>`;
 }
+// Wedding-only extra: which live band is playing, and roughly how many pieces. No band roster
+// exists in the data model yet (only ASP's own ARTISTS roster of singers/comedians/DJs), so this
+// is a free-text field rather than a dropdown -- swap in a real list here if one gets added.
+// Shared by both the new-lead form (f = S.newLeadForm) and the edit-details form (f =
+// S.editEventForm, ev = the event being edited, for its saved values).
+function renderBandFieldsSection(f, ev){
+  const band = f.band!==undefined ? f.band : (ev? (ev.band||'') : '');
+  const bandSize = f.bandSize!==undefined ? f.bandSize : (ev? (ev.bandSize||'') : '');
+  return `<div class="field-row">
+    <div class="field"><label>Which Band Is Playing</label><input data-field="band" value="${esc(band)}" placeholder="e.g. Simcha Players"/></div>
+    <div class="field"><label>Band Size (optional)</label><input type="number" min="0" data-field="bandSize" value="${esc(bandSize)}" placeholder="e.g. 5"/></div>
+  </div>`;
+}
 function renderNewLeadModal(){
   const f = S.newLeadForm;
   const kind = f.kind || 'client';
@@ -2602,6 +2615,7 @@ function renderNewLeadModal(){
           <div class="field"><label>Event Type</label><select data-action="pick-event-type">${typeList.map(t=>`<option ${f.type===t?'selected':''}>${t}</option>`).join('')}</select></div>
         </div>
         ${f.type==='Other'? `<div class="field"><label>Describe the Event Type</label><input data-field="customType" value="${esc(f.customType||'')}" placeholder="${isInternal?'e.g. Photo Shoot':'e.g. Bris, Vort, Studio Session'}"/></div>` : ''}
+        ${f.type==='Wedding'? renderBandFieldsSection(f) : ''}
         ${!isInternal? `<div class="field-row">
           <div class="field"><label>Client Email</label><input data-field="clientEmail" value="${esc(f.clientEmail||'')}" placeholder="name@example.com"/></div>
           <div class="field"><label>Client Phone</label><input data-field="clientPhone" value="${esc(f.clientPhone||'')}" placeholder="(555) 555-5555"/></div>
@@ -2858,6 +2872,7 @@ function renderEventSheet(ev){
         <div class="card card-pad" style="display:flex;flex-direction:column;gap:9px;">
           ${!ev.unpaid ? `<div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">${ICO.pin} Client</span><strong>${esc(ev.clientName)}</strong></div>` : ''}
           <div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">Type</span><strong>${esc(ev.type)}</strong></div>
+          ${ev.type==='Wedding' ? `<div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">Band</span><strong style="text-align:right;">${ev.band? esc(ev.band) : `<span style="color:var(--ink-3);font-weight:500;">${isAdmin?'Not set':'TBD'}</span>`}${ev.bandSize?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(String(ev.bandSize))} piece${Number(ev.bandSize)===1?'':'s'}</span>`:''}</strong></div>` : ''}
           <div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">${ICO.clock} Date &amp; Time</span><strong class="u-mono">${fmtDate(ev.date)} · ${fmtTimeRange(ev.time, ev.endTime)}</strong></div>
           <div style="display:flex;justify-content:space-between;font-size:13.5px;">
             <span style="color:var(--ink-2);">${ICO.pin} Venue</span>
@@ -3258,6 +3273,7 @@ function renderEditEventFormOverlay(){
           ${!ev.unpaid? `<div class="field"><label>Client Name</label><input data-field="clientName" value="${esc(f.clientName!==undefined?f.clientName:(ev.clientName||''))}"/></div>`:''}
           <div class="field"><label>Event Type</label><select class="edit-event-type-select">${typeList.map(t=>`<option ${type===t?'selected':''}>${esc(t)}</option>`).join('')}${!typeList.includes(type)?`<option selected>${esc(type)}</option>`:''}</select></div>
         </div>
+        ${type==='Wedding'? renderBandFieldsSection(f, ev) : ''}
         ${!ev.unpaid? `<div class="field-row">
           <div class="field"><label>Client Email</label><input data-field="clientEmail" value="${esc(f.clientEmail!==undefined?f.clientEmail:(ev.clientEmail||''))}"/></div>
           <div class="field"><label>Client Phone</label><input data-field="clientPhone" value="${esc(f.clientPhone!==undefined?f.clientPhone:(ev.clientPhone||''))}"/></div>
@@ -3808,6 +3824,10 @@ function doSaveEditEvent(id){
     if(f.clientPhone!==undefined) ev.clientPhone = f.clientPhone.trim();
   }
   if(f.type!==undefined) ev.type = f.type;
+  if(ev.type==='Wedding'){
+    if(f.band!==undefined) ev.band = f.band.trim()||null;
+    if(f.bandSize!==undefined) ev.bandSize = f.bandSize? Number(f.bandSize) : null;
+  }
   if(f.date!==undefined) ev.date = f.date;
   if(f.time!==undefined) ev.time = f.time;
   if(f.endTime!==undefined) ev.endTime = f.endTime || null;
@@ -4282,6 +4302,8 @@ function doSubmitLead(){
     flightNeeded: !!f.flightNeeded, flightBooked:false, flight:null,
     groundTransportNeeded: !!f.groundTransportNeeded, groundTransportBooked:false, groundTransport:null,
     charges: isInternal? [] : (f.charges||[]), dressCode: isInternal? '' : (f.dressCode||''), prepSheets:[], createdAt: fmtISO(new Date()),
+    band: f.type==='Wedding' ? (f.band||'').trim()||null : null,
+    bandSize: f.type==='Wedding' && f.bandSize ? Number(f.bandSize) : null,
     log:[{ts:new Date().toISOString(), type:'system', text: isInternal? `${resolvedType} scheduled for ${artistById(f.artistId).name}.` : `Lead created for ${artistById(f.artistId).name} — client info entered by management.`}],
   };
   S.events.unshift(ev); saveEvents();
@@ -4783,7 +4805,7 @@ function bindGlobal(){
     sel.addEventListener('change', ()=>{ S.editEventForm.paymentMethod = sel.value; render(); });
   });
   document.querySelectorAll('.edit-event-type-select').forEach(sel=>{
-    sel.addEventListener('change', ()=>{ S.editEventForm.type = sel.value; });
+    sel.addEventListener('change', ()=>{ S.editEventForm.type = sel.value; render(); });
   });
   document.querySelectorAll('.new-task-assignee-select').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.newTaskAssignee = sel.value; });
