@@ -402,6 +402,7 @@ function migrateContract(c){
   if(c.notes===undefined){ c.notes = ''; migrated = true; }
   if(!c.snapshot){ c.snapshot = {}; migrated = true; }
   if(c.status===undefined){ c.status = 'draft'; migrated = true; }
+  if(c.signedAt===undefined){ c.signedAt = null; migrated = true; }
   return migrated;
 }
 let CONTRACTS = loadContracts();
@@ -4316,6 +4317,18 @@ function renderPayeeBlock(profile){
   if(profile.notes) lines.push(esc(profile.notes));
   return lines.length? `<div class="doc-section"><h3>Payment</h3><p style="font-size:12.5px;line-height:1.8;margin:0;">${lines.join('<br/>')}</p></div>` : '';
 }
+// Electronic signature: matches the app's existing convention (see renderContractDoc/renderDocumentDoc)
+// of rendering a typed name in a cursive script once accepted, rather than a blank line -- also the
+// real-world behavior every "Acceptance" boilerplate clause already describes (deposit payment has
+// "the same effect as a signature"). Triggered by marking the contract Signed.
+function renderContractSignBlock(c, signingPartyLabel){
+  const signed = c.status==='signed';
+  const signedDate = signed ? fmtDateShort((c.signedAt||c.updatedAt).slice(0,10)) : '';
+  return `<div class="doc-sign">
+    <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc(c.snapshot.clientName||'Client')}</span><br/>Signed electronically &middot; ${signedDate}` : `<strong>&nbsp;</strong>Client Signature &middot; Date`}</div>
+    <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc(signingPartyLabel)}</span><br/>` : `<strong>&nbsp;</strong>`}For Artist, ${esc(signingPartyLabel)}</div>
+  </div>`;
+}
 function renderContractBuilderDoc(c){
   if(!c) return '';
   if(c.template==='comedian') return renderComedianDoc(c);
@@ -4359,10 +4372,7 @@ function renderStandardDoc(c){
     ${c.boilerplate.acceptanceClause? `<div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractAcceptanceText(c))}</p></div>` : ''}
     <div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractCancellationText(c))}</p></div>
     ${c.customClauses.map(cc=>`<div class="doc-section"><h3>${esc(cc.title||'Additional Terms')}</h3><p style="font-size:12.5px;line-height:1.7;margin:0;white-space:pre-line;">${esc(cc.body)}</p></div>`).join('')}
-    <div class="doc-sign">
-      <div class="doc-sign-line"><strong>&nbsp;</strong>Client Signature &middot; Date</div>
-      <div class="doc-sign-line"><strong>For Artist, ${esc(profile.entityName)}</strong></div>
-    </div>
+    ${renderContractSignBlock(c, profile.entityName)}
     ${renderPayeeBlock(profile)}
     <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
   `);
@@ -4408,10 +4418,7 @@ function renderComedianDoc(c){
     </div>
     ${c.boilerplate.acceptanceClause? `<div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractAcceptanceText(c))}</p></div>` : ''}
     ${c.customClauses.map(cc=>`<div class="doc-section"><h3>${esc(cc.title||'Additional Terms')}</h3><p style="font-size:12.5px;line-height:1.7;margin:0;white-space:pre-line;">${esc(cc.body)}</p></div>`).join('')}
-    <div class="doc-sign">
-      <div class="doc-sign-line"><strong>&nbsp;</strong>Client Signature &middot; Date</div>
-      <div class="doc-sign-line"><strong>For Artist, ${esc(who)}</strong></div>
-    </div>
+    ${renderContractSignBlock(c, who)}
     ${renderPayeeBlock(profile)}
     <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
   `);
@@ -4454,10 +4461,7 @@ function renderMultilineDoc(c){
     ${c.boilerplate.acceptanceClause? `<div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractAcceptanceText(c))}</p></div>` : ''}
     <div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractCancellationText(c))}</p></div>
     ${c.customClauses.map(cc=>`<div class="doc-section"><h3>${esc(cc.title||'Additional Terms')}</h3><p style="font-size:12.5px;line-height:1.7;margin:0;white-space:pre-line;">${esc(cc.body)}</p></div>`).join('')}
-    <div class="doc-sign">
-      <div class="doc-sign-line"><strong>&nbsp;</strong>Client Signature &middot; Date</div>
-      <div class="doc-sign-line"><strong>For Artist, ${esc(profile.entityName)}</strong></div>
-    </div>
+    ${renderContractSignBlock(c, profile.entityName)}
     ${renderPayeeBlock(profile)}
     <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
   `);
@@ -5582,7 +5586,7 @@ function bindGlobal(){
       case 'contractbuilder-overlay-close': if(e.target===t){ S.showContractBuilder=false; S.contractBuilderId=null; render(); } break;
       case 'contract-refresh-from-lead': doRefreshContractFromLead(S.contractBuilderId); break;
       case 'delete-contract': doDeleteContract(S.contractBuilderId); break;
-      case 'set-contract-status': { const c=getContract(S.contractBuilderId); if(c){ c.status=t.getAttribute('data-status'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
+      case 'set-contract-status': { const c=getContract(S.contractBuilderId); if(c){ c.status=t.getAttribute('data-status'); if(c.status==='signed' && !c.signedAt) c.signedAt=new Date().toISOString(); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'pick-contract-overtime-interval': { const c=getContract(S.contractBuilderId); if(c){ c.overtime.interval=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'pick-cancellation-type': { const c=getContract(S.contractBuilderId); if(c){ c.cancellationPolicy.type=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'add-cancellation-tier': doAddCancellationTier(S.contractBuilderId); break;
