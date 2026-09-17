@@ -44,6 +44,9 @@ const ICO = {
   up:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m5 15 7-7 7 7"/></svg>',
   down:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m5 9 7 7 7-7"/></svg>',
 };
+// Photo mic used specifically in the artist "My Gigs" area (nav icon + Today's Gig card) in place
+// of the generic ICO.mic line-art icon -- same .ico sizing rules apply since width/height are CSS.
+const MIC_PHOTO_ICON = '<img class="ico" src="assets/mic-artist.jpg" alt="Microphone" style="object-fit:cover;border-radius:3px;vertical-align:middle;"/>';
 // The animated 5-bar mark, reused as the app's loading indicator wherever something needs a moment.
 function markLoader(heightPx){
   return `<span class="mark" style="height:${heightPx||16}px;"><i></i><i></i><i></i><i></i><i></i></span>`;
@@ -1655,7 +1658,7 @@ function navBadge(v){
   return n>0 ? `<span class="nav-badge">${n>9?'9+':n}</span>` : '';
 }
 const ARTIST_NAV_ITEMS = [
-  ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',ICO.mic], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
+  ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
 const APP_VERSION = 'v1.1.0'; // v1.1.0: ASP workspace extracted into its own module (parent-app Phase 1a)
 const OVERTIME_PER_HALF_HOUR = 250;
@@ -2919,7 +2922,7 @@ function renderArtistDashboard(artistId){
   return `
   ${renderWelcomeHeader(a.name.split(' ')[0])}
   ${todayGig? `<div class="card card-pad" style="margin-bottom:20px;border-color:var(--accent);background:var(--accent-wash);">
-    <div style="display:flex;align-items:center;gap:8px;color:var(--accent-ink);font-weight:700;font-size:13px;margin-bottom:10px;">${ICO.mic} Today's Gig</div>
+    <div style="display:flex;align-items:center;gap:8px;color:var(--accent-ink);font-weight:700;font-size:13px;margin-bottom:10px;">${MIC_PHOTO_ICON} Today's Gig</div>
     <div style="font-family:var(--font-display);font-size:1.15rem;font-weight:600;margin-bottom:4px;cursor:pointer;" data-action="open-event" data-id="${todayGig.id}">${esc(todayGig.type)}${todayGig.clientName?` — ${esc(todayGig.clientName)}`:''}</div>
     <div style="font-size:13px;color:var(--ink-2);margin-bottom:2px;">${fmtTimeRange(todayGig.time, todayGig.endTime)}</div>
     <div style="font-size:13px;color:${hasLocation(todayGig)?'var(--ink-2)':'var(--ink-3)'};margin-bottom:14px;">${hasLocation(todayGig)? esc(fullLocation(todayGig)) : 'Location TBD'}</div>
@@ -4335,12 +4338,13 @@ function renderContractBuilderDoc(c){
   if(c.template==='multiline') return renderMultilineDoc(c);
   return renderStandardDoc(c);
 }
-function renderStandardDoc(c){
+function renderStandardDoc(c){ return docChrome(standardDocContent(c)); }
+function standardDocContent(c){
   const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
   const figures = contractPaymentFigures(c);
   const who = contractPerformerName(c);
   const boilerplate = contractBoilerplateLines(c);
-  return docChrome(`
+  return `
     <div class="doc-letterhead">
       <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(profile.entityName)}</div>
       <span class="pill ${contractStatusPillClass(c.status)}">${contractStatusLabel(c.status)}</span>
@@ -4375,14 +4379,15 @@ function renderStandardDoc(c){
     ${renderContractSignBlock(c, profile.entityName)}
     ${renderPayeeBlock(profile)}
     <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
-  `);
+  `;
 }
-function renderComedianDoc(c){
+function renderComedianDoc(c){ return docChrome(comedianDocContent(c)); }
+function comedianDocContent(c){
   const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
   const figures = contractPaymentFigures(c);
   const who = contractPerformerName(c);
   const boilerplate = contractBoilerplateLines(c);
-  return docChrome(`
+  return `
     <div class="doc-letterhead">
       <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(profile.entityName)}</div>
       <span class="pill ${contractStatusPillClass(c.status)}">${contractStatusLabel(c.status)}</span>
@@ -4421,13 +4426,14 @@ function renderComedianDoc(c){
     ${renderContractSignBlock(c, who)}
     ${renderPayeeBlock(profile)}
     <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
-  `);
+  `;
 }
-function renderMultilineDoc(c){
+function renderMultilineDoc(c){ return docChrome(multilineDocContent(c)); }
+function multilineDocContent(c){
   const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
   const figures = contractPaymentFigures(c);
   const boilerplate = contractBoilerplateLines(c);
-  return docChrome(`
+  return `
     <div class="doc-letterhead">
       <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(profile.entityName)}</div>
       <span class="pill ${contractStatusPillClass(c.status)}">${contractStatusLabel(c.status)}</span>
@@ -4464,7 +4470,12 @@ function renderMultilineDoc(c){
     ${renderContractSignBlock(c, profile.entityName)}
     ${renderPayeeBlock(profile)}
     <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
-  `);
+  `;
+}
+function contractDocContent(c){
+  if(c.template==='comedian') return comedianDocContent(c);
+  if(c.template==='multiline') return multilineDocContent(c);
+  return standardDocContent(c);
 }
 
 /* ---- Global "Contract Builder" list page (browse every contract across every lead) ---- */
