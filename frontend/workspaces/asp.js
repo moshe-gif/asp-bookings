@@ -680,6 +680,42 @@ function doDeletePayeeProfile(id){
   render();
 }
 
+/* ---- Send Contract (real email, via the send-contract-email Supabase Edge Function) ---- */
+async function doSendContractEmail(){
+  const c = getContract(S.contractBuilderId); if(!c) return;
+  const to = (S.sendContractForm.to||'').trim();
+  const subject = (S.sendContractForm.subject||'').trim();
+  if(!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)){ toast('Enter a valid recipient email.', 'system'); return; }
+  if(!subject){ toast('Enter a subject.', 'system'); return; }
+  if(!supabaseClient){ toast('Sign in with your real ASP account to send email (not available in Demo Mode).', 'system'); return; }
+  S.sendContractBusy = true; render();
+  try{
+    const html = contractEmailHtml(c);
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-contract-email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session ? session.access_token : SUPABASE_PUBLISHABLE_KEY}`,
+        'apikey': SUPABASE_PUBLISHABLE_KEY,
+      },
+      body: JSON.stringify({ to, subject, html }),
+    });
+    const data = await resp.json().catch(()=>({ ok:false, error:'Unexpected response from the server.' }));
+    if(!resp.ok || data.ok===false){
+      toast(data.error || 'Could not send the email.', 'system');
+    } else {
+      if(c.status==='draft'){ c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); }
+      toast(`Contract sent to ${to}.`, 'success');
+      S.showSendContractConfirm=false; S.sendContractForm={};
+    }
+  } catch(err){
+    toast('Could not send the email: ' + String(err), 'system');
+  } finally {
+    S.sendContractBusy = false; render();
+  }
+}
+
 const ADMIN_USERS = [
   {id:'admin_bookings', name:'ASP Office — Bookings', displayName:'Bookings', email:'bookings@aspmanagement.com', initials:'AB'},
   {id:'admin_bookkeeping', name:'ASP Office — Bookkeeping', displayName:'Bookkeeping', email:'bookkeeping@aspmanagement.com', initials:'AK'},
@@ -963,6 +999,9 @@ let S = {
   showPayeeProfileForm:false,
   payeeProfileForm:{},
   editingPayeeProfileId:null,
+  showSendContractConfirm:false,
+  sendContractForm:{},
+  sendContractBusy:false,
   contractsSearchQuery:'',
   contractsStatusFilter:'all',
 };
@@ -1325,6 +1364,7 @@ function closeAllOverlays(){
   S.showContractBuilder=false; S.contractBuilderId=null; S.showContractBuilderDoc=false;
   S.showTemplatePicker=false; S.templatePickerLeadId=null;
   S.showPayeeProfileForm=false; S.payeeProfileForm={}; S.editingPayeeProfileId=null;
+  S.showSendContractConfirm=false; S.sendContractForm={}; S.sendContractBusy=false;
 }
 let pendingViewTransition = false;
 let pendingViewDirection = 'right';
@@ -4122,6 +4162,24 @@ function renderTemplatePickerModal(){
   </div>`;
 }
 
+/* ---- Send Contract confirm (calls the send-contract-email Supabase Edge Function) ---- */
+function renderSendContractConfirmModal(){
+  const c = getContract(S.contractBuilderId); if(!c) return '';
+  const f = S.sendContractForm||{};
+  const busy = !!S.sendContractBusy;
+  return `<div class="overlay center" data-action="sendcontract-overlay-close">
+    <div class="modal" data-stop data-form="sendcontract" style="width:420px;">
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Send Contract</h2><button class="icon-btn" data-action="close-send-contract-confirm" ${busy?'disabled':''}>${ICO.x}</button></div>
+      <div class="sheet-body" style="display:flex;flex-direction:column;gap:10px;">
+        <div class="field"><label>To</label><input data-field="to" type="email" value="${esc(f.to||'')}" placeholder="client@email.com" ${busy?'disabled':''}/></div>
+        <div class="field"><label>Subject</label><input data-field="subject" value="${esc(f.subject||'')}" ${busy?'disabled':''}/></div>
+        <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Sends the contract exactly as shown in the preview, as an email the client can read directly.</p>
+        <button class="btn btn-primary btn-block" data-action="confirm-send-contract" ${busy?'disabled':''}>${busy?'Sending…':'Send'}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderContractBuilderModal(){
   const c = getContract(S.contractBuilderId); if(!c) return '';
   return `<div class="overlay" data-action="contractbuilder-overlay-close">
@@ -4297,12 +4355,13 @@ function renderContractCustomClausesSection(c){
 }
 
 /* ---- Print/preview doc: one renderer per template, sharing a chrome + payee block ---- */
-function docChrome(innerHtml){
+function docChrome(innerHtml, c){
   return `<div class="overlay center" data-action="contractbuilderdoc-overlay-close">
     <div class="doc" data-stop>
       <div class="sheet-head">
         <h2 style="font-size:1.1rem;">Contract Preview</h2>
         <div style="display:flex;gap:6px;">
+          ${c ? `<button class="icon-btn" data-action="open-send-contract" data-id="${c.id}" title="Send Contract"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg></button>` : ''}
           <button class="icon-btn" data-action="print-contract-builder" title="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
           <button class="icon-btn" data-action="close-contract-builder-doc">${ICO.x}</button>
         </div>
@@ -4338,7 +4397,7 @@ function renderContractBuilderDoc(c){
   if(c.template==='multiline') return renderMultilineDoc(c);
   return renderStandardDoc(c);
 }
-function renderStandardDoc(c){ return docChrome(standardDocContent(c)); }
+function renderStandardDoc(c){ return docChrome(standardDocContent(c), c); }
 function standardDocContent(c){
   const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
   const figures = contractPaymentFigures(c);
@@ -4381,7 +4440,7 @@ function standardDocContent(c){
     <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
   `;
 }
-function renderComedianDoc(c){ return docChrome(comedianDocContent(c)); }
+function renderComedianDoc(c){ return docChrome(comedianDocContent(c), c); }
 function comedianDocContent(c){
   const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
   const figures = contractPaymentFigures(c);
@@ -4428,7 +4487,7 @@ function comedianDocContent(c){
     <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
   `;
 }
-function renderMultilineDoc(c){ return docChrome(multilineDocContent(c)); }
+function renderMultilineDoc(c){ return docChrome(multilineDocContent(c), c); }
 function multilineDocContent(c){
   const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
   const figures = contractPaymentFigures(c);
@@ -4476,6 +4535,38 @@ function contractDocContent(c){
   if(c.template==='comedian') return comedianDocContent(c);
   if(c.template==='multiline') return multilineDocContent(c);
   return standardDocContent(c);
+}
+// Standalone HTML for the emailed copy -- inlined, hardcoded colors (not var(...), which many
+// email clients strip) since the recipient's inbox never loads styles.css. Mirrors the on-screen
+// .doc-* look closely enough to read the same, not a pixel-exact match.
+function contractEmailHtml(c){
+  return `<!doctype html><html><head><meta charset="utf-8"/><style>
+    body{ margin:0; padding:24px; background:#F5F4EF; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#17171A; }
+    .doc{ max-width:640px; margin:0 auto; background:#fff; padding:32px; border-radius:10px; }
+    .doc-letterhead{ display:flex; align-items:center; justify-content:space-between; padding-bottom:18px; border-bottom:2px solid #17171A; margin-bottom:22px; }
+    .wordmark{ font-size:1.15rem; font-weight:700; }
+    .pill{ display:inline-block; padding:3px 9px; border-radius:999px; font-size:11.5px; font-weight:700; background:#E4EAF3; color:#33517A; }
+    .doc-title{ font-size:1.5rem; font-weight:700; text-align:center; margin:6px 0 2px; }
+    .doc-sub{ text-align:center; font-size:11.5px; color:#9A9AA1; margin-bottom:26px; }
+    .doc-parties{ display:table; width:100%; margin-bottom:22px; }
+    .doc-party{ display:table-cell; width:50%; vertical-align:top; }
+    .doc-party h4{ font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:#9A9AA1; font-weight:700; margin:0 0 6px; }
+    .doc-party p{ margin:0; font-size:13.5px; line-height:1.5; }
+    .doc-section{ margin-bottom:18px; }
+    .doc-section h3{ font-size:1.05rem; margin:0 0 10px; }
+    .doc-facts{ display:table; width:100%; font-size:13px; margin-bottom:10px; }
+    .doc-facts > div{ display:table-row; }
+    .doc-facts .k{ display:table-cell; font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:#9A9AA1; font-weight:700; padding:3px 12px 3px 0; white-space:nowrap; }
+    .doc-facts > div > span:last-child{ display:table-cell; padding:3px 0; }
+    .doc-terms{ font-size:12.5px; line-height:1.7; color:#67676D; padding-left:18px; margin:0; }
+    .ledger-row{ display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px dashed #E1E1E6; font-size:13px; }
+    .ledger-row.total{ border-bottom:none; border-top:1px solid #D1D1D8; margin-top:2px; padding-top:10px; font-weight:700; font-size:14.5px; }
+    .doc-sign{ display:table; width:100%; margin-top:26px; }
+    .doc-sign-line{ display:table-cell; width:50%; border-top:1px solid #17171A; padding:8px 16px 0 0; font-size:12px; color:#67676D; }
+    .doc-sign-line strong{ display:block; font-size:13.5px; color:#17171A; }
+    .doc-signature{ display:inline-block; font-family:"Snell Roundhand","Segoe Script","Brush Script MT",cursive; font-size:1.7rem; color:#17171A; }
+    .doc-foot{ margin-top:26px; padding-top:14px; border-top:1px solid #E1E1E6; font-size:10.5px; color:#9A9AA1; text-align:center; }
+  </style></head><body><div class="doc">${contractDocContent(c)}</div></body></html>`;
 }
 
 /* ---- Global "Contract Builder" list page (browse every contract across every lead) ---- */
@@ -5347,6 +5438,14 @@ function bindGlobal(){
     holder.innerHTML = renderContractBuilderDoc(getContract(S.contractBuilderId));
     document.body.appendChild(holder);
   }
+  const staleSendContract = document.getElementById('sendContractOverlayHost');
+  if(staleSendContract) staleSendContract.remove();
+  if(S.showSendContractConfirm){
+    const holder = document.createElement('div');
+    holder.id = 'sendContractOverlayHost';
+    holder.innerHTML = renderSendContractConfirmModal();
+    document.body.appendChild(holder);
+  }
   const staleGigInfoForm = document.getElementById('gigInfoOverlayHost');
   if(staleGigInfoForm) staleGigInfoForm.remove();
   if(S.showGigInfoForm){
@@ -5408,7 +5507,7 @@ function bindGlobal(){
       const form = el.closest('[data-form]')?.getAttribute('data-form');
       if(form==='task'){ S.newTaskText = el.value; return; }
       if(form==='comment'){ S.newCommentText = el.value; return; }
-      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm, payeeprofile:S.payeeProfileForm };
+      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm, payeeprofile:S.payeeProfileForm, sendcontract:S.sendContractForm };
       const target = formTargets[form] || S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
       if(el.type==='checkbox') render();
@@ -5621,6 +5720,10 @@ function bindGlobal(){
       case 'pick-payee-overtime-interval': S.payeeProfileForm.defaultOvertimeInterval = t.getAttribute('data-value'); render(); break;
       case 'save-payee-profile': doSavePayeeProfile(); break;
       case 'delete-payee-profile': doDeletePayeeProfile(id); break;
+      case 'open-send-contract': { const c=getContract(id); if(c){ S.contractBuilderId=id; S.showSendContractConfirm=true; S.sendContractForm={ to:c.snapshot.clientEmail||'', subject:`${contractTemplateLabel(c.template)} — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` — ${fmtDateShort(c.snapshot.eventDate)}`:''}` }; } render(); break; }
+      case 'close-send-contract-confirm': if(!S.sendContractBusy){ S.showSendContractConfirm=false; S.sendContractForm={}; render(); } break;
+      case 'sendcontract-overlay-close': if(e.target===t && !S.sendContractBusy){ S.showSendContractConfirm=false; S.sendContractForm={}; render(); } break;
+      case 'confirm-send-contract': doSendContractEmail(); break;
       case 'view-itinerary': S.itineraryEventId=id; S.showItinerary=true; render(); break;
       case 'close-itinerary': S.showItinerary=false; S.itineraryEventId=null; render(); break;
       case 'itinerary-overlay-close': if(e.target===t) { S.showItinerary=false; S.itineraryEventId=null; render(); } break;

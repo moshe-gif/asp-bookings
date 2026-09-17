@@ -177,6 +177,37 @@ def test_deposit_percent_drives_live_math(live_server, page):
     assert not errors, f"console errors during deposit percent live math: {errors}"
 
 
+def test_send_contract_confirm_flow_fails_gracefully_without_backend(live_server, page):
+    # The send-contract-email Supabase Edge Function isn't deployed yet in this test environment
+    # (it requires manual one-time setup of a mail relay -- see ops/SEND_CONTRACT_SETUP.md), so
+    # this only proves the button opens a prefilled confirm modal and that attempting to send
+    # fails as a handled, user-visible toast rather than an uncaught JS error.
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+
+    create_lead(page, "Send Contract Client", "2027-08-01", artist_id="eli")
+    builder = create_contract_from_lead(page, "standard")
+
+    builder.locator('[data-action="view-contract-builder-doc"]').click()
+    doc = page.locator('#contractBuilderPrintHost .doc')
+    doc.wait_for(state='visible')
+
+    page.locator('[data-action="open-send-contract"]').click()
+    confirm = page.locator('#sendContractOverlayHost .modal')
+    confirm.wait_for(state='visible')
+    assert "Send Contract" in confirm.inner_text()
+    assert "Standard Artist Agreement" in confirm.locator('input[data-field="subject"]').input_value()
+
+    confirm.locator('input[data-field="to"]').fill("client@example.com")
+    confirm.locator('[data-action="confirm-send-contract"]').click()
+
+    toast = page.locator('#toasts .toast')
+    toast.first.wait_for(state='visible', timeout=15000)
+
+    assert not errors, f"console errors during send-contract confirm flow: {errors}"
+
+
 def test_contract_persists_after_reload(live_server, page):
     errors = collect_console_errors(page)
     page.goto(live_server)
