@@ -1,9 +1,12 @@
 """
-Contract Builder: the clause-driven, persisted contract system reached from a lead's detail
-sheet (separate from the existing simple per-event auto-doc "Contracts" page, which this feature
-does not touch). Covers the acceptance criteria directly: autofill from the lead, two artists
-with distinct flight clauses, flight + hotel structured clauses rendering correct sentences,
-live discount/down-payment math, brand switching, and reload persistence.
+Contract Builder v2: real-template contracts (Standard / Comedian / Multi-Performer) reached from
+a lead's detail sheet, replacing the earlier generic clause-library version. Separate from the
+existing simple per-event auto-doc "Contracts" page, which this feature does not touch. Covers a
+template picked at creation (locked after), per-artist payee-profile autofill (entity + default
+boilerplate + overtime interval), a Standard contract with Baruch-Levine-style boilerplate, a
+Comedian contract with the No-Recording/credit-future cancellation defaults, a Multiline contract
+with line items + add-ons matching the real Stein package numbers and its tiered cancellation
+schedule, live fee/deposit math, and reload persistence.
 """
 from helpers import login_as, goto_nav, collect_console_errors
 
@@ -16,20 +19,21 @@ def create_lead(page, client_name, date, artist_id="benny"):
     page.locator('[data-action="submit-lead"]').click()
 
 
-def open_contract_builder_from_lead(page):
+def create_contract_from_lead(page, template):
     page.locator('[data-action="create-contract"]').click()
+    page.locator(f'[data-action="pick-template-create"][data-template="{template}"]').click()
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
     return builder
 
 
-def test_create_contract_autofills_from_lead(live_server, page):
+def test_standard_contract_autofills_performer_and_payee_profile(live_server, page):
     errors = collect_console_errors(page)
     page.goto(live_server)
     login_as(page, "admin_bookings")
 
-    create_lead(page, "Contract Autofill Client", "2027-08-20")
-    builder = open_contract_builder_from_lead(page)
+    create_lead(page, "Contract Autofill Client", "2027-08-20", artist_id="baruch")
+    builder = create_contract_from_lead(page, "standard")
 
     assert builder.locator('input[data-contract-field="snapshot.clientName"]').input_value() == "Contract Autofill Client"
     assert builder.locator('input[data-contract-field="snapshot.eventDate"]').input_value() == "2027-08-20"
@@ -39,135 +43,138 @@ def test_create_contract_autofills_from_lead(live_server, page):
     name_field.blur()
     assert name_field.input_value() == "Edited Client Name"
 
-    assert not errors, f"console errors during contract autofill: {errors}"
+    # The lead's performer (Baruch Levine) should auto-resolve his payee profile + real boilerplate
+    # defaults (Mechitza with dancing, no secular songs) without any manual picking.
+    assert builder.locator('.contract-performer-select').input_value() == "baruch"
+    assert "Baruch Levine Music Inc." in builder.locator('p', has_text='Payee:').first.inner_text()
+    assert builder.locator('input[data-contract-field="boilerplate.mechitzaWithDancingOnly"]').is_checked()
+    assert builder.locator('input[data-contract-field="boilerplate.noSecularSongs"]').is_checked()
+
+    assert not errors, f"console errors during standard contract autofill: {errors}"
 
 
-def test_two_artists_distinct_flight_clauses_and_hotel_clauses(live_server, page):
+def test_standard_contract_doc_preview_shows_payee_and_cancellation(live_server, page):
     errors = collect_console_errors(page)
     page.goto(live_server)
     login_as(page, "admin_bookings")
 
-    create_lead(page, "Multi Artist Client", "2027-09-10")
-    builder = open_contract_builder_from_lead(page)
+    create_lead(page, "Doc Preview Client", "2027-09-10", artist_id="eli")
+    builder = create_contract_from_lead(page, "standard")
 
-    # Add a second artist to the contract.
-    builder.locator('[data-action="add-contract-artist"]').click()
-    artist_selects = builder.locator('.contract-artist-select')
-    assert artist_selects.count() == 2, "adding an artist row did not produce a second artist select"
-    artist_selects.nth(1).select_option("yaakov")
+    fee_input = builder.locator('input[data-contract-field="fee.amount"]')
+    fee_input.fill("7500"); fee_input.blur()
 
-    # Resolve display names from the ARTISTS roster via the option labels already rendered.
-    singer1_name = artist_selects.nth(0).locator('option[value="benny"]').text_content()
-    singer2_name = artist_selects.nth(1).locator('option[value="yaakov"]').text_content()
+    builder.locator('[data-action="view-contract-builder-doc"]').click()
+    doc = page.locator('#contractBuilderPrintHost .doc')
+    doc.wait_for(state='visible')
+    doc_text = doc.inner_text()
+    assert "ARTIST AGREEMENT" in doc_text
+    assert "Eli Marcus" in doc_text
+    assert "$7,500" in doc_text
+    # Default cancellation policy on Standard is flat 80%, matching every real ASP-format contract.
+    assert "80% of the payment" in doc_text
+    # Eli Marcus's real payment info (Zelle) should appear via his resolved payee profile.
+    assert "elimarcusmusic@gmail.com" in doc_text
 
-    # Add the structured Flights clause, then build up three entries: one business-class flight
-    # each for the two singers, plus a shared economy block for the band.
-    builder.locator('[data-action="toggle-add-clause-picker"]').click()
-    builder.locator('[data-action="add-contract-clause"]', has_text="Flights").click()
-
-    def set_entry(idx, artist_value, provider, cabin_class, count):
-        selects = builder.locator('.contract-entry-select[data-field="artistId"]')
-        selects.nth(idx).select_option(artist_value)
-        builder.locator('.contract-entry-select[data-field="provider"]').nth(idx).select_option(provider)
-        builder.locator('.contract-entry-select[data-field="cabinClass"]').nth(idx).select_option(cabin_class)
-        count_input = builder.locator('.contract-entry-number[data-field="count"]').nth(idx)
-        count_input.fill(str(count))
-        count_input.blur()
-
-    # A new structured clause starts with zero entries -- click "Add Flight" before each one.
-    add_flight = builder.locator('[data-action="add-clause-entry"]').first
-    add_flight.click()
-    set_entry(0, "benny", "client", "business", 1)
-    add_flight.click()
-    set_entry(1, "yaakov", "client", "business", 1)
-    add_flight.click()
-    set_entry(2, "", "client", "economy", 6)
-
-    # The Flights clause is the one just added -> appended to the end of the clause list (the
-    # lead's default clause set is plain-text and comes first).
-    sentence = builder.locator('textarea[data-contract-field^="clause."][data-contract-field$=".bodyText"]').last.input_value()
-    assert f"one (1) business class flight for {singer1_name}" in sentence, sentence
-    assert f"one (1) business class flight for {singer2_name}" in sentence, sentence
-    assert "six (6) economy class flights for the band" in sentence, sentence
-
-    # Hotel clauses: one premium instance, one standard instance -- each its own generated
-    # sentence. Each new structured clause starts with zero entries too.
-    builder.locator('[data-action="toggle-add-clause-picker"]').click()
-    builder.locator('[data-action="add-contract-clause"]', has_text="Hotel").click()
-    builder.locator('[data-action="add-clause-entry"]').last.click()
-    hotel_tier_selects = builder.locator('.contract-entry-select[data-field="tier"]')
-    hotel_tier_selects.first.select_option("premium")
-    hotel_rooms = builder.locator('.contract-entry-number[data-field="rooms"]').first
-    hotel_rooms.fill("2"); hotel_rooms.blur()
-    hotel_nights = builder.locator('.contract-entry-number[data-field="nights"]').first
-    hotel_nights.fill("2"); hotel_nights.blur()
-    hotel_sentence = builder.locator('textarea[data-contract-field^="clause."][data-contract-field$=".bodyText"]').last.input_value()
-    assert hotel_sentence == "Client will provide two (2) premium hotel rooms for two (2) nights.", hotel_sentence
-
-    builder.locator('[data-action="toggle-add-clause-picker"]').click()
-    builder.locator('[data-action="add-contract-clause"]', has_text="Hotel").click()
-    builder.locator('[data-action="add-clause-entry"]').last.click()
-    hotel_tier_selects = builder.locator('.contract-entry-select[data-field="tier"]')
-    hotel_tier_selects.last.select_option("standard")
-    hotel_rooms_last = builder.locator('.contract-entry-number[data-field="rooms"]').last
-    hotel_rooms_last.fill("1"); hotel_rooms_last.blur()
-    hotel_nights_last = builder.locator('.contract-entry-number[data-field="nights"]').last
-    hotel_nights_last.fill("3"); hotel_nights_last.blur()
-    hotel_sentence_2 = builder.locator('textarea[data-contract-field^="clause."][data-contract-field$=".bodyText"]').last.input_value()
-    assert hotel_sentence_2 == "Client will provide one (1) standard hotel room for three (3) nights.", hotel_sentence_2
-
-    assert not errors, f"console errors during multi-artist flight/hotel clause flow: {errors}"
+    assert not errors, f"console errors during standard doc preview: {errors}"
 
 
-def test_discount_and_down_payment_recompute_live(live_server, page):
+def test_comedian_contract_defaults_no_recording_and_credit_cancellation(live_server, page):
     errors = collect_console_errors(page)
     page.goto(live_server)
     login_as(page, "admin_bookings")
 
-    create_lead(page, "Payment Math Client", "2027-10-05")
-    builder = open_contract_builder_from_lead(page)
+    create_lead(page, "Comedy Night Client", "2027-10-05", artist_id="dovie")
+    builder = create_contract_from_lead(page, "comedian")
 
-    total_input = builder.locator('input[data-contract-field="payment.total"]')
-    total_input.fill("10000"); total_input.blur()
+    # Comedian contracts default to credit-toward-future-event cancellation (not flat-percent-owed)
+    # and the No Recording Clause toggle on, matching every real Dovi Neuburger comedian contract.
+    assert "sel" in (builder.locator('[data-action="pick-cancellation-type"][data-value="credit_future"]').get_attribute("class") or "")
+    assert builder.locator('input[data-contract-field="boilerplate.noRecording"]').is_checked()
+    assert builder.locator('input[data-contract-field="boilerplate.acceptanceClause"]').is_checked()
 
-    discount_input = builder.locator('input[data-contract-field="payment.discountValue"]')
-    discount_input.fill("10"); discount_input.blur()  # 10% off by default discount type
+    builder.locator('[data-action="view-contract-builder-doc"]').click()
+    doc = page.locator('#contractBuilderPrintHost .doc')
+    doc.wait_for(state='visible')
+    doc_text = doc.inner_text()
+    assert "COMEDIAN AGREEMENT" in doc_text
+    assert "No Recording Clause" in doc_text
+    assert "credited toward a future event" in doc_text
 
-    down_input = builder.locator('input[data-contract-field="payment.downPaymentPct"]')
-    down_input.fill("20"); down_input.blur()
+    assert not errors, f"console errors during comedian contract defaults: {errors}"
+
+
+def test_multiline_line_items_addons_and_tiered_cancellation(live_server, page):
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+
+    create_lead(page, "Stein Package Client", "2026-11-29", artist_id="eli")
+    builder = create_contract_from_lead(page, "multiline")
+
+    # Multiline defaults to a tiered cancellation schedule (not flat %), matching the real Stein
+    # package contract's three-tier policy.
+    assert "sel" in (builder.locator('[data-action="pick-cancellation-type"][data-value="tiered"]').get_attribute("class") or "")
+    within_inputs = builder.locator('input[data-contract-field^="tier."][data-contract-field$=".withinDays"]')
+    percent_inputs = builder.locator('input[data-contract-field^="tier."][data-contract-field$=".percent"]')
+    assert within_inputs.count() == 3
+    assert [within_inputs.nth(i).input_value() for i in range(3)] == ["60", "30", "0"]
+    assert [percent_inputs.nth(i).input_value() for i in range(3)] == ["0", "80", "100"]
+
+    # Add the real Stein line items + one add-on and confirm the fee auto-sums.
+    builder.locator('[data-action="add-line-item"]').click()
+    labels = builder.locator('input[data-contract-field^="lineitem."][data-contract-field$=".label"]')
+    fees = builder.locator('input[data-contract-field^="lineitem."][data-contract-field$=".fee"]')
+    labels.nth(0).fill("Eli Marcus - 5hr from performance start")
+    fees.nth(0).fill("6500"); fees.nth(0).blur()
+
+    builder.locator('[data-action="add-line-item"]').click()
+    labels.nth(1).fill("DJ Tzvi Singer - Third Dance set")
+    fees.nth(1).fill("3000"); fees.nth(1).blur()
+
+    builder.locator('[data-action="add-line-item"]').click()
+    labels.nth(2).fill("Gershon Freishtat Band - 12 piece orchestra")
+    fees.nth(2).fill("16750"); fees.nth(2).blur()
+
+    builder.locator('[data-action="add-add-on"]').click()
+    addon_labels = builder.locator('input[data-contract-field^="addon."][data-contract-field$=".label"]')
+    addon_amounts = builder.locator('input[data-contract-field^="addon."][data-contract-field$=".amount"]')
+    addon_labels.nth(0).fill("Custom Band Stands")
+    addon_amounts.nth(0).fill("1600"); addon_amounts.nth(0).blur()
+
+    fee_total = builder.locator('input[data-contract-field="fee.amount"]')
+    assert fee_total.input_value() == "27850", fee_total.input_value()  # 6500+3000+16750+1600
+
+    deposit_input = builder.locator('input[data-contract-field="deposit.amount"]')
+    deposit_input.fill("10000"); deposit_input.blur()
+    ledger_text = builder.locator('.ledger').first.inner_text()
+    assert "$27,850" in ledger_text, ledger_text
+    assert "$10,000" in ledger_text, ledger_text
+    assert "$17,850" in ledger_text, ledger_text  # balance
+
+    assert not errors, f"console errors during multiline line items/add-ons: {errors}"
+
+
+def test_deposit_percent_drives_live_math(live_server, page):
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+
+    create_lead(page, "Deposit Percent Client", "2027-12-01", artist_id="benny")
+    builder = create_contract_from_lead(page, "standard")
+
+    fee_input = builder.locator('input[data-contract-field="fee.amount"]')
+    fee_input.fill("15000"); fee_input.blur()
+
+    percent_input = builder.locator('input[data-contract-field="deposit.percent"]')
+    percent_input.fill("15"); percent_input.blur()  # matches the real Benny Friedman/Yaakov Link contract
 
     ledger_text = builder.locator('.ledger').first.inner_text()
-    # 10000 total, 10% discount = -1000 (shown), then 20% down payment of the 9000 remaining
-    # (not itself shown as a line) = 1800 down, balance = 9000 - 1800 = 7200.
-    assert "$10,000" in ledger_text, ledger_text
-    assert "-$1,000" in ledger_text, ledger_text
-    assert "$1,800" in ledger_text, ledger_text
-    assert "$7,200" in ledger_text, ledger_text
+    assert "$15,000" in ledger_text, ledger_text
+    assert "$2,250" in ledger_text, ledger_text  # 15% deposit
+    assert "$12,750" in ledger_text, ledger_text  # balance
 
-    assert not errors, f"console errors during live payment math: {errors}"
-
-
-def test_brand_switch_updates_doc_preview(live_server, page):
-    errors = collect_console_errors(page)
-    page.goto(live_server)
-    login_as(page, "admin_bookings")
-
-    create_lead(page, "Brand Switch Client", "2027-11-01")
-    builder = open_contract_builder_from_lead(page)
-
-    builder.locator('[data-action="view-contract-builder-doc"]').click()
-    doc = page.locator('#contractBuilderPrintHost .doc')
-    doc.wait_for(state='visible')
-    assert "ASP" in doc.locator('.doc-letterhead').inner_text()
-    page.locator('[data-action="close-contract-builder-doc"]').click()
-
-    builder.locator('[data-action="pick-contract-brand"]', has_text="SING Entertainment").click()
-    builder.locator('[data-action="view-contract-builder-doc"]').click()
-    doc = page.locator('#contractBuilderPrintHost .doc')
-    doc.wait_for(state='visible')
-    assert "SING Entertainment" in doc.locator('.doc-letterhead').inner_text()
-
-    assert not errors, f"console errors during brand switch: {errors}"
+    assert not errors, f"console errors during deposit percent live math: {errors}"
 
 
 def test_contract_persists_after_reload(live_server, page):
@@ -175,8 +182,8 @@ def test_contract_persists_after_reload(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
 
-    create_lead(page, "Reload Persistence Client", "2027-12-15")
-    builder = open_contract_builder_from_lead(page)
+    create_lead(page, "Reload Persistence Client", "2027-12-15", artist_id="benny")
+    builder = create_contract_from_lead(page, "standard")
     builder.locator('input[data-contract-field="snapshot.venue"]').fill("Persisted Venue Hall")
     builder.locator('[data-action="set-contract-status"][data-status="sent"]').click()
     builder.get_by_role("button", name="Done").click()
