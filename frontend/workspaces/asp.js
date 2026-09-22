@@ -476,6 +476,8 @@ function migrateContract(c){
   if(!c.snapshot){ c.snapshot = {}; migrated = true; }
   if(c.status===undefined){ c.status = 'draft'; migrated = true; }
   if(c.signedAt===undefined){ c.signedAt = null; migrated = true; }
+  if(c.qboInvoiceId===undefined){ c.qboInvoiceId = null; migrated = true; }
+  if(c.qboInvoiceDocNumber===undefined){ c.qboInvoiceDocNumber = null; migrated = true; }
   // ---- v3 additions (office-drive audit against real contracts) ----
   if(c.snapshot.clientPhone===undefined){ c.snapshot.clientPhone = ''; migrated = true; }
   if(c.snapshot.eventName===undefined){ c.snapshot.eventName = ''; migrated = true; }
@@ -874,8 +876,16 @@ function doDeletePayeeProfile(id){
 /* ---- Send Contract (real email, via the send-contract-email Supabase Edge Function) ---- */
 async function doSendContractEmail(){
   const c = getContract(S.contractBuilderId); if(!c) return;
+  // Capture every form value up front and use only these locals from here on -- S.sendContractForm
+  // gets cleared as soon as the email step succeeds (so the confirm modal doesn't reopen stale),
+  // and the QuickBooks step runs after that point. Reading S.sendContractForm.qboAmount there was
+  // a real bug: it always resolved to 0 against the just-cleared form, so a requested QuickBooks
+  // invoice silently never got created even when the email send reported success.
   const to = (S.sendContractForm.to||'').trim();
   const subject = (S.sendContractForm.subject||'').trim();
+  const wantsInvoice = !!S.sendContractInvoice;
+  const qboAmount = Number(S.sendContractForm.qboAmount)||0;
+  const qboDescription = S.sendContractForm.qboDescription||'Deposit';
   if(!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)){ toast('Enter a valid recipient email.', 'system'); return; }
   if(!subject){ toast('Enter a subject.', 'system'); return; }
   if(!supabaseClient){ toast('Sign in with your real ASP account to send email (not available in Demo Mode).', 'system'); return; }
@@ -883,43 +893,41 @@ async function doSendContractEmail(){
   try{
     const html = contractEmailHtml(c);
     const { data: { session } } = await supabaseClient.auth.getSession();
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session ? session.access_token : SUPABASE_PUBLISHABLE_KEY}`,
+      'apikey': SUPABASE_PUBLISHABLE_KEY,
+    };
+    // Retry-safe: re-sending after a prior failure re-runs the email step (send-contract-email has
+    // no dedupe of its own yet), but never re-runs the QuickBooks step once it already succeeded --
+    // c.qboInvoiceId is the idempotency marker.
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-contract-email`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session ? session.access_token : SUPABASE_PUBLISHABLE_KEY}`,
-        'apikey': SUPABASE_PUBLISHABLE_KEY,
-      },
-      body: JSON.stringify({ to, subject, html }),
+      method: 'POST', headers: authHeaders, body: JSON.stringify({ to, subject, html }),
     });
     const data = await resp.json().catch(()=>({ ok:false, error:'Unexpected response from the server.' }));
     if(!resp.ok || data.ok===false){
       toast(data.error || 'Could not send the email.', 'system');
-    } else {
-      if(c.status==='draft'){ c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); }
-      toast(`Contract sent to ${to}.`, 'success');
-      S.showSendContractConfirm=false; S.sendContractForm={};
+      return;
+    }
+    if(c.status==='draft'){ c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); }
+    toast(`Contract sent to ${to}.`, 'success');
+    S.showSendContractConfirm=false; S.sendContractForm={};
 
-      if(S.sendContractInvoice && S.qboStatus && S.qboStatus.connected){
-        const amount = Number(S.sendContractForm.qboAmount)||0;
-        if(amount > 0){
-          try{
-            const invResp = await fetch(`${SUPABASE_URL}/functions/v1/qbo-create-invoice`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${session ? session.access_token : SUPABASE_PUBLISHABLE_KEY}`,
-                'apikey': SUPABASE_PUBLISHABLE_KEY,
-              },
-              body: JSON.stringify({ clientName: c.snapshot.clientName||to, clientEmail: to, amount, description: S.sendContractForm.qboDescription||'Deposit' }),
-            });
-            const invData = await invResp.json().catch(()=>({ ok:false, error:'Unexpected response from the server.' }));
-            if(!invResp.ok || invData.ok===false) toast('Contract sent, but the QuickBooks invoice failed: ' + (invData.error||'unknown error'), 'system');
-            else toast(`QuickBooks invoice ${invData.docNumber?('#'+invData.docNumber):''} sent to ${to}.`, 'success');
-          } catch(err){
-            toast('Contract sent, but the QuickBooks invoice failed: ' + String(err), 'system');
-          }
+    if(wantsInvoice && S.qboStatus && S.qboStatus.connected && qboAmount>0 && !c.qboInvoiceId){
+      try{
+        const invResp = await fetch(`${SUPABASE_URL}/functions/v1/qbo-create-invoice`, {
+          method: 'POST', headers: authHeaders,
+          body: JSON.stringify({ clientName: c.snapshot.clientName||to, clientEmail: to, amount: qboAmount, description: qboDescription }),
+        });
+        const invData = await invResp.json().catch(()=>({ ok:false, error:'Unexpected response from the server.' }));
+        if(!invResp.ok || invData.ok===false){
+          toast('Contract sent, but the QuickBooks invoice failed: ' + (invData.error||'unknown error'), 'system');
+        } else {
+          c.qboInvoiceId = invData.invoiceId||null; c.qboInvoiceDocNumber = invData.docNumber||null; c.updatedAt = new Date().toISOString(); saveContracts();
+          toast(`QuickBooks invoice ${invData.docNumber?('#'+invData.docNumber):''} sent to ${to}.`, 'success');
         }
+      } catch(err){
+        toast('Contract sent, but the QuickBooks invoice failed: ' + String(err), 'system');
       }
     }
   } catch(err){
