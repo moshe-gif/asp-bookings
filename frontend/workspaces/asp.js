@@ -249,6 +249,32 @@ const DOC_BRANDS = {
   asp: { label:'ASP Artist Management', signer:'ASP Artist Management' },
   sing: { label:'SING Entertainment', signer:'SING Entertainment (for Ilan)' },
 };
+// Centralized brand config (see supabase/migrations/0015_zelle_gmail_and_brand.sql): the real,
+// admin-editable source of truth once populated. Falls back to DOC_BRANDS' hardcoded text --
+// identical strings today -- when the table isn't reachable yet (Demo Mode, offline, or before
+// that migration has been applied), so nothing changes visually until an admin actually edits a
+// brand in Supabase. New consumers should call getBrandConfig(key) rather than reading DOC_BRANDS
+// directly; existing DOC_BRANDS call sites (e.g. the Documents builder) are untouched for now.
+let BRAND_CONFIG_CACHE = null;
+async function loadBrandConfig(){
+  if(!supabaseClient) return;
+  // Same guard as refreshQboStatus(): Demo Mode has no real Supabase session, so skip the network
+  // call entirely rather than let it 404/RLS-reject against a live project with nothing to gain --
+  // matters beyond tidiness, since a real fetch failure logs "Failed to load resource" to the
+  // console regardless of whether the JS promise rejection itself is caught.
+  try{
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if(!session) return;
+    const { data, error } = await supabaseClient.from('brand_config').select('*');
+    if(error || !data) return;
+    const map = {};
+    data.forEach(row=>{ map[row.brand_key] = { label: row.display_name, signer: row.legal_name, raw: row }; });
+    if(Object.keys(map).length){ BRAND_CONFIG_CACHE = map; render(); }
+  }catch(err){ /* stays on the DOC_BRANDS fallback */ }
+}
+function getBrandConfig(key){
+  return (BRAND_CONFIG_CACHE && BRAND_CONFIG_CACHE[key]) || DOC_BRANDS[key] || DOC_BRANDS.asp;
+}
 let DOCID = 1;
 const DOCUMENTS_LS_KEY = 'asp_mock_documents_v1';
 function loadDocuments(){ try{ const raw = localStorage.getItem(DOCUMENTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
@@ -870,6 +896,73 @@ function doDeletePayeeProfile(id){
   PAYEE_PROFILES = PAYEE_PROFILES.filter(p=>p.id!==id);
   savePayeeProfiles();
   toast('Payee profile deleted.', 'system');
+  render();
+}
+
+/* ---- Data Migration: move localStorage records into the real Supabase tables (0010-0016) ----
+   Preview-then-confirm, admin-only, idempotent (each local record gets a _supabaseId/_migratedAt
+   marker once written, so re-running only picks up what's still unmigrated -- safe to click
+   repeatedly, safe to leave half-run). Scoped to payee_profiles + contracts for now: events
+   themselves (215 real imported gigs, all still needsReview) and external_events are their own
+   careful follow-up pass, not bundled in here. */
+function computeMigrationCounts(){
+  const pp = { total: PAYEE_PROFILES.length, migrated: PAYEE_PROFILES.filter(p=>p._supabaseId).length };
+  const ct = { total: CONTRACTS.length, migrated: CONTRACTS.filter(c=>c._supabaseId).length };
+  return { payeeProfiles: pp, contracts: ct };
+}
+function payeeProfileToSupabaseRow(p){
+  return {
+    legacy_id: p.id, artist_id: null, // artist FK resolved by the caller (needs a local-id -> real-uuid map); left null if unresolved
+    entity_name: p.entityName, zelle: p.zelle||'', check_payee: p.checkPayee||'', check_address: p.checkAddress||'',
+    wire_bank_name: p.wireBankName||'', wire_bank_address: p.wireBankAddress||'', wire_account_name: p.wireAccountName||'',
+    wire_account_number: p.wireAccountNumber||'', wire_routing_number: p.wireRoutingNumber||'', wire_swift: p.wireSwift||'',
+    notes: p.notes||'', default_boilerplate: p.defaultBoilerplate||{}, default_overtime_interval: p.defaultOvertimeInterval||'half_hour',
+    default_travel_clause: p.defaultTravelClause||null, default_cancellation: p.defaultCancellation||null,
+  };
+}
+function contractToSupabaseRow(c, payeeSupabaseId){
+  return {
+    legacy_id: c.id, legacy_lead_id: c.leadId||null, lead_id: null, // events aren't migrated yet -- see legacy_lead_id
+    template: c.template, status: c.status, performer_artist_id: null, performer_label: c.performerLabel||'',
+    payee_profile_id: payeeSupabaseId||null, brand: c.brand||'asp', bsd_header: !!c.bsdHeader,
+    snapshot: c.snapshot||{}, fee: c.fee||{}, deposit: c.deposit||{}, overtime: c.overtime||{},
+    cancellation_policy: c.cancellationPolicy||{}, boilerplate: c.boilerplate||{}, client_provides: c.clientProvides||[],
+    line_items: c.lineItems||[], add_ons: c.addOns||[], custom_clauses: c.customClauses||[],
+    hours_of_engagement: c.hoursOfEngagement||'', balance_due_timing: c.balanceDueTiming||'prior',
+    artist_provides: c.artistProvides||'', travel_clause: c.travelClause||null, discount: c.discount||null,
+    performance_duration: c.performanceDuration||'', performance_type: c.performanceType||'', additional_expenses: c.additionalExpenses||'N/A',
+    barter: c.barter||null, creative: c.creative||null, notes: c.notes||'',
+    qbo_invoice_id: c.qboInvoiceId||null, qbo_invoice_doc_number: c.qboInvoiceDocNumber||null, signed_at: c.signedAt||null,
+  };
+}
+async function doMigratePayeeProfilesToSupabase(){
+  if(!supabaseClient){ toast('Sign in with your real ASP account first (not available in Demo Mode).', 'system'); return; }
+  const todo = PAYEE_PROFILES.filter(p=>!p._supabaseId);
+  if(!todo.length){ toast('All payee profiles are already migrated.', 'system'); return; }
+  let ok=0, failed=0;
+  for(const p of todo){
+    const { data, error } = await supabaseClient.from('payee_profiles').insert(payeeProfileToSupabaseRow(p)).select('id').single();
+    if(error){ failed++; console.error('payee profile migration failed', p.id, error); continue; }
+    p._supabaseId = data.id; p._migratedAt = new Date().toISOString(); ok++;
+  }
+  savePayeeProfiles();
+  toast(`Payee profiles: ${ok} migrated${failed?`, ${failed} failed (see console)`:''}.`, failed? 'system':'success');
+  render();
+}
+async function doMigrateContractsToSupabase(){
+  if(!supabaseClient){ toast('Sign in with your real ASP account first (not available in Demo Mode).', 'system'); return; }
+  const todo = CONTRACTS.filter(c=>!c._supabaseId);
+  if(!todo.length){ toast('All contracts are already migrated.', 'system'); return; }
+  let ok=0, failed=0;
+  for(const c of todo){
+    const profile = getPayeeProfile(c.payeeProfileId);
+    const payeeSupabaseId = profile && profile._supabaseId ? profile._supabaseId : null;
+    const { data, error } = await supabaseClient.from('contracts').insert(contractToSupabaseRow(c, payeeSupabaseId)).select('id').single();
+    if(error){ failed++; console.error('contract migration failed', c.id, error); continue; }
+    c._supabaseId = data.id; c._migratedAt = new Date().toISOString(); ok++;
+  }
+  saveContracts();
+  toast(`Contracts: ${ok} migrated${failed?`, ${failed} failed (see console)`:''}.`, failed? 'system':'success');
   render();
 }
 
@@ -10578,6 +10671,7 @@ let S = {
   sendContractForm:{},
   sendContractBusy:false,
   qboStatus:null, // null = unknown/not yet checked, else {connected, realmId, connectedAt}
+  migrationPreview:null, // null until "Preview" clicked, else {payeeProfiles:{total,migrated}, contracts:{total,migrated}}
   sendContractInvoice:true,
   contractsSearchQuery:'',
   contractsStatusFilter:'all',
@@ -10789,6 +10883,7 @@ async function refreshQboStatus(){
   else if(qbo==='error'){ toast('Could not connect QuickBooks -- check the setup and try again.', 'system'); }
 })();
 refreshQboStatus();
+loadBrandConfig();
 
 /* ============ THEME PREF ============ */
 const THEME_LS_KEY = 'asp_theme_pref';
@@ -11498,6 +11593,8 @@ function renderSettingsPage(){
   ${isAdmin ? renderPayeeProfilesCard() : ''}
 
   ${isAdmin ? renderQuickBooksCard() : ''}
+
+  ${isAdmin ? renderDataMigrationCard() : ''}
 
   <div class="card card-pad" style="margin-bottom:20px;">
     <h3 style="margin-bottom:12px;">Connected Accounts</h3>
@@ -14172,7 +14269,7 @@ function renderContractBuilderDoc(c){
 function renderStandardDoc(c){ return docChrome(standardDocContent(c), c); }
 function standardDocContent(c){
   const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
-  const brand = DOC_BRANDS[c.brand] || DOC_BRANDS.asp;
+  const brand = getBrandConfig(c.brand);
   const figures = contractPaymentFigures(c);
   const who = contractPerformerName(c);
   const boilerplate = contractBoilerplateLines(c);
@@ -14222,7 +14319,7 @@ function standardDocContent(c){
 function renderComedianDoc(c){ return docChrome(comedianDocContent(c), c); }
 function comedianDocContent(c){
   const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
-  const brand = DOC_BRANDS[c.brand] || DOC_BRANDS.asp;
+  const brand = getBrandConfig(c.brand);
   const figures = contractPaymentFigures(c);
   const who = contractPerformerName(c);
   const boilerplate = contractBoilerplateLines(c);
@@ -14277,7 +14374,7 @@ function comedianDocContent(c){
 function renderMultilineDoc(c){ return docChrome(multilineDocContent(c), c); }
 function multilineDocContent(c){
   const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
-  const brand = DOC_BRANDS[c.brand] || DOC_BRANDS.asp;
+  const brand = getBrandConfig(c.brand);
   const figures = contractPaymentFigures(c);
   const boilerplate = contractBoilerplateLines(c);
   const contactLine = contractClientContactLine(c);
@@ -14329,7 +14426,7 @@ function multilineDocContent(c){
 function renderCreativeDoc(c){ return docChrome(creativeDocContent(c), c); }
 function creativeDocContent(c){
   const profile = getPayeeProfile(c.payeeProfileId) || airschnitzPayeeProfile();
-  const brand = DOC_BRANDS[c.brand] || DOC_BRANDS.asp;
+  const brand = getBrandConfig(c.brand);
   const figures = contractPaymentFigures(c);
   const contactLine = contractClientContactLine(c);
   return `
@@ -14477,6 +14574,26 @@ function renderQuickBooksCard(){
       <p style="font-size:11.5px;color:var(--ink-3);margin:8px 0 0;">Sending a contract can also create and email a QuickBooks invoice for the deposit, payable by credit card.</p>`
     : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">Not connected yet. Connecting lets Send Contract also create and email a real QuickBooks invoice for the deposit.</p>
       <a href="${qboAuthorizeUrl()}" class="btn btn-sm btn-primary">Connect QuickBooks</a>`}
+  </div>`;
+}
+function renderDataMigrationCard(){
+  const preview = S.migrationPreview;
+  return `<div class="card card-pad" style="margin-bottom:20px;">
+    <h3 style="margin-bottom:6px;">Data Migration (Supabase)</h3>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 12px;">Payee profiles and contracts currently live only in this browser's storage. This moves them into the real Supabase tables (see <code>supabase/migrations/0010-0016</code>) without deleting or changing anything here -- safe to preview repeatedly, and re-running only picks up records that aren't migrated yet.</p>
+    ${!preview? `<button class="btn btn-sm" data-action="preview-data-migration">Preview</button>`
+    : `<div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="settings-row">
+          <div><h4>Payee Profiles</h4><p>${preview.payeeProfiles.migrated} of ${preview.payeeProfiles.total} migrated</p></div>
+          ${preview.payeeProfiles.migrated<preview.payeeProfiles.total? `<button class="btn btn-sm btn-primary" data-action="migrate-payee-profiles">Migrate ${preview.payeeProfiles.total-preview.payeeProfiles.migrated}</button>` : `<span class="pill pill-good">Done</span>`}
+        </div>
+        <div class="settings-row">
+          <div><h4>Contracts</h4><p>${preview.contracts.migrated} of ${preview.contracts.total} migrated</p></div>
+          ${preview.contracts.migrated<preview.contracts.total? `<button class="btn btn-sm btn-primary" data-action="migrate-contracts">Migrate ${preview.contracts.total-preview.contracts.migrated}</button>` : `<span class="pill pill-good">Done</span>`}
+        </div>
+        <p style="font-size:11px;color:var(--ink-3);margin:0;">Migrate payee profiles first -- contracts link to them by their new Supabase id when available. Events (and contracts' link back to their lead) aren't part of this pass yet; that's its own follow-up given the volume of real imported gigs.</p>
+        <button class="btn btn-sm btn-ghost" style="align-self:flex-start;" data-action="preview-data-migration">Refresh</button>
+      </div>`}
   </div>`;
 }
 function renderPayeeProfileFormModal(){
@@ -15590,6 +15707,9 @@ function bindGlobal(){
       case 'pick-payee-overtime-interval': S.payeeProfileForm.defaultOvertimeInterval = t.getAttribute('data-value'); render(); break;
       case 'save-payee-profile': doSavePayeeProfile(); break;
       case 'delete-payee-profile': doDeletePayeeProfile(id); break;
+      case 'preview-data-migration': S.migrationPreview = computeMigrationCounts(); render(); break;
+      case 'migrate-payee-profiles': doMigratePayeeProfilesToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
+      case 'migrate-contracts': doMigrateContractsToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
       case 'open-send-contract': { const c=getContract(id); if(c){ const figures=contractPaymentFigures(c); S.contractBuilderId=id; S.showSendContractConfirm=true; S.sendContractInvoice=true; S.sendContractForm={ to:c.snapshot.clientEmail||'', subject:`${contractTemplateLabel(c.template)} — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` — ${fmtDateShort(c.snapshot.eventDate)}`:''}`, qboAmount: figures.deposit||'', qboDescription: `Deposit — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` (${fmtDateShort(c.snapshot.eventDate)})`:''}` }; } render(); break; }
       case 'close-send-contract-confirm': if(!S.sendContractBusy){ S.showSendContractConfirm=false; S.sendContractForm={}; render(); } break;
       case 'sendcontract-overlay-close': if(e.target===t && !S.sendContractBusy){ S.showSendContractConfirm=false; S.sendContractForm={}; render(); } break;
