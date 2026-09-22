@@ -709,6 +709,28 @@ async function doSendContractEmail(){
       if(c.status==='draft'){ c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); }
       toast(`Contract sent to ${to}.`, 'success');
       S.showSendContractConfirm=false; S.sendContractForm={};
+
+      if(S.sendContractInvoice && S.qboStatus && S.qboStatus.connected){
+        const amount = Number(S.sendContractForm.qboAmount)||0;
+        if(amount > 0){
+          try{
+            const invResp = await fetch(`${SUPABASE_URL}/functions/v1/qbo-create-invoice`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session ? session.access_token : SUPABASE_PUBLISHABLE_KEY}`,
+                'apikey': SUPABASE_PUBLISHABLE_KEY,
+              },
+              body: JSON.stringify({ clientName: c.snapshot.clientName||to, clientEmail: to, amount, description: S.sendContractForm.qboDescription||'Deposit' }),
+            });
+            const invData = await invResp.json().catch(()=>({ ok:false, error:'Unexpected response from the server.' }));
+            if(!invResp.ok || invData.ok===false) toast('Contract sent, but the QuickBooks invoice failed: ' + (invData.error||'unknown error'), 'system');
+            else toast(`QuickBooks invoice ${invData.docNumber?('#'+invData.docNumber):''} sent to ${to}.`, 'success');
+          } catch(err){
+            toast('Contract sent, but the QuickBooks invoice failed: ' + String(err), 'system');
+          }
+        }
+      }
     }
   } catch(err){
     toast('Could not send the email: ' + String(err), 'system');
@@ -10246,6 +10268,18 @@ const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_U
   auth: { experimental: { passkey: true } },
 }) : null;
 
+/* ============ QUICKBOOKS ============ */
+// Client ID is not secret (same reasoning as the Supabase publishable key above) -- it identifies
+// the app to Intuit's OAuth screen, but nothing sensitive can be done with it alone. Set once the
+// Intuit Developer app is registered; the Connect button in Settings stays disabled until it is.
+// See ops/QUICKBOOKS_SETUP.md for the full setup.
+const QBO_CLIENT_ID = '';
+const QBO_REDIRECT_URI = SUPABASE_URL + '/functions/v1/qbo-oauth-callback';
+function qboAuthorizeUrl(){
+  const state = Math.random().toString(36).slice(2);
+  return `https://appcenter.intuit.com/connect/oauth2?client_id=${encodeURIComponent(QBO_CLIENT_ID)}&scope=com.intuit.quickbooks.accounting&redirect_uri=${encodeURIComponent(QBO_REDIRECT_URI)}&response_type=code&state=${state}`;
+}
+
 /* ============ STATE ============ */
 const LS_KEY='asp_mock_state_v2';
 let S = {
@@ -10345,6 +10379,8 @@ let S = {
   showSendContractConfirm:false,
   sendContractForm:{},
   sendContractBusy:false,
+  qboStatus:null, // null = unknown/not yet checked, else {connected, realmId, connectedAt}
+  sendContractInvoice:true,
   contractsSearchQuery:'',
   contractsStatusFilter:'all',
 };
@@ -10533,6 +10569,28 @@ if(supabaseClient){
     if(event==='SIGNED_OUT'){ S.realSession = null; S.realPasskeys = null; }
   });
 }
+async function refreshQboStatus(){
+  if(!supabaseClient) return;
+  try{
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if(!session) return;
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/qbo-status`, {
+      headers: { 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
+    });
+    const data = await resp.json().catch(()=>null);
+    if(resp.ok && data && data.ok) S.qboStatus = data;
+    render();
+  }catch(err){ /* Settings just shows "not connected" if this fails -- non-critical */ }
+}
+(function checkQboRedirect(){
+  const params = new URLSearchParams(location.search);
+  const qbo = params.get('qbo');
+  if(!qbo) return;
+  history.replaceState(null, '', location.pathname + location.hash);
+  if(qbo==='connected'){ toast('QuickBooks connected.', 'success'); refreshQboStatus(); }
+  else if(qbo==='error'){ toast('Could not connect QuickBooks -- check the setup and try again.', 'system'); }
+})();
+refreshQboStatus();
 
 /* ============ THEME PREF ============ */
 const THEME_LS_KEY = 'asp_theme_pref';
@@ -11240,6 +11298,8 @@ function renderSettingsPage(){
   ${isReal && isAdmin ? renderUsersDashboardCard() : ''}
 
   ${isAdmin ? renderPayeeProfilesCard() : ''}
+
+  ${isAdmin ? renderQuickBooksCard() : ''}
 
   <div class="card card-pad" style="margin-bottom:20px;">
     <h3 style="margin-bottom:12px;">Connected Accounts</h3>
@@ -13556,6 +13616,14 @@ function renderSendContractConfirmModal(){
         <div class="field"><label>To</label><input data-field="to" type="email" value="${esc(f.to||'')}" placeholder="client@email.com" ${busy?'disabled':''}/></div>
         <div class="field"><label>Subject</label><input data-field="subject" value="${esc(f.subject||'')}" ${busy?'disabled':''}/></div>
         <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Sends the contract exactly as shown in the preview, as an email the client can read directly.</p>
+        ${S.qboStatus && S.qboStatus.connected ? `
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;border-top:1px solid var(--border);padding-top:10px;">
+          <input type="checkbox" data-action="toggle-send-contract-invoice" ${S.sendContractInvoice?'checked':''} ${busy?'disabled':''}/> Also send a QuickBooks invoice for the deposit (payable by credit card)
+        </label>
+        ${S.sendContractInvoice? `<div class="field-row">
+          <div class="field"><label>Amount ($)</label><input data-field="qboAmount" type="number" value="${esc(String(f.qboAmount||''))}" ${busy?'disabled':''}/></div>
+          <div class="field"><label>Description</label><input data-field="qboDescription" value="${esc(f.qboDescription||'')}" ${busy?'disabled':''}/></div>
+        </div>` : ''}` : ''}
         <button class="btn btn-primary btn-block" data-action="confirm-send-contract" ${busy?'disabled':''}>${busy?'Sending…':'Send'}</button>
       </div>
     </div>
@@ -13995,6 +14063,25 @@ function renderPayeeProfilesCard(){
         <button class="icon-btn" data-action="delete-payee-profile" data-id="${p.id}" title="Delete">${ICO.trash}</button>
       </div>
     </div>`; }).join('')}
+  </div>`;
+}
+function renderQuickBooksCard(){
+  const st = S.qboStatus;
+  const configured = !!QBO_CLIENT_ID;
+  return `<div class="card card-pad" style="margin-bottom:20px;">
+    <h3 style="margin-bottom:12px;">QuickBooks</h3>
+    ${!configured? `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">Not set up yet -- needs an Intuit Developer app registered first. See <code>ops/QUICKBOOKS_SETUP.md</code>.</p>
+      <button class="btn btn-sm" disabled style="opacity:.55;cursor:not-allowed;">Connect QuickBooks</button>`
+    : st && st.connected ? `<div class="settings-row">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="pill pill-good">Connected</span>
+          <div><p style="margin:0;">Company ID ${esc(st.realmId||'')}${st.connectedAt?` &middot; connected ${fmtDateShort(st.connectedAt.slice(0,10))}`:''}</p></div>
+        </div>
+        <a href="${qboAuthorizeUrl()}" class="btn btn-sm btn-ghost">Reconnect</a>
+      </div>
+      <p style="font-size:11.5px;color:var(--ink-3);margin:8px 0 0;">Sending a contract can also create and email a QuickBooks invoice for the deposit, payable by credit card.</p>`
+    : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">Not connected yet. Connecting lets Send Contract also create and email a real QuickBooks invoice for the deposit.</p>
+      <a href="${qboAuthorizeUrl()}" class="btn btn-sm btn-primary">Connect QuickBooks</a>`}
   </div>`;
 }
 function renderPayeeProfileFormModal(){
@@ -15104,10 +15191,11 @@ function bindGlobal(){
       case 'pick-payee-overtime-interval': S.payeeProfileForm.defaultOvertimeInterval = t.getAttribute('data-value'); render(); break;
       case 'save-payee-profile': doSavePayeeProfile(); break;
       case 'delete-payee-profile': doDeletePayeeProfile(id); break;
-      case 'open-send-contract': { const c=getContract(id); if(c){ S.contractBuilderId=id; S.showSendContractConfirm=true; S.sendContractForm={ to:c.snapshot.clientEmail||'', subject:`${contractTemplateLabel(c.template)} — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` — ${fmtDateShort(c.snapshot.eventDate)}`:''}` }; } render(); break; }
+      case 'open-send-contract': { const c=getContract(id); if(c){ const figures=contractPaymentFigures(c); S.contractBuilderId=id; S.showSendContractConfirm=true; S.sendContractInvoice=true; S.sendContractForm={ to:c.snapshot.clientEmail||'', subject:`${contractTemplateLabel(c.template)} — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` — ${fmtDateShort(c.snapshot.eventDate)}`:''}`, qboAmount: figures.deposit||'', qboDescription: `Deposit — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` (${fmtDateShort(c.snapshot.eventDate)})`:''}` }; } render(); break; }
       case 'close-send-contract-confirm': if(!S.sendContractBusy){ S.showSendContractConfirm=false; S.sendContractForm={}; render(); } break;
       case 'sendcontract-overlay-close': if(e.target===t && !S.sendContractBusy){ S.showSendContractConfirm=false; S.sendContractForm={}; render(); } break;
       case 'confirm-send-contract': doSendContractEmail(); break;
+      case 'toggle-send-contract-invoice': S.sendContractInvoice = !S.sendContractInvoice; render(); break;
       case 'view-itinerary': S.itineraryEventId=id; S.showItinerary=true; render(); break;
       case 'close-itinerary': S.showItinerary=false; S.itineraryEventId=null; render(); break;
       case 'itinerary-overlay-close': if(e.target===t) { S.showItinerary=false; S.itineraryEventId=null; render(); } break;
