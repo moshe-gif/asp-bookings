@@ -230,4 +230,123 @@ def test_contract_persists_after_reload(live_server, page):
     reopened.wait_for(state='visible')
     assert reopened.locator('input[data-contract-field="snapshot.venue"]').input_value() == "Persisted Venue Hall"
 
+
+# ---- v3: office-drive audit additions (new "creative" template, travel/discount/overtime
+# auto-suggest, split approval toggles, real payee-profile fixes, letterhead/BS"D chrome) ----
+
+def test_creative_template_renders_standing_clauses_and_no_overtime(live_server, page):
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+
+    create_lead(page, "SAR Academy", "2027-05-01", artist_id="dovie")
+    builder = create_contract_from_lead(page, "creative")
+
+    assert "Creative/Video Production Agreement" in builder.locator('h2').first.inner_text()
+    # Creative contracts have no performer/overtime apparatus -- shouldn't render those fields.
+    assert builder.locator('input[data-contract-field="overtime.rate"]').count() == 0
+
+    builder.locator('input[data-contract-field="creative.projectName"]').fill("SAR Academy Dinner Video")
+    fee = builder.locator('input[data-contract-field="fee.amount"]')
+    fee.fill("6500"); fee.blur()
+
+    builder.locator('[data-action="view-contract-builder-doc"]').click()
+    doc = page.locator('#contractBuilderPrintHost .doc')
+    doc.wait_for(state='visible')
+    doc_text = doc.inner_text()
+    assert "SAR Academy Dinner Video" in doc_text
+    assert "no further revisions, additions, or changes will be made" in doc_text
+    assert "not binding until the deposit is received" in doc_text
+    assert "when the project is complete" in doc_text  # default balanceDueTiming for creative
+    assert "mockup document" not in doc_text
+
+    assert not errors, f"console errors during creative template flow: {errors}"
+
+
+def test_overtime_auto_suggest_and_travel_sentence(live_server, page):
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+
+    create_lead(page, "Overtime Client", "2027-05-01", artist_id="eli")
+    builder = create_contract_from_lead(page, "standard")
+
+    fee = builder.locator('input[data-contract-field="fee.amount"]')
+    fee.fill("6500"); fee.blur()
+    # Standing rule: $6,500 fee -> $650/half hour, auto-suggested only while the rate is unset.
+    assert builder.locator('input[data-contract-field="overtime.rate"]').input_value() == "650"
+
+    flights = builder.locator('input[data-contract-field="travel.flightsCount"]')
+    flights.fill("1"); flights.blur()
+    builder.locator('[data-action="pick-travel-flight-class"][data-value="business"]').click()
+    hotel = builder.locator('input[data-contract-field="travel.hotelRooms"]')
+    hotel.fill("1"); hotel.blur()
+    assert 'plus Business Class flight, Hotel' in builder.inner_text() or 'plus Business Class flight and Hotel' in builder.inner_text()
+
+    assert not errors, f"console errors during overtime/travel flow: {errors}"
+
+
+def test_discount_strikethrough_on_doc(live_server, page):
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+
+    create_lead(page, "Repeat Customer", "2027-05-01", artist_id="baruch")
+    builder = create_contract_from_lead(page, "standard")
+
+    fee = builder.locator('input[data-contract-field="fee.amount"]')
+    fee.fill("8000"); fee.blur()
+    orig = builder.locator('input[data-contract-field="discount.originalPrice"]')
+    orig.fill("10000"); orig.blur()
+
+    builder.locator('[data-action="view-contract-builder-doc"]').click()
+    doc = page.locator('#contractBuilderPrintHost .doc')
+    doc.wait_for(state='visible')
+    assert doc.locator('s').count() >= 1, "expected a struck-through original price"
+    doc_text = doc.inner_text()
+    assert "repeat customer price" in doc_text
+
+    assert not errors, f"console errors during discount display flow: {errors}"
+
+
+def test_v2_contract_migrates_split_boilerplate_without_data_loss(live_server, page):
+    # Simulates a contract saved before this session's boilerplate split (a single
+    # adsRequireApproval toggle) and before the v3 field additions -- proves the migration
+    # upgrades it in place with no data loss, per CLAUDE.md's additive-migration convention.
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    old_contract = {
+        "id": "CT-9001", "schemaVersion": 2, "leadId": "EV-9999", "template": "standard", "status": "draft",
+        "createdAt": "2026-09-01T00:00:00.000Z", "updatedAt": "2026-09-01T00:00:00.000Z",
+        "snapshot": {"clientName": "Legacy Client", "clientEmail": "legacy@example.com", "eventDate": "2027-01-01", "venue": "Old Venue", "city": "Lakewood", "state": "NJ", "occasion": "Wedding"},
+        "performerArtistId": "eli", "performerLabel": "",
+        "payeeProfileId": "PP-1",
+        "fee": {"amount": 5000, "note": ""},
+        "deposit": {"amount": 0, "percent": 15, "nonRefundable": False},
+        "overtime": {"rate": 0, "interval": "half_hour"},
+        "cancellationPolicy": {"type": "flat_percent", "flatPercent": 80, "tiers": [], "creditWindowMonths": 6},
+        "boilerplate": {"mechitza": True, "noSecularSongs": True, "weatherReturnsDeposit": True, "acceptanceClause": True, "adsRequireApproval": True},
+        "clientProvides": ["Stage"],
+        "lineItems": [], "addOns": [],
+        "customClauses": [{"id": "CC-1", "title": "Old Note", "body": "Some legacy custom clause text."}],
+        "notes": "legacy notes",
+    }
+    page.evaluate("(c) => localStorage.setItem('asp_mock_contracts_v1', JSON.stringify([c]))", old_contract)
+    page.reload()
+    login_as(page, "admin_bookings")
+
+    goto_nav(page, "contract_builder")
+    page.locator("tr", has_text="Legacy Client").click()
+    builder = page.locator('#contractBuilderOverlayHost .sheet')
+    builder.wait_for(state='visible')
+
+    for key in ["runOfShowApproval", "bandSoundLightingApproval", "adsGraphicsApproval", "mediaReleaseApproval"]:
+        assert builder.locator(f'input[data-contract-field="boilerplate.{key}"]').is_checked(), f"{key} should inherit from the old adsRequireApproval=true"
+    assert builder.locator('input[data-contract-field="snapshot.clientName"]').input_value() == "Legacy Client"
+    cc_title = builder.locator('input[data-contract-field^="customclause."][data-contract-field$=".title"]')
+    assert cc_title.count() == 1
+    assert cc_title.first.input_value() == "Old Note"
+
+    assert not errors, f"console errors migrating a v2 contract: {errors}"
+
     assert not errors, f"console errors during reload persistence check: {errors}"

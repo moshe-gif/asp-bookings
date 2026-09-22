@@ -292,8 +292,10 @@ function loadPayeeProfiles(){ try{ const raw = localStorage.getItem(PAYEE_PROFIL
 function savePayeeProfiles(){ try{ localStorage.setItem(PAYEE_PROFILES_LS_KEY, JSON.stringify(PAYEE_PROFILES)); }catch(e){} }
 function blankBoilerplateDefaults(){
   return { mechitza:false, mechitzaWithDancingOnly:false, noSecularSongs:false, noMixedDancing:false, weatherReturnsDeposit:false,
-    postponementCreditsReschedule:false, adsRequireApproval:false, recordingPermission:false, acceptanceClause:false,
-    noRecording:false, ipVideoClause:false, noWaitstaffWalkthrough:false, audienceSeatingClose:false };
+    postponementCreditsReschedule:false, runOfShowApproval:false, bandSoundLightingApproval:false, adsGraphicsApproval:false,
+    mediaReleaseApproval:false, recordingPermission:false, acceptanceClause:false,
+    noRecording:false, ipVideoClause:false, noWaitstaffWalkthrough:false, audienceSeatingClose:false,
+    artistCancelsReturnsDeposit:false, notBindingUntilDeposit:false };
 }
 const BOILERPLATE_TOGGLES = [
   ['mechitza','Mechitza required at all events with dancing'],
@@ -302,47 +304,113 @@ const BOILERPLATE_TOGGLES = [
   ['noMixedDancing','Chassidish DJ — stops music if mixed dancing occurs'],
   ['weatherReturnsDeposit','Weather/travel cancellation returns the deposit'],
   ['postponementCreditsReschedule','Postponement credits deposit toward reschedule'],
-  ['adsRequireApproval','Run of show, band, sound & lighting require Artist approval'],
+  ['runOfShowApproval','Run of show must be approved by the Artist'],
+  ['bandSoundLightingApproval','Band, sound, and lighting must be approved by Artist'],
+  ['adsGraphicsApproval','All ads and graphics must be sent to and approved by Artist'],
+  ['mediaReleaseApproval','Media/posters/flyers/photos with Artist\'s name or photo need Artist approval'],
   ['recordingPermission','Artist grants recording/livestream permission (50% revenue share if released)'],
   ['acceptanceClause','Acceptance clause (deposit payment = acceptance, signature optional)'],
   ['noRecording','No Recording Clause (comedian — prohibits audience recording)'],
   ['ipVideoClause','Short IP clause (no video without consent)'],
   ['noWaitstaffWalkthrough','No staff walkthroughs during the performance'],
   ['audienceSeatingClose','Audience seating must be close to the stage'],
+  ['artistCancelsReturnsDeposit','If the Artist cancels, the deposit is returned in full'],
+  ['notBindingUntilDeposit','This contract is not binding until the deposit is received'],
 ];
 function seedPayeeProfiles(){
   const blArtist = ARTISTS.find(a=>/baruch levine/i.test(a.name||''));
   const emArtist = ARTISTS.find(a=>/eli marcus/i.test(a.name||''));
   const slArtist = ARTISTS.find(a=>/shmili landau/i.test(a.name||''));
+  const mtArtist = ARTISTS.find(a=>/moshe tischler/i.test(a.name||''));
+  const yrArtist = ARTISTS.find(a=>/yaakov rosenblum/i.test(a.name||''));
+  const bfArtist = ARTISTS.find(a=>/benny friedman/i.test(a.name||''));
   return [
     { id:'PP-'+(PPID++), artistId:null, entityName:'ASP Management Services LLC',
       zelle:'billing@aspmgmt.com', checkPayee:'ASP Management Services', checkAddress:'1098 East 21st St, Brooklyn, NY 11210',
-      wireBankName:'Chase Bank', wireAccountName:'ASP Management Services LLC', wireAccountNumber:'2909266806', wireRoutingNumber:'021000021', wireSwift:'', notes:'',
+      wireBankName:'Chase Bank', wireBankAddress:'', wireAccountName:'ASP Management Services LLC', wireAccountNumber:'2909266806', wireRoutingNumber:'021000021', wireSwift:'', notes:'',
       defaultBoilerplate: blankBoilerplateDefaults(), defaultOvertimeInterval:'half_hour' },
     { id:'PP-'+(PPID++), artistId: blArtist ? blArtist.id : null, entityName:'Baruch Levine Music Inc.',
       zelle:'', checkPayee:'Baruch Levine Music Inc.', checkAddress:'',
-      wireBankName:'TD Bank', wireAccountName:'Baruch Levine Music Inc.', wireAccountNumber:'', wireRoutingNumber:'', wireSwift:'',
+      wireBankName:'TD Bank', wireBankAddress:'', wireAccountName:'Baruch Levine Music Inc.', wireAccountNumber:'', wireRoutingNumber:'', wireSwift:'',
       notes:'Client must provide Stage. Media/photo release requires Baruch Levine approval.',
       defaultBoilerplate: { ...blankBoilerplateDefaults(), mechitzaWithDancingOnly:true, noSecularSongs:true, weatherReturnsDeposit:true }, defaultOvertimeInterval:'half_hour' },
     { id:'PP-'+(PPID++), artistId: emArtist ? emArtist.id : null, entityName:'Eli Marcus',
       zelle:'elimarcusmusic@gmail.com', checkPayee:'Eli Marcus', checkAddress:'Brooklyn, NY',
-      wireBankName:'', wireAccountName:'', wireAccountNumber:'', wireRoutingNumber:'', wireSwift:'', notes:'Payment plans: WhatsApp 929-392-6076.',
+      wireBankName:'', wireBankAddress:'', wireAccountName:'', wireAccountNumber:'', wireRoutingNumber:'', wireSwift:'', notes:'Payment plans: WhatsApp 929-392-6076.',
       defaultBoilerplate: { ...blankBoilerplateDefaults(), mechitza:true, noSecularSongs:true, weatherReturnsDeposit:true }, defaultOvertimeInterval:'half_hour' },
     { id:'PP-'+(PPID++), artistId: slArtist ? slArtist.id : null, entityName:'Tantz Vee A Yid LLC',
       zelle:'ShmiliLandauMusic@gmail.com', checkPayee:'Tantz Vee A Yid LLC', checkAddress:'4906 11th Ave, Brooklyn, NY 11219',
-      wireBankName:'Chase Bank', wireAccountName:'Tantz Vee A Yid LLC', wireAccountNumber:'591669059', wireRoutingNumber:'021000021', wireSwift:'',
+      wireBankName:'Chase Bank', wireBankAddress:'', wireAccountName:'Tantz Vee A Yid LLC', wireAccountNumber:'591669059', wireRoutingNumber:'021000021', wireSwift:'',
       notes:'For deposit via check, send a picture of front & back via WhatsApp to 929-392-6076.',
       defaultBoilerplate: { ...blankBoilerplateDefaults(), mechitza:true, noSecularSongs:true, noMixedDancing:true, weatherReturnsDeposit:true }, defaultOvertimeInterval:'15_min' },
     { id:'PP-'+(PPID++), artistId: null, entityName:'Airschnitz Productions LLC',
-      zelle:'', checkPayee:'Airschnitz Productions LLC', checkAddress:'',
-      wireBankName:'Chase Bank', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'', wireRoutingNumber:'021000021', wireSwift:'',
+      zelle:'airschnitzprod@gmail.com', checkPayee:'Airschnitz Productions LLC', checkAddress:'50 Lawrence Ave, Lawrence, NY 11559',
+      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'611993269', wireRoutingNumber:'021000021', wireSwift:'',
       notes:'Shared payee entity used for Benny Friedman, Dovi Neuburger, and similar bookings.',
       defaultBoilerplate: { ...blankBoilerplateDefaults(), weatherReturnsDeposit:true, postponementCreditsReschedule:true }, defaultOvertimeInterval:'half_hour' },
+    { id:'PP-'+(PPID++), artistId: mtArtist ? mtArtist.id : null, entityName:'Moshe Tischler Inc',
+      zelle:'mtischlermusic@gmail.com', checkPayee:'Moshe Tischler Inc', checkAddress:'',
+      wireBankName:'', wireBankAddress:'', wireAccountName:'', wireAccountNumber:'', wireRoutingNumber:'', wireSwift:'',
+      notes:'For deposit via check, send a picture of the front & back via WhatsApp to 929-392-6076.',
+      defaultBoilerplate: { ...blankBoilerplateDefaults(), bandSoundLightingApproval:true, mediaReleaseApproval:true, postponementCreditsReschedule:true, artistCancelsReturnsDeposit:true }, defaultOvertimeInterval:'half_hour' },
+    { id:'PP-'+(PPID++), artistId: yrArtist ? yrArtist.id : null, entityName:'Airschnitz Productions LLC',
+      zelle:'airschnitzprod@gmail.com', checkPayee:'Airschnitz Productions LLC', checkAddress:'50 Lawrence Ave, Lawrence, NY 11559',
+      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'611993269', wireRoutingNumber:'021000021', wireSwift:'', notes:'',
+      defaultBoilerplate: { ...blankBoilerplateDefaults(), mechitza:true, noSecularSongs:true, weatherReturnsDeposit:true }, defaultOvertimeInterval:'half_hour',
+      defaultCancellation: { type:'full_within_days', withinDays:40 } },
+    { id:'PP-'+(PPID++), artistId: bfArtist ? bfArtist.id : null, entityName:'Airschnitz Productions LLC',
+      zelle:'airschnitzprod@gmail.com', checkPayee:'Airschnitz Productions LLC', checkAddress:'50 Lawrence Ave, Lawrence, NY 11559',
+      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'611993269', wireRoutingNumber:'021000021', wireSwift:'', notes:'',
+      defaultBoilerplate: blankBoilerplateDefaults(), defaultOvertimeInterval:'half_hour',
+      defaultTravelClause: { flightsCount:1, flightsClass:'business', hotelRooms:1, hotelNights:1, hotelTier:'standard', food:false, shabbos:false, groundTransport:false } },
   ];
 }
 let PAYEE_PROFILES = loadPayeeProfiles();
 if(!PAYEE_PROFILES){ PAYEE_PROFILES = seedPayeeProfiles(); savePayeeProfiles(); }
 else { PPID = PAYEE_PROFILES.reduce((max,p)=>{ const n=parseInt(String(p.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, PPID); }
+// One-time-per-field backfill for already-stored profiles -- fills in real payment details that
+// were seeded blank before the office-drive audit, and adds the artist profiles that were missing
+// entirely (Moshe Tischler/Yaakov Rosenblum/Benny Friedman). Never overwrites a field someone
+// already filled in or edited themselves -- only touches fields still at their blank/seed default.
+function migratePayeeProfiles(){
+  let migrated = false;
+  const airschnitz = PAYEE_PROFILES.find(p=>!p.artistId && /airschnitz/i.test(p.entityName||''));
+  if(airschnitz){
+    const fill = { zelle:'airschnitzprod@gmail.com', checkPayee:'Airschnitz Productions LLC', checkAddress:'50 Lawrence Ave, Lawrence, NY 11559',
+      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'611993269', wireRoutingNumber:'021000021' };
+    Object.keys(fill).forEach(k=>{ if(!airschnitz[k]){ airschnitz[k] = fill[k]; migrated = true; } });
+  }
+  PAYEE_PROFILES.forEach(p=>{ if(p.wireBankAddress===undefined){ p.wireBankAddress = ''; migrated = true; } });
+  const mtArtist = ARTISTS.find(a=>/moshe tischler/i.test(a.name||''));
+  if(mtArtist && !PAYEE_PROFILES.some(p=>p.artistId===mtArtist.id)){
+    PAYEE_PROFILES.push({ id:'PP-'+(PPID++), artistId: mtArtist.id, entityName:'Moshe Tischler Inc',
+      zelle:'mtischlermusic@gmail.com', checkPayee:'Moshe Tischler Inc', checkAddress:'',
+      wireBankName:'', wireBankAddress:'', wireAccountName:'', wireAccountNumber:'', wireRoutingNumber:'', wireSwift:'',
+      notes:'For deposit via check, send a picture of the front & back via WhatsApp to 929-392-6076.',
+      defaultBoilerplate: { ...blankBoilerplateDefaults(), bandSoundLightingApproval:true, mediaReleaseApproval:true, postponementCreditsReschedule:true, artistCancelsReturnsDeposit:true }, defaultOvertimeInterval:'half_hour' });
+    migrated = true;
+  }
+  const yrArtist = ARTISTS.find(a=>/yaakov rosenblum/i.test(a.name||''));
+  if(yrArtist && !PAYEE_PROFILES.some(p=>p.artistId===yrArtist.id)){
+    PAYEE_PROFILES.push({ id:'PP-'+(PPID++), artistId: yrArtist.id, entityName:'Airschnitz Productions LLC',
+      zelle:'airschnitzprod@gmail.com', checkPayee:'Airschnitz Productions LLC', checkAddress:'50 Lawrence Ave, Lawrence, NY 11559',
+      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'611993269', wireRoutingNumber:'021000021', wireSwift:'', notes:'',
+      defaultBoilerplate: { ...blankBoilerplateDefaults(), mechitza:true, noSecularSongs:true, weatherReturnsDeposit:true }, defaultOvertimeInterval:'half_hour',
+      defaultCancellation: { type:'full_within_days', withinDays:40 } });
+    migrated = true;
+  }
+  const bfArtist = ARTISTS.find(a=>/benny friedman/i.test(a.name||''));
+  if(bfArtist && !PAYEE_PROFILES.some(p=>p.artistId===bfArtist.id)){
+    PAYEE_PROFILES.push({ id:'PP-'+(PPID++), artistId: bfArtist.id, entityName:'Airschnitz Productions LLC',
+      zelle:'airschnitzprod@gmail.com', checkPayee:'Airschnitz Productions LLC', checkAddress:'50 Lawrence Ave, Lawrence, NY 11559',
+      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'611993269', wireRoutingNumber:'021000021', wireSwift:'', notes:'',
+      defaultBoilerplate: blankBoilerplateDefaults(), defaultOvertimeInterval:'half_hour',
+      defaultTravelClause: { flightsCount:1, flightsClass:'business', hotelRooms:1, hotelNights:1, hotelTier:'standard', food:false, shabbos:false, groundTransport:false } });
+    migrated = true;
+  }
+  if(migrated) savePayeeProfiles();
+}
+migratePayeeProfiles();
 function getPayeeProfile(id){ return PAYEE_PROFILES.find(p=>p.id===id); }
 function housePayeeProfile(){ return PAYEE_PROFILES.find(p=>!p.artistId) || PAYEE_PROFILES[0]; }
 function defaultPayeeProfileForArtist(artistId){ return PAYEE_PROFILES.find(p=>p.artistId===artistId) || housePayeeProfile(); }
@@ -352,12 +420,13 @@ const CONTRACT_TEMPLATES = [
   ['standard','Standard Artist Agreement'],
   ['comedian','Comedian Agreement'],
   ['multiline','Multi-Performer / Package Agreement'],
+  ['creative','Creative/Video Production Agreement'],
 ];
 function contractTemplateLabel(t){ const m = CONTRACT_TEMPLATES.find(([k])=>k===t); return m ? m[1] : t; }
 
 /* ---- Contracts (persisted, per-lead, versioned) ---- */
 const CONTRACTS_LS_KEY = 'asp_mock_contracts_v1';
-const CONTRACTS_SCHEMA_VERSION = 2;
+const CONTRACTS_SCHEMA_VERSION = 3;
 let CTID = 1;
 function loadContracts(){ try{ const raw = localStorage.getItem(CONTRACTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
 function saveContracts(){ try{ localStorage.setItem(CONTRACTS_LS_KEY, JSON.stringify(CONTRACTS)); }catch(e){} }
@@ -407,6 +476,36 @@ function migrateContract(c){
   if(!c.snapshot){ c.snapshot = {}; migrated = true; }
   if(c.status===undefined){ c.status = 'draft'; migrated = true; }
   if(c.signedAt===undefined){ c.signedAt = null; migrated = true; }
+  // ---- v3 additions (office-drive audit against real contracts) ----
+  if(c.snapshot.clientPhone===undefined){ c.snapshot.clientPhone = ''; migrated = true; }
+  if(c.snapshot.eventName===undefined){ c.snapshot.eventName = ''; migrated = true; }
+  if(c.hoursOfEngagement===undefined){ c.hoursOfEngagement = '5 hours'; migrated = true; }
+  if(c.balanceDueTiming===undefined){ c.balanceDueTiming = 'prior'; migrated = true; }
+  if(c.artistProvides===undefined){ c.artistProvides = ''; migrated = true; }
+  if(!c.travelClause){ c.travelClause = blankTravelClause(); migrated = true; }
+  if(!c.discount){ c.discount = { originalPrice:0, label:'repeat customer price' }; migrated = true; }
+  if(c.performanceDuration===undefined){ c.performanceDuration = ''; migrated = true; }
+  if(c.performanceType===undefined){ c.performanceType = ''; migrated = true; }
+  if(c.additionalExpenses===undefined){ c.additionalExpenses = 'N/A'; migrated = true; }
+  if(!c.barter){ c.barter = { label:'', description:'' }; migrated = true; }
+  if(!c.creative){ c.creative = { projectName:'', filmingDays:3, revisionRounds:'one consolidated revision round following the first cut' }; migrated = true; }
+  if(c.brand===undefined){ c.brand = 'asp'; migrated = true; }
+  if(c.bsdHeader===undefined){ c.bsdHeader = true; migrated = true; }
+  if(c.cancellationPolicy.withinDays===undefined){ c.cancellationPolicy.withinDays = 40; migrated = true; }
+  if(c.boilerplate.adsRequireApproval!==undefined){
+    if(c.boilerplate.adsRequireApproval){
+      c.boilerplate.runOfShowApproval = true;
+      c.boilerplate.bandSoundLightingApproval = true;
+      c.boilerplate.adsGraphicsApproval = true;
+      c.boilerplate.mediaReleaseApproval = true;
+    }
+    delete c.boilerplate.adsRequireApproval;
+    migrated = true;
+  }
+  (c.lineItems||[]).forEach(li=>{
+    if(li.notes===undefined){ li.notes = ''; migrated = true; }
+    if(!li.travelClause){ li.travelClause = blankTravelClause(); migrated = true; }
+  });
   return migrated;
 }
 let CONTRACTS = loadContracts();
@@ -419,6 +518,11 @@ else {
 }
 function getContract(id){ return CONTRACTS.find(c=>c.id===id); }
 function contractsForLead(leadId){ return CONTRACTS.filter(c=>c.leadId===leadId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)); }
+// Flat shape (not nested sub-objects) so it addresses cleanly through the generic
+// setContractFieldByPath path scheme, both top-level (c.travelClause) and per-line-item.
+function blankTravelClause(){
+  return { flightsCount:0, flightsClass:'economy', hotelRooms:0, hotelNights:0, hotelTier:'standard', food:false, shabbos:false, groundTransport:false };
+}
 function contractStatusLabel(s){ return {draft:'Draft', sent:'Sent', signed:'Signed', void:'Void'}[s] || s; }
 function contractStatusPillClass(s){ return s==='signed' ? 'pill-good' : s==='sent' ? 'pill-accent' : s==='void' ? 'pill-crit' : 'pill-neutral'; }
 
@@ -427,8 +531,33 @@ function contractPerformerName(c){
   if(c.performerArtistId){ const a = artistById(c.performerArtistId); if(a) return a.name; }
   return c.performerLabel || 'the Artist';
 }
-const OVERTIME_INTERVAL_LABELS = { half_hour:'half hour', '15_min':'15 minutes', hour:'hour' };
+const OVERTIME_INTERVAL_LABELS = { half_hour:'half hour', '15_min':'15 minutes', hour:'hour', not_applicable:'N/A' };
 function overtimeIntervalLabel(interval){ return OVERTIME_INTERVAL_LABELS[interval] || 'half hour'; }
+// Standing rule confirmed with Moshe: $6,500 fee -> $650 per half hour, i.e. fee/10.
+function suggestedOvertimeRate(fee){ return Math.round((Number(fee)||0) / 10); }
+// "plus 1 business-class flight, hotel, food, and Shabbos accommodation" -- real-contract phrasing
+// (Chabad of Bondi / Toronto examples), appended after the fee. Returns '' when nothing is set.
+function contractTravelSentence(tc){
+  if(!tc) return '';
+  const parts = [];
+  if(tc.flightsCount>0){
+    const classLabel = tc.flightsClass==='first' ? 'First Class' : tc.flightsClass==='business' ? 'Business Class' : 'Economy Class';
+    parts.push(tc.flightsCount>1 ? `${tc.flightsCount} ${classLabel} flights` : `${classLabel} flight`);
+  }
+  if(tc.hotelRooms>0 || tc.hotelNights>0) parts.push('Hotel');
+  if(tc.food) parts.push('Food');
+  if(tc.shabbos) parts.push('Shabbos accommodation');
+  if(tc.groundTransport) parts.push('ground transportation');
+  if(!parts.length) return '';
+  const joined = parts.length>1 ? parts.slice(0,-1).join(', ') + ' and ' + parts[parts.length-1] : parts[0];
+  return `plus ${joined}`;
+}
+// Struck-through original price + the actual (discounted) fee + label, e.g. for a repeat customer.
+function contractFeeDisplayHtml(c, figures){
+  const d = c.discount || {};
+  if(!d.originalPrice || d.originalPrice<=figures.total) return money(figures.total);
+  return `<s style="opacity:.55;">${money(d.originalPrice)}</s> ${money(figures.total)}${d.label?` (${esc(d.label)})`:''}`;
+}
 // fee.amount is the single source of truth on standard/comedian; on multiline it is kept in sync
 // with lineItems+addOns by the CRUD actions below but remains a normal editable field, matching
 // how the real package contracts (Stein, Greenwald) state one explicit total.
@@ -458,6 +587,12 @@ function contractCancellationText(c){
   if(p.type==='credit_future'){
     return `Cancellation Clause: If the Client cancels, the Client agrees to pay 80% of the contracted amount, which will be credited toward a future event within ${p.creditWindowMonths||6}-${(p.creditWindowMonths||6)+2} months.`;
   }
+  if(p.type==='credit_reschedule'){
+    return 'In the event of cancellation or postponement, the Artist will use the deposit towards the rescheduled date (pending availability).';
+  }
+  if(p.type==='full_within_days'){
+    return `Should the Artist be canceled within ${p.withinDays||40} days prior to the event, full payment is required.`;
+  }
   if(p.type==='tiered'){
     const lines = (p.tiers||[]).map(t=>`If the Client cancels within ${t.withinDays} days of the event date, the Client agrees to pay ${t.percent}% of the total contracted amount, inclusive of any deposit already paid.`);
     return `In the event of cancellation by the Client, the following terms shall apply: ${lines.join(' ')} All cancellations must be submitted in writing and are not effective until acknowledged in writing. Amounts owed are due within fourteen days of the cancellation notice.`;
@@ -473,14 +608,30 @@ function contractBoilerplateLines(c){
   if(b.noMixedDancing) lines.push(`As a Chassidish DJ, ${who} does not perform at events with mixed dancing. If mixed dancing occurs, the music will stop immediately.`);
   if(b.weatherReturnsDeposit) lines.push('If the event is cancelled due to weather or travel issues, the Artist agrees to return the deposit.');
   if(b.postponementCreditsReschedule) lines.push('If the event is postponed, the deposit will be credited toward a mutually agreed rescheduled date.');
-  if(b.adsRequireApproval) lines.push('The run of show, band, sound, and lighting must be approved by Artist prior to the event.');
+  if(b.runOfShowApproval) lines.push('The run of show must be approved by the Artist prior to the event.');
+  if(b.bandSoundLightingApproval) lines.push('Band, sound, and lighting must be approved by Artist.');
+  if(b.adsGraphicsApproval) lines.push('All ads and graphics must be sent to and approved by Artist.');
+  if(b.mediaReleaseApproval) lines.push('Any media, posters, flyers, photos etc. with the Artist\'s name and/or photo may only be released with approval from the Artist.');
   if(b.recordingPermission) lines.push('The Artist grants the organizers of the event full permission to record and/or livestream the performance. The Artist retains full and sole discretion over release of any such recording, and, if released, is entitled to fifty percent (50%) of any revenue generated.');
   if(b.noWaitstaffWalkthrough) lines.push('There shall be no staff walkthroughs or crossing in front of the stage during the performance.');
   if(b.audienceSeatingClose) lines.push('Audience seating must be arranged close to the stage for the performance.');
+  if(b.artistCancelsReturnsDeposit) lines.push('In the event of cancellation on behalf of the Artist, the deposit will be returned in full.');
+  if(b.notBindingUntilDeposit) lines.push('This contract is not binding until the deposit is received.');
   return lines;
 }
 function contractAcceptanceText(c){
   return `Acceptance. Payment of the deposit constitutes the Client's acceptance of this agreement and of all terms set forth herein, with the same effect as a signature. The date is not held until the deposit is received.`;
+}
+function contractBalanceDueText(c, figures){
+  const timing = c.balanceDueTiming==='at_event' ? 'at the event' : c.balanceDueTiming==='on_completion' ? 'when the project is complete' : 'prior to the engagement';
+  return `The remaining balance of ${money(figures.balance)} shall be paid ${timing}.`;
+}
+function contractClientContactLine(c){
+  const parts = [];
+  if(c.snapshot.clientName) parts.push(c.snapshot.clientName);
+  if(c.snapshot.clientEmail) parts.push(c.snapshot.clientEmail);
+  if(c.snapshot.clientPhone) parts.push(c.snapshot.clientPhone);
+  return parts.length>1 ? `Client contact: ${parts.join(' - ')}` : '';
 }
 function contractIpClauseText(){
   return 'Videos of the performance may not be taken and/or disseminated in any way without the express consent of the performer.';
@@ -490,31 +641,56 @@ function contractNoRecordingText(){
 }
 
 /* ---- Contract CRUD (direct-mutate + autosave, same convention as project board cards/tasks) ---- */
+function defaultArtistProvides(template, performerName, role, hours){
+  if(template==='comedian') return `Live comedy show by ${performerName}`;
+  return `Vocal performance for up to ${hours}`;
+}
+function airschnitzPayeeProfile(){ return PAYEE_PROFILES.find(p=>/airschnitz/i.test(p.entityName||'')) || housePayeeProfile(); }
 function doCreateContractFromLead(eventId, template){
   const ev = getEvent(eventId); if(!ev) return;
   const now = new Date().toISOString();
   const performerArtistId = ev.artistId || null;
-  const payeeProfile = performerArtistId ? defaultPayeeProfileForArtist(performerArtistId) : housePayeeProfile();
+  const performerArtist = performerArtistId ? artistById(performerArtistId) : null;
+  const payeeProfile = template==='creative' ? airschnitzPayeeProfile()
+    : performerArtistId ? defaultPayeeProfileForArtist(performerArtistId) : housePayeeProfile();
+  const hours = '5 hours';
   const contract = {
     id:'CT-'+(CTID++), schemaVersion: CONTRACTS_SCHEMA_VERSION, leadId: ev.id, template: template||'standard', status:'draft',
     createdAt: now, updatedAt: now,
-    snapshot: { clientName: ev.clientName||'', clientEmail: ev.clientEmail||'', eventDate: ev.date||'', venue: ev.venue||'', city: ev.city||'', state: ev.state||'', occasion: ev.type||'' },
+    snapshot: { clientName: ev.clientName||'', clientEmail: ev.clientEmail||'', clientPhone: ev.clientPhone||'', eventName:'', eventDate: ev.date||'', venue: ev.venue||'', city: ev.city||'', state: ev.state||'', occasion: ev.type||'' },
     performerArtistId, performerLabel:'',
     payeeProfileId: payeeProfile ? payeeProfile.id : null,
     fee: { amount: ev.price||0, note:'' },
     deposit: { amount:0, percent:15, nonRefundable:false },
     overtime: { rate:0, interval: payeeProfile ? payeeProfile.defaultOvertimeInterval : 'half_hour' },
-    cancellationPolicy: { type:'flat_percent', flatPercent:80, tiers:[], creditWindowMonths:6 },
-    boilerplate: payeeProfile ? { ...payeeProfile.defaultBoilerplate } : blankBoilerplateDefaults(),
+    cancellationPolicy: { type:'flat_percent', flatPercent:80, tiers:[], creditWindowMonths:6, withinDays:40, ...(payeeProfile&&payeeProfile.defaultCancellation||{}) },
+    boilerplate: payeeProfile ? { ...payeeProfile.defaultBoilerplate, notBindingUntilDeposit:true } : { ...blankBoilerplateDefaults(), notBindingUntilDeposit:true },
     clientProvides: [],
     lineItems: [], addOns: [],
     customClauses: [],
     notes: '',
+    hoursOfEngagement: hours,
+    balanceDueTiming: 'prior',
+    artistProvides: defaultArtistProvides(template, performerArtist?performerArtist.name:'the Artist', performerArtist?performerArtist.role:'Singer', hours),
+    travelClause: payeeProfile && payeeProfile.defaultTravelClause ? { ...payeeProfile.defaultTravelClause } : blankTravelClause(),
+    discount: { originalPrice:0, label:'repeat customer price' },
+    performanceDuration: '',
+    performanceType: template==='comedian' ? `Live comedy show by ${performerArtist?performerArtist.name:'the Artist'}` : '',
+    additionalExpenses: 'N/A',
+    barter: { label:'', description:'' },
+    creative: { projectName:'', filmingDays:3, revisionRounds:'one consolidated revision round following the first cut' },
+    brand: 'asp',
+    bsdHeader: true,
   };
   if(template==='comedian'){
     contract.boilerplate.acceptanceClause = true;
     contract.boilerplate.noRecording = true;
-    contract.cancellationPolicy = { type:'credit_future', flatPercent:80, tiers:[], creditWindowMonths:6 };
+    contract.cancellationPolicy = { type:'credit_future', flatPercent:80, tiers:[], creditWindowMonths:6, withinDays:40 };
+  } else if(template==='creative'){
+    contract.boilerplate = { notBindingUntilDeposit:true };
+    contract.balanceDueTiming = 'on_completion';
+    contract.deposit = { amount:0, percent:0, nonRefundable:false };
+    contract.cancellationPolicy = { type:'credit_reschedule', flatPercent:80, tiers:[], creditWindowMonths:6, withinDays:40 };
   } else {
     contract.boilerplate.acceptanceClause = true;
   }
@@ -522,7 +698,7 @@ function doCreateContractFromLead(eventId, template){
     contract.deposit = { amount:0, percent:0, nonRefundable:false };
     contract.cancellationPolicy = { type:'tiered', flatPercent:80, tiers:[
       { id:'TR-1', withinDays:60, percent:0 }, { id:'TR-2', withinDays:30, percent:80 }, { id:'TR-3', withinDays:0, percent:100 },
-    ], creditWindowMonths:0 };
+    ], creditWindowMonths:0, withinDays:40 };
   }
   CONTRACTS.unshift(contract); saveContracts();
   S.showContractBuilder = true; S.contractBuilderId = contract.id;
@@ -531,7 +707,7 @@ function doCreateContractFromLead(eventId, template){
 function doRefreshContractFromLead(id){
   const c = getContract(id); if(!c) return;
   const ev = getEvent(c.leadId); if(!ev){ toast('The original lead no longer exists.', 'system'); return; }
-  c.snapshot = { clientName: ev.clientName||'', clientEmail: ev.clientEmail||'', eventDate: ev.date||'', venue: ev.venue||'', city: ev.city||'', state: ev.state||'', occasion: c.snapshot.occasion || ev.type||'' };
+  c.snapshot = { clientName: ev.clientName||'', clientEmail: ev.clientEmail||'', clientPhone: ev.clientPhone||'', eventName: c.snapshot.eventName||'', eventDate: ev.date||'', venue: ev.venue||'', city: ev.city||'', state: ev.state||'', occasion: c.snapshot.occasion || ev.type||'' };
   if(c.template!=='multiline') c.fee.amount = ev.price||0;
   c.updatedAt = new Date().toISOString();
   saveContracts();
@@ -549,17 +725,22 @@ function doDeleteContract(id){
 function doSetContractPerformer(contractId, artistId){
   const c = getContract(contractId); if(!c) return;
   c.performerArtistId = artistId || null;
+  const artist = artistId ? artistById(artistId) : null;
   const profile = artistId ? defaultPayeeProfileForArtist(artistId) : housePayeeProfile();
   if(profile){
     c.payeeProfileId = profile.id;
     c.boilerplate = { ...c.boilerplate, ...profile.defaultBoilerplate };
     c.overtime.interval = profile.defaultOvertimeInterval;
+    if(profile.defaultTravelClause) c.travelClause = { ...profile.defaultTravelClause };
+    if(profile.defaultCancellation) c.cancellationPolicy = { ...c.cancellationPolicy, ...profile.defaultCancellation };
   }
+  c.artistProvides = defaultArtistProvides(c.template, artist?artist.name:'the Artist', artist?artist.role:'Singer', c.hoursOfEngagement||'5 hours');
+  if(c.template==='comedian') c.performanceType = `Live comedy show by ${artist?artist.name:'the Artist'}`;
   c.updatedAt = new Date().toISOString(); saveContracts(); render();
 }
 function doAddLineItem(contractId){
   const c = getContract(contractId); if(!c) return;
-  c.lineItems.push({ id:'LI-'+Math.random().toString(36).slice(2,7), label:'', performerArtistId:null, fee:0, date:'', overtimeRate:'' });
+  c.lineItems.push({ id:'LI-'+Math.random().toString(36).slice(2,7), label:'', performerArtistId:null, fee:0, date:'', overtimeRate:'', notes:'', travelClause: blankTravelClause() });
   c.updatedAt = new Date().toISOString(); saveContracts(); render();
 }
 function doRemoveLineItem(contractId, liId){
@@ -616,17 +797,26 @@ function setContractFieldByPath(c, path, value){
   const parts = path.split('.');
   const kind = parts[0];
   if(kind==='snapshot') c.snapshot[parts[1]] = value;
-  else if(kind==='fee') c.fee[parts[1]] = value;
+  else if(kind==='fee'){
+    c.fee[parts[1]] = value;
+    if(parts[1]==='amount' && !Number(c.overtime.rate) && c.overtime.interval!=='not_applicable') c.overtime.rate = suggestedOvertimeRate(value);
+  }
   else if(kind==='deposit') c.deposit[parts[1]] = value;
   else if(kind==='overtime') c.overtime[parts[1]] = value;
   else if(kind==='cancellation') c.cancellationPolicy[parts[1]] = value;
   else if(kind==='tier'){ const t=c.cancellationPolicy.tiers.find(x=>x.id===parts[1]); if(t) t[parts[2]] = value; }
   else if(kind==='boilerplate') c.boilerplate[parts[1]] = value;
-  else if(kind==='lineitem'){ const li=c.lineItems.find(x=>x.id===parts[1]); if(li){ li[parts[2]] = value; c.fee.amount = contractLineItemsTotal(c); } }
-  else if(kind==='addon'){ const a=c.addOns.find(x=>x.id===parts[1]); if(a){ a[parts[2]] = value; c.fee.amount = contractLineItemsTotal(c); } }
+  else if(kind==='lineitem'){ const li=c.lineItems.find(x=>x.id===parts[1]); if(li){ li[parts[2]] = value; c.fee.amount = contractLineItemsTotal(c); if(!Number(c.overtime.rate) && c.overtime.interval!=='not_applicable') c.overtime.rate = suggestedOvertimeRate(c.fee.amount); } }
+  else if(kind==='addon'){ const a=c.addOns.find(x=>x.id===parts[1]); if(a){ a[parts[2]] = value; c.fee.amount = contractLineItemsTotal(c); if(!Number(c.overtime.rate) && c.overtime.interval!=='not_applicable') c.overtime.rate = suggestedOvertimeRate(c.fee.amount); } }
   else if(kind==='customclause'){ const cc=c.customClauses.find(x=>x.id===parts[1]); if(cc) cc[parts[2]] = value; }
   else if(kind==='performerLabel') c.performerLabel = value;
   else if(kind==='notes') c.notes = value;
+  else if(kind==='travel') c.travelClause[parts[1]] = value;
+  else if(kind==='lineitemtravel'){ const li=c.lineItems.find(x=>x.id===parts[1]); if(li) li.travelClause[parts[2]] = value; }
+  else if(kind==='barter') c.barter[parts[1]] = value;
+  else if(kind==='discount') c.discount[parts[1]] = value;
+  else if(kind==='creative') c.creative[parts[1]] = value;
+  else if(kind==='top') c[parts[1]] = value;
 }
 // Re-render while preserving focus/caret on the field the user is actively typing in -- used for
 // fields that must recompute something live (fee/deposit/balance figures); every other
@@ -13632,6 +13822,7 @@ function renderSendContractConfirmModal(){
 
 function renderContractBuilderModal(){
   const c = getContract(S.contractBuilderId); if(!c) return '';
+  const isCreative = c.template==='creative';
   return `<div class="overlay" data-action="contractbuilder-overlay-close">
     <div class="sheet" data-stop style="width:780px;">
       <div class="sheet-head">
@@ -13654,26 +13845,36 @@ function renderContractBuilderModal(){
           <button class="btn btn-sm btn-ghost" style="flex:none;" data-action="contract-refresh-from-lead" data-id="${c.id}">Refresh from Lead</button>
         </div>
         <div class="field-row">
-          <div class="field"><label>Client Name</label><input data-contract-field="snapshot.clientName" value="${esc(c.snapshot.clientName||'')}"/></div>
+          <div class="field"><label>${isCreative?'Client / Organization':'Client Name'}</label><input data-contract-field="snapshot.clientName" value="${esc(c.snapshot.clientName||'')}"/></div>
           <div class="field"><label>Client Email</label><input data-contract-field="snapshot.clientEmail" value="${esc(c.snapshot.clientEmail||'')}"/></div>
         </div>
         <div class="field-row">
+          <div class="field"><label>Client Phone</label><input data-contract-field="snapshot.clientPhone" value="${esc(c.snapshot.clientPhone||'')}"/></div>
           <div class="field"><label>Event Date</label><input type="date" data-contract-field="snapshot.eventDate" value="${c.snapshot.eventDate||''}"/></div>
+        </div>
+        ${isCreative? `<div class="field"><label>Project Name</label><input data-contract-field="creative.projectName" value="${esc(c.creative.projectName||'')}" placeholder="e.g. SAR Academy Dinner Video"/></div>
+        <div class="field"><label>Event Name</label><input data-contract-field="snapshot.eventName" value="${esc(c.snapshot.eventName||'')}" placeholder="e.g. SAR Academy Annual Dinner"/></div>` : ''}
+        <div class="field-row">
           <div class="field"><label>Venue</label><input data-contract-field="snapshot.venue" value="${esc(c.snapshot.venue||'')}"/></div>
+          <div class="field"><label>City</label><input data-contract-field="snapshot.city" value="${esc(c.snapshot.city||'')}"/></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>City</label><input data-contract-field="snapshot.city" value="${esc(c.snapshot.city||'')}"/></div>
           <div class="field"><label>State</label><input data-contract-field="snapshot.state" value="${esc(c.snapshot.state||'')}"/></div>
+          ${!isCreative? `<div class="field"><label>Occasion</label><input data-contract-field="snapshot.occasion" value="${esc(c.snapshot.occasion||'')}" placeholder="e.g. Wedding, Purim Party, Bar Mitzvah"/></div>` : ''}
         </div>
-        <div class="field"><label>Occasion</label><input data-contract-field="snapshot.occasion" value="${esc(c.snapshot.occasion||'')}" placeholder="e.g. Wedding, Purim Party, Bar Mitzvah"/></div>
+        ${!isCreative? `<div class="field"><label>Hours of Engagement</label><input data-contract-field="top.hoursOfEngagement" value="${esc(c.hoursOfEngagement||'')}" placeholder="e.g. 5 hours"/></div>` : ''}
 
-        ${renderContractPerformerSection(c)}
+        ${isCreative? renderCreativeFieldsSection(c) : renderContractPerformerSection(c)}
         ${c.template==='multiline' ? renderContractLineItemsSection(c) : ''}
         ${renderContractFeeSection(c)}
-        ${renderContractCancellationSection(c)}
-        ${renderContractBoilerplateSection(c)}
-        ${renderContractClientProvidesSection(c)}
+        ${!isCreative? renderTravelClauseSection(c) : ''}
+        ${c.template==='comedian' ? renderComedianFieldsSection(c) : ''}
+        ${!isCreative? renderContractCancellationSection(c) : ''}
+        ${!isCreative? renderContractBoilerplateSection(c) : renderCreativeBoilerplateSection(c)}
+        ${!isCreative? renderContractProvidesSection(c) : ''}
+        ${c.template==='multiline' ? renderBarterSection(c) : ''}
         ${renderContractCustomClausesSection(c)}
+        ${renderContractDocSettingsSection(c)}
         <div class="field"><label>Internal Notes (not printed)</label><textarea data-contract-field="notes" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(c.notes||'')}</textarea></div>
 
         <button class="btn btn-primary btn-block" data-action="close-contract-builder">Done</button>
@@ -13692,15 +13893,65 @@ function renderContractPerformerSection(c){
       </select>
     </div>
     ${!c.performerArtistId ? `<div class="field"><label>Performer Label</label><input data-contract-field="performerLabel" value="${esc(c.performerLabel||'')}" placeholder="e.g. Eli Marcus with OMb and sound"/></div>` : ''}
-    <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Payee: <strong>${esc(profile? profile.entityName : '—')}</strong> &middot; picking a performer autofills their contracting entity, boilerplate, and overtime interval below (still fully editable).</p>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Payee: <strong>${esc(profile? profile.entityName : '—')}</strong> &middot; picking a performer autofills their contracting entity, boilerplate, overtime interval, and travel defaults below (still fully editable).</p>
+  </div>`;
+}
+function renderCreativeFieldsSection(c){
+  return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
+    <h3 style="font-size:13.5px;margin:0;">Project Details</h3>
+    <div class="field-row">
+      <div class="field" style="width:160px;"><label>On-Site Filming Days</label><input type="number" min="0" data-contract-field="creative.filmingDays" value="${c.creative.filmingDays!==undefined?c.creative.filmingDays:3}"/></div>
+      <div class="field"><label>Revision Rounds</label><input data-contract-field="creative.revisionRounds" value="${esc(c.creative.revisionRounds||'')}"/></div>
+    </div>
+    <p style="font-size:11px;color:var(--ink-3);margin:0;">Standing clauses always included: "Once the Client considers the project complete, no further revisions, additions, or changes will be made."</p>
+  </div>`;
+}
+function renderCreativeBoilerplateSection(c){
+  return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:8px;">
+    <h3 style="font-size:13.5px;margin:0;">Terms</h3>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-contract-field="boilerplate.notBindingUntilDeposit" ${c.boilerplate.notBindingUntilDeposit?'checked':''}/> This agreement is not binding until the deposit is received</label>
+  </div>`;
+}
+function renderComedianFieldsSection(c){
+  return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
+    <h3 style="font-size:13.5px;margin:0;">Comedian Details</h3>
+    <div class="field-row">
+      <div class="field"><label>Performance Duration</label><input data-contract-field="top.performanceDuration" value="${esc(c.performanceDuration||'')}" placeholder="e.g. 45 min - 1 hour"/></div>
+      <div class="field"><label>Additional Expenses</label><input data-contract-field="top.additionalExpenses" value="${esc(c.additionalExpenses||'')}" placeholder="N/A"/></div>
+    </div>
+    <div class="field"><label>Performance Type</label><input data-contract-field="top.performanceType" value="${esc(c.performanceType||'')}" placeholder="e.g. Live comedy show by Dovi Neuburger"/></div>
+  </div>`;
+}
+function renderTravelClauseSection(c){
+  const tc = c.travelClause;
+  const sentence = contractTravelSentence(tc);
+  return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
+    <h3 style="font-size:13.5px;margin:0;">Travel (Optional)</h3>
+    <div class="field-row">
+      <div class="field" style="width:100px;"><label>Flights</label><input type="number" min="0" data-contract-field="travel.flightsCount" data-focus-key="travel.flightsCount" data-live value="${tc.flightsCount||0}"/></div>
+      <div class="field"><label>Class</label>
+        <div class="chip-row">${['economy','business','first'].map(cl=>`<button class="filter-chip ${tc.flightsClass===cl?'sel':''}" data-action="pick-travel-flight-class" data-value="${cl}">${cl.charAt(0).toUpperCase()+cl.slice(1)}</button>`).join('')}</div>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field" style="width:120px;"><label>Hotel Rooms</label><input type="number" min="0" data-contract-field="travel.hotelRooms" data-focus-key="travel.hotelRooms" data-live value="${tc.hotelRooms||0}"/></div>
+      <div class="field" style="width:100px;"><label>Nights</label><input type="number" min="0" data-contract-field="travel.hotelNights" data-focus-key="travel.hotelNights" data-live value="${tc.hotelNights||0}"/></div>
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;"><input type="checkbox" data-contract-field="travel.food" data-live ${tc.food?'checked':''}/> Food</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;"><input type="checkbox" data-contract-field="travel.shabbos" data-live ${tc.shabbos?'checked':''}/> Shabbos accommodation</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;"><input type="checkbox" data-contract-field="travel.groundTransport" data-live ${tc.groundTransport?'checked':''}/> Ground transportation</label>
+    </div>
+    ${sentence? `<p style="font-size:11px;color:var(--ink-3);margin:0;">Adds to fee: "${esc(sentence)}"</p>` : ''}
   </div>`;
 }
 function renderContractFeeSection(c){
   const figures = contractPaymentFigures(c);
+  const isCreative = c.template==='creative';
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
-    <h3 style="font-size:13.5px;margin:0;">Fee, Deposit &amp; Overtime</h3>
+    <h3 style="font-size:13.5px;margin:0;">Fee, Deposit${isCreative?'':' &amp; Overtime'}</h3>
     <div class="field-row">
-      <div class="field"><label>Total Fee ($)</label><input type="number" data-contract-field="fee.amount" data-focus-key="fee.amount" data-live value="${c.fee.amount||0}" ${c.template==='multiline'?'readonly title="Auto-summed from line items + add-ons below"':''}/></div>
+      <div class="field"><label>${isCreative?'Creative Fee ($)':'Total Fee ($)'}</label><input type="number" data-contract-field="fee.amount" data-focus-key="fee.amount" data-live value="${c.fee.amount||0}" ${c.template==='multiline'?'readonly title="Auto-summed from line items + add-ons below"':''}/></div>
       <div class="field"><label>Fee Note (optional)</label><input data-contract-field="fee.note" value="${esc(c.fee.note||'')}" placeholder="e.g. including Travel Expenses, cash only"/></div>
     </div>
     <div class="field-row">
@@ -13708,14 +13959,25 @@ function renderContractFeeSection(c){
       <div class="field"><label>Deposit (% of total, optional)</label><input type="number" data-contract-field="deposit.percent" data-focus-key="deposit.percent" data-live value="${c.deposit.percent||0}" placeholder="0 = use $ amount"/></div>
     </div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-contract-field="deposit.nonRefundable" ${c.deposit.nonRefundable?'checked':''}/> Deposit is non-refundable</label>
-    <div class="field-row">
-      <div class="field"><label>Overtime Rate ($)</label><input type="number" data-contract-field="overtime.rate" value="${c.overtime.rate||0}"/></div>
-      <div class="field"><label>Per</label>
-        <div class="chip-row">
-          ${['half_hour','15_min','hour'].map(iv=>`<button class="filter-chip ${c.overtime.interval===iv?'sel':''}" data-action="pick-contract-overtime-interval" data-value="${iv}">${overtimeIntervalLabel(iv)}</button>`).join('')}
-        </div>
+    <div class="field"><label>Balance Due</label>
+      <div class="chip-row">
+        <button class="filter-chip ${c.balanceDueTiming==='prior'?'sel':''}" data-action="pick-balance-due-timing" data-value="prior">Prior to the engagement</button>
+        <button class="filter-chip ${c.balanceDueTiming==='at_event'?'sel':''}" data-action="pick-balance-due-timing" data-value="at_event">At the event</button>
+        <button class="filter-chip ${c.balanceDueTiming==='on_completion'?'sel':''}" data-action="pick-balance-due-timing" data-value="on_completion">When the project is complete</button>
       </div>
     </div>
+    <div class="field-row">
+      <div class="field"><label>Regular Price (optional)</label><input type="number" data-contract-field="discount.originalPrice" value="${c.discount.originalPrice||''}" placeholder="0 = no discount shown"/></div>
+      <div class="field"><label>Discount Label</label><input data-contract-field="discount.label" value="${esc(c.discount.label||'')}" placeholder="e.g. repeat customer price"/></div>
+    </div>
+    ${!isCreative? `<div class="field-row">
+      <div class="field"><label>Overtime Rate ($)</label><input type="number" data-contract-field="overtime.rate" value="${c.overtime.rate||0}" ${c.overtime.interval==='not_applicable'?'disabled':''}/></div>
+      <div class="field"><label>Per</label>
+        <div class="chip-row">
+          ${['half_hour','15_min','hour','not_applicable'].map(iv=>`<button class="filter-chip ${c.overtime.interval===iv?'sel':''}" data-action="pick-contract-overtime-interval" data-value="${iv}">${iv==='not_applicable'?'Not applicable':overtimeIntervalLabel(iv)}</button>`).join('')}
+        </div>
+      </div>
+    </div>` : ''}
     <div class="ledger" style="margin-top:4px;">
       <div class="ledger-row"><span>Total</span><span class="amt">${money(figures.total)}</span></div>
       <div class="ledger-row"><span>Deposit${c.deposit.percent?` (${c.deposit.percent}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
@@ -13731,9 +13993,12 @@ function renderContractCancellationSection(c){
       <button class="filter-chip ${p.type==='flat_percent'?'sel':''}" data-action="pick-cancellation-type" data-value="flat_percent">Flat %</button>
       <button class="filter-chip ${p.type==='tiered'?'sel':''}" data-action="pick-cancellation-type" data-value="tiered">Tiered</button>
       <button class="filter-chip ${p.type==='credit_future'?'sel':''}" data-action="pick-cancellation-type" data-value="credit_future">Credit Toward Future Event</button>
+      <button class="filter-chip ${p.type==='credit_reschedule'?'sel':''}" data-action="pick-cancellation-type" data-value="credit_reschedule">Credit Toward Reschedule</button>
+      <button class="filter-chip ${p.type==='full_within_days'?'sel':''}" data-action="pick-cancellation-type" data-value="full_within_days">Full Payment Within N Days</button>
     </div>
     ${p.type==='flat_percent'? `<div class="field" style="max-width:160px;"><label>Percent Owed</label><input type="number" data-contract-field="cancellation.flatPercent" value="${p.flatPercent||80}"/></div>` : ''}
     ${p.type==='credit_future'? `<div class="field" style="max-width:200px;"><label>Credit Window (months)</label><input type="number" data-contract-field="cancellation.creditWindowMonths" value="${p.creditWindowMonths||6}"/></div>` : ''}
+    ${p.type==='full_within_days'? `<div class="field" style="max-width:160px;"><label>Within (days)</label><input type="number" data-contract-field="cancellation.withinDays" value="${p.withinDays||40}"/></div>` : ''}
     ${p.type==='tiered'? `<div style="display:flex;flex-direction:column;gap:6px;">
       ${p.tiers.map(t=>`<div style="display:flex;gap:8px;align-items:center;">
         <span style="font-size:12px;color:var(--ink-3);">Within</span>
@@ -13757,11 +14022,29 @@ function renderContractBoilerplateSection(c){
   </div>`;
 }
 const CLIENT_PROVIDES_SUGGESTIONS = ['Stage','Sound & Lighting per Artist specs','AV/Backline per Artist specs','Wired Microphone & Spotlight','Green Room','Appropriate Venue & Sound System'];
-function renderContractClientProvidesSection(c){
+function renderContractProvidesSection(c){
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
-    <h3 style="font-size:13.5px;margin:0;">Client Provides</h3>
+    <h3 style="font-size:13.5px;margin:0;">Artist Shall Provide</h3>
+    <input data-contract-field="top.artistProvides" value="${esc(c.artistProvides||'')}" placeholder="e.g. Vocal performance for up to 5 hours"/>
+    <h3 style="font-size:13.5px;margin:10px 0 0;">Client Shall Provide</h3>
     <div class="chip-row">${CLIENT_PROVIDES_SUGGESTIONS.map(s=>`<button class="filter-chip" data-action="add-client-provides" data-id="${c.id}" data-label="${esc(s)}">${ICO.plus} ${esc(s)}</button>`).join('')}</div>
     ${c.clientProvides.length? `<div class="chip-row">${c.clientProvides.map((label,idx)=>`<span class="filter-chip sel" style="display:flex;align-items:center;gap:6px;">${esc(label)} <button data-action="remove-client-provides" data-id="${c.id}" data-idx="${idx}" style="background:none;border:none;cursor:pointer;color:inherit;">${ICO.x}</button></span>`).join('')}</div>` : `<p style="font-size:12px;color:var(--ink-3);margin:0;">None yet.</p>`}
+  </div>`;
+}
+function renderBarterSection(c){
+  const b = c.barter;
+  return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
+    <h3 style="font-size:13.5px;margin:0;">Non-Cash / Barter Compensation (Optional)</h3>
+    <p style="font-size:11px;color:var(--ink-3);margin:0;">Excluded from the payment total above — e.g. a performer compensated via hotel rooms in lieu of a fee.</p>
+    <div class="field"><label>Label</label><input data-contract-field="barter.label" value="${esc(b.label||'')}" placeholder="e.g. 2 hotel rooms for 5 people"/></div>
+    <div class="field"><label>Description</label><textarea data-contract-field="barter.description" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(b.description||'')}</textarea></div>
+  </div>`;
+}
+function renderContractDocSettingsSection(c){
+  return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
+    <h3 style="font-size:13.5px;margin:0;">Letterhead</h3>
+    <div class="chip-row">${Object.keys(DOC_BRANDS).map(k=>`<button class="filter-chip ${c.brand===k?'sel':''}" data-action="pick-contract-brand" data-value="${k}">${esc(DOC_BRANDS[k].label)}</button>`).join('')}</div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-contract-field="top.bsdHeader" ${c.bsdHeader?'checked':''}/> Show "BS"D" header</label>
   </div>`;
 }
 function renderContractLineItemsSection(c){
@@ -13770,13 +14053,35 @@ function renderContractLineItemsSection(c){
       <h3 style="font-size:13.5px;margin:0;">Line Items (Performers)</h3>
       <button class="btn btn-sm" data-action="add-line-item" data-id="${c.id}">${ICO.plus} Add Line Item</button>
     </div>
-    ${c.lineItems.map(li=>`<div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
-      <div class="field"><label>Label</label><input data-contract-field="lineitem.${li.id}.label" data-focus-key="lineitem.${li.id}.label" value="${esc(li.label||'')}" placeholder="e.g. Eli Marcus - 5hr from performance start"/></div>
-      <div class="field" style="width:130px;"><label>Fee ($)</label><input type="number" data-contract-field="lineitem.${li.id}.fee" data-focus-key="lineitem.${li.id}.fee" data-live value="${li.fee||0}"/></div>
-      <div class="field" style="width:170px;"><label>Overtime Rate</label><input data-contract-field="lineitem.${li.id}.overtimeRate" value="${esc(li.overtimeRate||'')}" placeholder="e.g. $150/musician/half hr"/></div>
-      <div class="field" style="width:150px;"><label>Date (optional)</label><input type="date" data-contract-field="lineitem.${li.id}.date" value="${li.date||''}"/></div>
-      <button class="icon-btn" data-action="remove-line-item" data-id="${li.id}" title="Remove" style="flex:none;">${ICO.trash}</button>
-    </div>`).join('')}
+    ${c.lineItems.map(li=>{ const tc = li.travelClause||blankTravelClause(); const sentence = contractTravelSentence(tc); return `<div style="display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--surface-2);border-radius:8px;">
+      <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
+        <div class="field"><label>Label</label><input data-contract-field="lineitem.${li.id}.label" data-focus-key="lineitem.${li.id}.label" value="${esc(li.label||'')}" placeholder="e.g. Eli Marcus - 5hr from performance start"/></div>
+        <div class="field" style="width:130px;"><label>Fee ($)</label><input type="number" data-contract-field="lineitem.${li.id}.fee" data-focus-key="lineitem.${li.id}.fee" data-live value="${li.fee||0}"/></div>
+        <div class="field" style="width:170px;"><label>Overtime Rate</label><input data-contract-field="lineitem.${li.id}.overtimeRate" value="${esc(li.overtimeRate||'')}" placeholder="e.g. $150/musician/half hr"/></div>
+        <div class="field" style="width:150px;"><label>Date (optional)</label><input type="date" data-contract-field="lineitem.${li.id}.date" value="${li.date||''}"/></div>
+        <button class="icon-btn" data-action="remove-line-item" data-id="${li.id}" title="Remove" style="flex:none;">${ICO.trash}</button>
+      </div>
+      <textarea data-contract-field="lineitem.${li.id}.notes" rows="2" placeholder="Notes for this night/set (e.g. who opens, set length, timing)" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(li.notes||'')}</textarea>
+      <details>
+        <summary style="cursor:pointer;font-size:11.5px;color:var(--ink-3);">Travel for this line item</summary>
+        <div class="field-row" style="margin-top:6px;">
+          <div class="field" style="width:90px;"><label>Flights</label><input type="number" min="0" data-contract-field="lineitemtravel.${li.id}.flightsCount" data-focus-key="lineitemtravel.${li.id}.flightsCount" data-live value="${tc.flightsCount||0}"/></div>
+          <div class="field"><label>Class</label>
+            <div class="chip-row">${['economy','business','first'].map(cl=>`<button class="filter-chip ${tc.flightsClass===cl?'sel':''}" data-action="pick-lineitem-travel-flight-class" data-id="${li.id}" data-value="${cl}">${cl.charAt(0).toUpperCase()+cl.slice(1)}</button>`).join('')}</div>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field" style="width:110px;"><label>Hotel Rooms</label><input type="number" min="0" data-contract-field="lineitemtravel.${li.id}.hotelRooms" data-focus-key="lineitemtravel.${li.id}.hotelRooms" data-live value="${tc.hotelRooms||0}"/></div>
+          <div class="field" style="width:90px;"><label>Nights</label><input type="number" min="0" data-contract-field="lineitemtravel.${li.id}.hotelNights" data-focus-key="lineitemtravel.${li.id}.hotelNights" data-live value="${tc.hotelNights||0}"/></div>
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" data-contract-field="lineitemtravel.${li.id}.food" data-live ${tc.food?'checked':''}/> Food</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" data-contract-field="lineitemtravel.${li.id}.shabbos" data-live ${tc.shabbos?'checked':''}/> Shabbos</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" data-contract-field="lineitemtravel.${li.id}.groundTransport" data-live ${tc.groundTransport?'checked':''}/> Ground transport</label>
+        </div>
+        ${sentence? `<p style="font-size:11px;color:var(--ink-3);margin:6px 0 0;">Adds to this line: "${esc(sentence)}"</p>` : ''}
+      </details>
+    </div>`; }).join('')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
       <h3 style="font-size:13.5px;margin:0;">Add-Ons</h3>
       <button class="btn btn-sm" data-action="add-add-on" data-id="${c.id}">${ICO.plus} Add Add-On</button>
@@ -13825,8 +14130,9 @@ function renderPayeeBlock(profile){
   const lines = [];
   if(profile.zelle) lines.push(`Zelle: ${esc(profile.zelle)}`);
   if(profile.checkPayee) lines.push(`Check: ${esc(profile.checkPayee)}${profile.checkAddress? ', '+esc(profile.checkAddress):''}`);
-  if(profile.wireBankName || profile.wireAccountNumber) lines.push(`Wire: ${esc(profile.wireAccountName||profile.entityName)} — ${esc(profile.wireBankName||'')}${profile.wireAccountNumber?`, Account #${esc(profile.wireAccountNumber)}`:''}${profile.wireRoutingNumber?`, Routing #${esc(profile.wireRoutingNumber)}`:''}`);
+  if(profile.wireBankName || profile.wireAccountNumber) lines.push(`Wire: ${esc(profile.wireAccountName||profile.entityName)} — ${esc(profile.wireBankName||'')}${profile.wireBankAddress?`, ${esc(profile.wireBankAddress)}`:''}${profile.wireAccountNumber?`, Account #${esc(profile.wireAccountNumber)}`:''}${profile.wireRoutingNumber?`, Routing #${esc(profile.wireRoutingNumber)}`:''}`);
   if(profile.notes) lines.push(esc(profile.notes));
+  if(profile.zelle) lines.push('IMPORTANT: Payments sent via Zelle must include event date/details in description. Otherwise, we cannot guarantee your deposit will be applied to your event.');
   return lines.length? `<div class="doc-section"><h3>Payment</h3><p style="font-size:12.5px;line-height:1.8;margin:0;">${lines.join('<br/>')}</p></div>` : '';
 }
 // Electronic signature: matches the app's existing convention (see renderContractDoc/renderDocumentDoc)
@@ -13836,26 +14142,38 @@ function renderPayeeBlock(profile){
 function renderContractSignBlock(c, signingPartyLabel){
   const signed = c.status==='signed';
   const signedDate = signed ? fmtDateShort((c.signedAt||c.updatedAt).slice(0,10)) : '';
-  return `<div class="doc-sign">
+  let block = `<div class="doc-sign">
     <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc(c.snapshot.clientName||'Client')}</span><br/>Signed electronically &middot; ${signedDate}` : `<strong>&nbsp;</strong>Client Signature &middot; Date`}</div>
     <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc(signingPartyLabel)}</span><br/>` : `<strong>&nbsp;</strong>`}For Artist, ${esc(signingPartyLabel)}</div>
   </div>`;
+  if(c.boilerplate.acceptanceClause){
+    block += `<p style="font-size:11px;color:var(--ink-3);margin:8px 0 0;">A signature is welcome but not required where the deposit has been paid.</p>`;
+  }
+  return block;
+}
+function docBsdHeader(c){
+  return c.bsdHeader ? `<div style="text-align:center;font-size:12px;font-weight:700;margin-bottom:8px;">BS"D</div>` : '';
 }
 function renderContractBuilderDoc(c){
   if(!c) return '';
   if(c.template==='comedian') return renderComedianDoc(c);
   if(c.template==='multiline') return renderMultilineDoc(c);
+  if(c.template==='creative') return renderCreativeDoc(c);
   return renderStandardDoc(c);
 }
 function renderStandardDoc(c){ return docChrome(standardDocContent(c), c); }
 function standardDocContent(c){
   const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
+  const brand = DOC_BRANDS[c.brand] || DOC_BRANDS.asp;
   const figures = contractPaymentFigures(c);
   const who = contractPerformerName(c);
   const boilerplate = contractBoilerplateLines(c);
+  const travelSentence = contractTravelSentence(c.travelClause);
+  const contactLine = contractClientContactLine(c);
   return `
+    ${docBsdHeader(c)}
     <div class="doc-letterhead">
-      <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(profile.entityName)}</div>
+      <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(brand.label)}</div>
       <span class="pill ${contractStatusPillClass(c.status)}">${contractStatusLabel(c.status)}</span>
     </div>
     <div class="doc-title">ARTIST AGREEMENT</div>
@@ -13868,37 +14186,44 @@ function standardDocContent(c){
       <div class="doc-facts">
         <div><span class="k">Place of Engagement</span><span>${esc(c.snapshot.venue)||'TBD'}${(c.snapshot.city||c.snapshot.state)? `, ${esc(c.snapshot.city)}${c.snapshot.city&&c.snapshot.state?', ':''}${esc(c.snapshot.state)}` : ''}</span></div>
         <div><span class="k">Date of Engagement</span><span>${c.snapshot.eventDate? fmtDate(c.snapshot.eventDate) : 'TBD'}</span></div>
+        <div><span class="k">Hours of Engagement</span><span>${esc(c.hoursOfEngagement||'—')}</span></div>
         <div><span class="k">Occasion</span><span>${esc(c.snapshot.occasion)||'—'}</span></div>
-        <div><span class="k">Payment for Engagement</span><span>${money(figures.total)}${c.fee.note?` ${esc(c.fee.note)}`:''}</span></div>
+        <div><span class="k">Payment for Engagement</span><span>${contractFeeDisplayHtml(c, figures)}${c.fee.note?` ${esc(c.fee.note)}`:''}${travelSentence?` ${esc(travelSentence)}`:''}</span></div>
       </div>
     </div>
+    ${c.artistProvides? `<div class="doc-section"><h3>Artist Shall Provide</h3><ul class="doc-terms"><li>${esc(c.artistProvides)}</li></ul></div>` : ''}
     ${c.clientProvides.length? `<div class="doc-section"><h3>Client Shall Provide</h3><ul class="doc-terms">${c.clientProvides.map(l=>`<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}
     <div class="doc-section"><h3>Payment Terms</h3>
       <div class="ledger" style="margin-bottom:8px;">
-        <div class="ledger-row"><span>Total Payment</span><span class="amt">${money(figures.total)}</span></div>
+        <div class="ledger-row"><span>Total Payment</span><span class="amt">${contractFeeDisplayHtml(c, figures)}</span></div>
         <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${c.deposit.percent?` (${c.deposit.percent}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
         <div class="ledger-row total"><span>Balance Due</span><span class="amt">${money(figures.balance)}</span></div>
       </div>
-      ${c.overtime.rate? `<p style="font-size:12.5px;margin:0;">If the Artist is asked to stay beyond the agreed upon time, a $${esc(String(c.overtime.rate))} per ${esc(overtimeIntervalLabel(c.overtime.interval))} charge shall be paid in overtime fees.</p>` : ''}
+      <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
+      ${c.overtime.interval==='not_applicable'? `<p style="font-size:12.5px;margin:4px 0 0;">Overtime: Not applicable.</p>` : c.overtime.rate? `<p style="font-size:12.5px;margin:4px 0 0;">If the Artist is asked to stay beyond the agreed upon time, a $${esc(String(c.overtime.rate))} per ${esc(overtimeIntervalLabel(c.overtime.interval))} charge shall be paid in overtime fees.</p>` : ''}
     </div>
     ${boilerplate.length? `<div class="doc-section"><h3>Terms &amp; Conditions</h3><ul class="doc-terms">${boilerplate.map(l=>`<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}
     ${c.boilerplate.acceptanceClause? `<div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractAcceptanceText(c))}</p></div>` : ''}
     <div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractCancellationText(c))}</p></div>
     ${c.customClauses.map(cc=>`<div class="doc-section"><h3>${esc(cc.title||'Additional Terms')}</h3><p style="font-size:12.5px;line-height:1.7;margin:0;white-space:pre-line;">${esc(cc.body)}</p></div>`).join('')}
-    ${renderContractSignBlock(c, profile.entityName)}
+    ${renderContractSignBlock(c, brand.signer)}
     ${renderPayeeBlock(profile)}
-    <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
+    ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
   `;
 }
 function renderComedianDoc(c){ return docChrome(comedianDocContent(c), c); }
 function comedianDocContent(c){
   const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
+  const brand = DOC_BRANDS[c.brand] || DOC_BRANDS.asp;
   const figures = contractPaymentFigures(c);
   const who = contractPerformerName(c);
   const boilerplate = contractBoilerplateLines(c);
+  const travelSentence = contractTravelSentence(c.travelClause);
+  const contactLine = contractClientContactLine(c);
   return `
+    ${docBsdHeader(c)}
     <div class="doc-letterhead">
-      <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(profile.entityName)}</div>
+      <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(brand.label)}</div>
       <span class="pill ${contractStatusPillClass(c.status)}">${contractStatusLabel(c.status)}</span>
     </div>
     <div class="doc-title">COMEDIAN AGREEMENT</div>
@@ -13912,14 +14237,18 @@ function comedianDocContent(c){
         <div><span class="k">Place</span><span>${esc(c.snapshot.venue)||'TBD'}</span></div>
         <div><span class="k">Date</span><span>${c.snapshot.eventDate? fmtDate(c.snapshot.eventDate) : 'TBD'}</span></div>
         <div><span class="k">Occasion</span><span>${esc(c.snapshot.occasion)||'Comedy Show'}</span></div>
+        <div><span class="k">Performance Duration</span><span>${esc(c.performanceDuration)||'—'}</span></div>
+        <div><span class="k">Performance Type</span><span>${esc(c.performanceType)||'—'}</span></div>
       </div>
     </div>
     <div class="doc-section"><h3>1. Compensation</h3>
       <div class="ledger" style="margin-bottom:8px;">
-        <div class="ledger-row"><span>Total Fee${c.fee.note?` (${esc(c.fee.note)})`:''}</span><span class="amt">${money(figures.total)}</span></div>
+        <div class="ledger-row"><span>Total Fee${c.fee.note?` (${esc(c.fee.note)})`:''}</span><span class="amt">${contractFeeDisplayHtml(c, figures)}${travelSentence?` ${esc(travelSentence)}`:''}</span></div>
         <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${c.deposit.percent?` (${c.deposit.percent}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
         <div class="ledger-row total"><span>Balance Due</span><span class="amt">${money(figures.balance)}</span></div>
       </div>
+      <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
+      <p style="font-size:12.5px;margin:4px 0 0;">Additional Expenses: ${esc(c.additionalExpenses||'N/A')}</p>
     </div>
     ${c.clientProvides.length? `<div class="doc-section"><h3>2. Client Responsibilities</h3><ul class="doc-terms">${c.clientProvides.map(l=>`<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}
     ${c.boilerplate.ipVideoClause? `<div class="doc-section"><h3>3. Intellectual Property</h3><ul class="doc-terms"><li>${esc(contractIpClauseText())}</li></ul></div>` : ''}
@@ -13932,19 +14261,22 @@ function comedianDocContent(c){
     </div>
     ${c.boilerplate.acceptanceClause? `<div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractAcceptanceText(c))}</p></div>` : ''}
     ${c.customClauses.map(cc=>`<div class="doc-section"><h3>${esc(cc.title||'Additional Terms')}</h3><p style="font-size:12.5px;line-height:1.7;margin:0;white-space:pre-line;">${esc(cc.body)}</p></div>`).join('')}
-    ${renderContractSignBlock(c, who)}
+    ${renderContractSignBlock(c, brand.signer)}
     ${renderPayeeBlock(profile)}
-    <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
+    ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
   `;
 }
 function renderMultilineDoc(c){ return docChrome(multilineDocContent(c), c); }
 function multilineDocContent(c){
   const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
+  const brand = DOC_BRANDS[c.brand] || DOC_BRANDS.asp;
   const figures = contractPaymentFigures(c);
   const boilerplate = contractBoilerplateLines(c);
+  const contactLine = contractClientContactLine(c);
   return `
+    ${docBsdHeader(c)}
     <div class="doc-letterhead">
-      <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(profile.entityName)}</div>
+      <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(brand.label)}</div>
       <span class="pill ${contractStatusPillClass(c.status)}">${contractStatusLabel(c.status)}</span>
     </div>
     <div class="doc-title">ARTIST AGREEMENT</div>
@@ -13957,33 +14289,88 @@ function multilineDocContent(c){
       <div class="doc-facts">
         <div><span class="k">Place of Engagement</span><span>${esc(c.snapshot.venue)||'TBD'}</span></div>
         <div><span class="k">Date of Engagement</span><span>${c.snapshot.eventDate? fmtDate(c.snapshot.eventDate) : 'TBD'}</span></div>
-        <div><span class="k">Payment for Engagement</span><span>${money(figures.total)}</span></div>
+        <div><span class="k">Occasion</span><span>${esc(c.snapshot.occasion)||'—'}</span></div>
+        <div><span class="k">Payment for Engagement</span><span>${contractFeeDisplayHtml(c, figures)}</span></div>
       </div>
     </div>
     <div class="doc-section"><h3>Terms of Engagement</h3>
-      <ul class="doc-terms">${c.lineItems.map(li=>`<li><strong>${esc(li.label||'—')}:</strong> ${money(li.fee||0)}${li.date? ` (${fmtDateShort(li.date)})`:''}${li.overtimeRate? ` — overtime ${esc(li.overtimeRate)}`:''}</li>`).join('')}</ul>
+      <ul class="doc-terms">${c.lineItems.map(li=>{ const travel = contractTravelSentence(li.travelClause); return `<li><strong>${esc(li.label||'—')}:</strong> ${money(li.fee||0)}${li.date? ` (${fmtDateShort(li.date)})`:''}${li.overtimeRate? ` — overtime ${esc(li.overtimeRate)}`:''}${travel? ` — ${esc(travel)}`:''}${li.notes? `<br/><span style="font-size:11.5px;color:var(--ink-3);">${esc(li.notes)}</span>`:''}</li>`; }).join('')}</ul>
     </div>
     ${c.addOns.length? `<div class="doc-section"><h3>Add-Ons</h3><ul class="doc-terms">${c.addOns.map(a=>`<li><strong>${esc(a.label||'—')}:</strong> ${money(a.amount||0)}</li>`).join('')}</ul></div>` : ''}
+    ${c.barter && (c.barter.label||c.barter.description)? `<div class="doc-section"><h3>Non-Cash Compensation</h3><p style="font-size:12.5px;line-height:1.7;margin:0;"><strong>${esc(c.barter.label||'')}</strong>${c.barter.description?`<br/>${esc(c.barter.description)}`:''}</p></div>` : ''}
+    ${c.artistProvides? `<div class="doc-section"><h3>Artist Shall Provide</h3><ul class="doc-terms"><li>${esc(c.artistProvides)}</li></ul></div>` : ''}
     ${c.clientProvides.length? `<div class="doc-section"><h3>Client Shall Provide</h3><ul class="doc-terms">${c.clientProvides.map(l=>`<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}
     <div class="doc-section"><h3>Payment Terms</h3>
       <div class="ledger" style="margin-bottom:8px;">
-        <div class="ledger-row"><span>Total Payment</span><span class="amt">${money(figures.total)}</span></div>
+        <div class="ledger-row"><span>Total Payment</span><span class="amt">${contractFeeDisplayHtml(c, figures)}</span></div>
         <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${c.deposit.percent?` (${c.deposit.percent}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
         <div class="ledger-row total"><span>Balance Due</span><span class="amt">${money(figures.balance)}</span></div>
       </div>
+      <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
+      ${c.overtime.interval==='not_applicable'? `<p style="font-size:12.5px;margin:4px 0 0;">Overtime: Not applicable.</p>` : ''}
     </div>
     ${boilerplate.length? `<div class="doc-section"><h3>Terms &amp; Conditions</h3><ul class="doc-terms">${boilerplate.map(l=>`<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}
     ${c.boilerplate.acceptanceClause? `<div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractAcceptanceText(c))}</p></div>` : ''}
     <div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractCancellationText(c))}</p></div>
     ${c.customClauses.map(cc=>`<div class="doc-section"><h3>${esc(cc.title||'Additional Terms')}</h3><p style="font-size:12.5px;line-height:1.7;margin:0;white-space:pre-line;">${esc(cc.body)}</p></div>`).join('')}
-    ${renderContractSignBlock(c, profile.entityName)}
+    ${renderContractSignBlock(c, brand.signer)}
     ${renderPayeeBlock(profile)}
-    <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
+    ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
+  `;
+}
+function renderCreativeDoc(c){ return docChrome(creativeDocContent(c), c); }
+function creativeDocContent(c){
+  const profile = getPayeeProfile(c.payeeProfileId) || airschnitzPayeeProfile();
+  const brand = DOC_BRANDS[c.brand] || DOC_BRANDS.asp;
+  const figures = contractPaymentFigures(c);
+  const contactLine = contractClientContactLine(c);
+  return `
+    ${docBsdHeader(c)}
+    <div class="doc-letterhead">
+      <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(brand.label)}</div>
+      <span class="pill ${contractStatusPillClass(c.status)}">${contractStatusLabel(c.status)}</span>
+    </div>
+    <div class="doc-title">CREATIVE / VIDEO PRODUCTION AGREEMENT</div>
+    <div class="doc-sub">Agreement ${esc(c.id)} &middot; ${contractDateSentence(c)}, between ${esc(profile.entityName)}, hereafter referred to as "the Artist", and ${esc(c.snapshot.clientName||'the Client')}, hereafter referred to as "the Client".</div>
+    <div class="doc-parties">
+      <div class="doc-party"><h4>Artist</h4><p><strong>${esc(profile.entityName)}</strong></p></div>
+      <div class="doc-party"><h4>Client / Organization</h4><p><strong>${esc(c.snapshot.clientName||'—')}</strong>${c.snapshot.clientEmail?`<br/>${esc(c.snapshot.clientEmail)}`:''}</p></div>
+    </div>
+    <div class="doc-section"><h3>Project Details</h3>
+      <div class="doc-facts">
+        <div><span class="k">Project Name</span><span>${esc(c.creative.projectName)||'—'}</span></div>
+        <div><span class="k">Event Name</span><span>${esc(c.snapshot.eventName)||'—'}</span></div>
+        <div><span class="k">Event Date</span><span>${c.snapshot.eventDate? fmtDate(c.snapshot.eventDate) : 'TBD'}</span></div>
+        <div><span class="k">On-Site Filming Days</span><span>up to ${esc(String(c.creative.filmingDays||3))}</span></div>
+        <div><span class="k">Revision Rounds</span><span>${esc(c.creative.revisionRounds||'')}</span></div>
+        <div><span class="k">Creative Fee</span><span>${contractFeeDisplayHtml(c, figures)}${c.fee.note?` ${esc(c.fee.note)}`:''}</span></div>
+      </div>
+    </div>
+    <div class="doc-section"><h3>Payment Terms</h3>
+      <div class="ledger" style="margin-bottom:8px;">
+        <div class="ledger-row"><span>Total Fee</span><span class="amt">${contractFeeDisplayHtml(c, figures)}</span></div>
+        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${c.deposit.percent?` (${c.deposit.percent}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
+        <div class="ledger-row total"><span>Balance Due</span><span class="amt">${money(figures.balance)}</span></div>
+      </div>
+      <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
+    </div>
+    <div class="doc-section"><h3>Terms &amp; Conditions</h3>
+      <ul class="doc-terms">
+        ${c.boilerplate.notBindingUntilDeposit? `<li>This agreement is not binding until the deposit is received.</li>` : ''}
+        <li>Once the Client considers the project complete, no further revisions, additions, or changes will be made.</li>
+      </ul>
+      <p style="font-size:12.5px;line-height:1.7;margin:8px 0 0;">${esc(contractCancellationText(c))}</p>
+    </div>
+    ${c.customClauses.map(cc=>`<div class="doc-section"><h3>${esc(cc.title||'Additional Terms')}</h3><p style="font-size:12.5px;line-height:1.7;margin:0;white-space:pre-line;">${esc(cc.body)}</p></div>`).join('')}
+    ${renderContractSignBlock(c, brand.signer)}
+    ${renderPayeeBlock(profile)}
+    ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
   `;
 }
 function contractDocContent(c){
   if(c.template==='comedian') return comedianDocContent(c);
   if(c.template==='multiline') return multilineDocContent(c);
+  if(c.template==='creative') return creativeDocContent(c);
   return standardDocContent(c);
 }
 // Standalone HTML for the emailed copy -- inlined, hardcoded colors (not var(...), which many
@@ -15170,6 +15557,10 @@ function bindGlobal(){
       case 'set-contract-status': { const c=getContract(S.contractBuilderId); if(c){ c.status=t.getAttribute('data-status'); if(c.status==='signed' && !c.signedAt) c.signedAt=new Date().toISOString(); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'pick-contract-overtime-interval': { const c=getContract(S.contractBuilderId); if(c){ c.overtime.interval=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'pick-cancellation-type': { const c=getContract(S.contractBuilderId); if(c){ c.cancellationPolicy.type=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
+      case 'pick-balance-due-timing': { const c=getContract(S.contractBuilderId); if(c){ c.balanceDueTiming=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
+      case 'pick-contract-brand': { const c=getContract(S.contractBuilderId); if(c){ c.brand=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
+      case 'pick-travel-flight-class': { const c=getContract(S.contractBuilderId); if(c){ c.travelClause.flightsClass=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
+      case 'pick-lineitem-travel-flight-class': { const c=getContract(S.contractBuilderId); if(c){ const li=c.lineItems.find(x=>x.id===id); if(li) li.travelClause.flightsClass=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'add-cancellation-tier': doAddCancellationTier(S.contractBuilderId); break;
       case 'remove-cancellation-tier': doRemoveCancellationTier(S.contractBuilderId, id); break;
       case 'add-client-provides': doAddClientProvides(S.contractBuilderId, t.getAttribute('data-label')); break;
