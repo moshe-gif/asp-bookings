@@ -57,15 +57,18 @@ In the app, **Settings → Gmail Mailboxes (Zelle Matching)**:
 
 ## Notes — what's still needed for the rest of item 6
 
-Connecting a mailbox alone doesn't match any payments yet. Still needed, all real additional scope:
+Connecting a mailbox alone doesn't match any payments yet. Settings → **Zelle Review Queue**
+already exists (mirrors the QuickBooks Payment Reconciliation Queue exactly -- a real, session-
+guarded read of `zelle_notifications` where `status='unmatched'`) but will show nothing until the
+two pieces that actually populate that table are built:
 - **Gmail push notifications (watch) or periodic polling** — `gmail_mailboxes.watch_expires_at`/
   `last_history_id` (migration 0015) already model this; nothing sets them up yet.
-- **The parser** — reading only allowlisted Zelle-notification patterns, minimizing stored content
-  (amount/sender/memo/timestamp only, per the spec) into `zelle_notifications` (already exists).
-- **The scored matcher** — amount/sender/memo/date/mailbox/type/window scoring, auto-applying only
-  above a high-confidence threshold, everything else into an admin review queue (mirroring the
-  read-only Payment Reconciliation Queue already built for QuickBooks, item 3/5) that routes an
-  approved match through the same centralized payment-received workflow QuickBooks uses.
+- **The parser + scored matcher** — reading only allowlisted Zelle-notification patterns,
+  minimizing stored content (amount/sender/memo/timestamp only, per the spec) into
+  `zelle_notifications`, then scoring amount/sender/memo/date/mailbox/type/window and auto-applying
+  only above a high-confidence threshold -- everything else stays `unmatched` for the review queue
+  above, and an approved match routes through the same centralized payment-received workflow
+  QuickBooks uses.
 
 This is genuinely the largest remaining piece of the whole spec — treat it as its own multi-step
 project once the connection piece above is confirmed working for at least one real mailbox.

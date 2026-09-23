@@ -11015,6 +11015,8 @@ let S = {
   calendarMappingsBusy:false,
   reconciliationQueue:null, // null until checked, else array of unmatched payments rows
   reconciliationBusy:false,
+  zelleReviewQueue:null, // null until checked, else array of unmatched zelle_notifications rows
+  zelleReviewQueueBusy:false,
   gmailMailboxes:null, // null until checked, else array of {id, mailboxType, artistId, email, connected, connectedAt, watchExpiresAt}
   gmailMailboxesBusy:false,
   newGmailMailboxForm:{},
@@ -12041,6 +12043,8 @@ function renderSettingsPage(){
   ${isAdmin ? renderReconciliationCard() : ''}
 
   ${isAdmin ? renderGmailMailboxesCard() : ''}
+
+  ${isAdmin ? renderZelleReviewQueueCard() : ''}
 
   ${isAdmin ? renderDataMigrationCard() : ''}
 
@@ -15377,6 +15381,38 @@ function renderReconciliationCard(){
       </div>`}
   </div>`;
 }
+// Zelle review queue (ops automation spec item 6): mirrors the QuickBooks Reconciliation Queue
+// exactly -- read-only for now, real Supabase read, session-guarded. No parser exists yet to
+// actually populate zelle_notifications (that's the biggest piece of item 6 still unbuilt, see
+// ops/GMAIL_SETUP.md), so this shows nothing until that lands -- but the admin surface is ready
+// the moment it does, rather than needing a UI built later under time pressure.
+async function loadZelleReviewQueue(){
+  if(!supabaseClient) return;
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(!session) return;
+  S.zelleReviewQueueBusy = true; render();
+  try{
+    const { data, error } = await supabaseClient.from('zelle_notifications').select('*').eq('status','unmatched').order('received_at', {ascending:false});
+    if(error){ toast('Could not load the Zelle review queue: ' + error.message, 'system'); return; }
+    S.zelleReviewQueue = data||[];
+  } finally {
+    S.zelleReviewQueueBusy = false; render();
+  }
+}
+function renderZelleReviewQueueCard(){
+  const queue = S.zelleReviewQueue;
+  const busy = !!S.zelleReviewQueueBusy;
+  return `<div class="card card-pad" style="margin-bottom:20px;">
+    <h3 style="margin-bottom:6px;">Zelle Review Queue</h3>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 12px;">Zelle notices below the auto-match confidence threshold land here for manual review. Read-only for now — resolve one directly in Supabase.</p>
+    ${!queue? `<button class="btn btn-sm" data-action="check-zelle-review-queue" ${busy?'disabled':''}>${busy?'Checking…':'Check Queue'}</button>`
+    : queue.length===0? `<div class="settings-row" style="border-bottom:none;"><span class="pill pill-good">Nothing to review</span><button class="btn btn-sm btn-ghost" data-action="check-zelle-review-queue">Refresh</button></div>`
+    : `<div style="display:flex;flex-direction:column;gap:8px;">
+        ${queue.map(n=>`<div class="settings-row"><div><h4>${money(n.amount||0)}${n.sender_name?` — ${esc(n.sender_name)}`:''}</h4><p>${esc(n.memo||'')} &middot; ${fmtDateShort((n.received_at||'').slice(0,10))}</p></div><span class="pill">Unmatched</span></div>`).join('')}
+        <button class="btn btn-sm btn-ghost" style="align-self:flex-start;" data-action="check-zelle-review-queue">Refresh</button>
+      </div>`}
+  </div>`;
+}
 function renderDataMigrationCard(){
   const preview = S.migrationPreview;
   return `<div class="card card-pad" style="margin-bottom:20px;">
@@ -16626,6 +16662,7 @@ function bindGlobal(){
       case 'check-reconciliation-queue': loadReconciliationQueue(); break;
       case 'check-gmail-mailboxes': loadGmailStatus(); break;
       case 'check-calendar-mappings': loadCalendarMappings(); break;
+      case 'check-zelle-review-queue': loadZelleReviewQueue(); break;
       case 'add-gmail-mailbox': doAddGmailMailbox(); break;
       case 'migrate-payee-profiles': doMigratePayeeProfilesToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
       case 'migrate-contracts': doMigrateContractsToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
