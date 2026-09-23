@@ -1108,13 +1108,17 @@ async function doSendContractEmail(){
   }
 }
 
-// Phase 4 (Google Calendar HOLD/CONFIRMED sync) scaffolding: no Google OAuth client is configured
-// yet (see .env.example), so this always reports "not connected" rather than pretending to create
-// real calendar events. Once Phase 4 ships, this becomes a real call to a gcal-create-hold Edge
-// Function and this stub is replaced, not wrapped -- keeping the call site (doSendContractEmail)
-// unchanged either way.
+// Phase 4 (Google Calendar HOLD/CONFIRMED sync): the OAuth connect flow exists (Settings), but the
+// gcal-create-hold Edge Function and the per-artist calendar ID mapping (which calendar to write
+// to for each artist + ASP's main calendar) don't exist yet -- that's real scope on top of "is the
+// account connected," so this still always skips rather than pretending to create real events.
+// Once that lands, this becomes a real call and this function is replaced, not wrapped -- keeping
+// the call site (doSendContractEmail) unchanged either way.
 function doCreateCalendarHoldsForContract(c){
-  return { status:'skipped', detail:'Contract sent, but calendar holds were skipped — Google Calendar isn\'t connected yet (Settings → Integrations, once Phase 4 ships).' };
+  if(!GOOGLE_CALENDAR_CLIENT_ID){
+    return { status:'skipped', detail:'Contract sent, but calendar holds were skipped — Google Calendar isn\'t connected yet (Settings → Google Calendar Sync).' };
+  }
+  return { status:'skipped', detail:'Contract sent, but calendar holds were skipped — calendar mapping isn\'t set up yet for this artist.' };
 }
 
 const ADMIN_USERS = [
@@ -10783,6 +10787,17 @@ function qboAuthorizeUrl(){
   return `https://appcenter.intuit.com/connect/oauth2?client_id=${encodeURIComponent(QBO_CLIENT_ID)}&scope=com.intuit.quickbooks.accounting&redirect_uri=${encodeURIComponent(QBO_REDIRECT_URI)}&response_type=code&state=${state}`;
 }
 
+// Google Calendar HOLD/CONFIRMED sync (ops automation spec item 4). Same "client ID is not secret,
+// Connect button stays disabled until it's set" reasoning as QBO_CLIENT_ID above. See
+// ops/GOOGLE_CALENDAR_SETUP.md for the full setup once it exists.
+const GOOGLE_CALENDAR_CLIENT_ID = '';
+const GOOGLE_CALENDAR_REDIRECT_URI = SUPABASE_URL + '/functions/v1/gcal-oauth-callback';
+function gcalAuthorizeUrl(){
+  const state = Math.random().toString(36).slice(2);
+  const scope = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/userinfo.email';
+  return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(GOOGLE_CALENDAR_CLIENT_ID)}&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(GOOGLE_CALENDAR_REDIRECT_URI)}&response_type=code&access_type=offline&prompt=consent&state=${state}`;
+}
+
 /* ============ STATE ============ */
 const LS_KEY='asp_mock_state_v2';
 let S = {
@@ -10885,6 +10900,7 @@ let S = {
   sendContractForm:{},
   sendContractBusy:false,
   qboStatus:null, // null = unknown/not yet checked, else {connected, realmId, connectedAt}
+  gcalStatus:null, // null = unknown/not yet checked, else {connected, email, connectedAt}
   migrationPreview:null, // null until "Preview" clicked, else {payeeProfiles:{total,migrated}, contracts:{total,migrated}}
   sendContractInvoice:true,
   showTravelRequestDetail:false,
@@ -11091,6 +11107,27 @@ async function refreshQboStatus(){
     render();
   }catch(err){ /* Settings just shows "not connected" if this fails -- non-critical */ }
 }
+async function refreshGcalStatus(){
+  if(!supabaseClient) return;
+  try{
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if(!session) return;
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/gcal-status`, {
+      headers: { 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
+    });
+    const data = await resp.json().catch(()=>null);
+    if(resp.ok && data && data.ok) S.gcalStatus = data;
+    render();
+  }catch(err){ /* Settings just shows "not connected" if this fails -- non-critical */ }
+}
+(function checkGcalRedirect(){
+  const params = new URLSearchParams(location.search);
+  const gcal = params.get('gcal');
+  if(!gcal) return;
+  history.replaceState(null, '', location.pathname + location.hash);
+  if(gcal==='connected'){ toast('Google Calendar connected.', 'success'); refreshGcalStatus(); }
+  else if(gcal==='error'){ toast('Could not connect Google Calendar -- check the setup and try again.', 'system'); }
+})();
 (function checkQboRedirect(){
   const params = new URLSearchParams(location.search);
   const qbo = params.get('qbo');
@@ -11100,6 +11137,7 @@ async function refreshQboStatus(){
   else if(qbo==='error'){ toast('Could not connect QuickBooks -- check the setup and try again.', 'system'); }
 })();
 refreshQboStatus();
+refreshGcalStatus();
 loadBrandConfig();
 
 /* ============ THEME PREF ============ */
@@ -11814,6 +11852,8 @@ function renderSettingsPage(){
   ${isAdmin ? renderPayeeProfilesCard() : ''}
 
   ${isAdmin ? renderQuickBooksCard() : ''}
+
+  ${isAdmin ? renderGoogleCalendarSyncCard() : ''}
 
   ${isAdmin ? renderDataMigrationCard() : ''}
 
@@ -15034,6 +15074,25 @@ function renderTravelSettingsCard(){
     <h3 style="margin-bottom:6px;">Travel (Rivky)</h3>
     <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 12px;">Travel requests are never sent until this is set — per the spec, Rivky's address is never hardcoded into the app.</p>
     <div class="field"><label>Rivky's Email</label><input data-field="rivkyEmail" data-form="orgsettings" type="email" value="${esc(ORG_SETTINGS.rivkyEmail||'')}" placeholder="rivky@example.com"/></div>
+  </div>`;
+}
+function renderGoogleCalendarSyncCard(){
+  const st = S.gcalStatus;
+  const configured = !!GOOGLE_CALENDAR_CLIENT_ID;
+  return `<div class="card card-pad" style="margin-bottom:20px;">
+    <h3 style="margin-bottom:12px;">Google Calendar Sync (HOLD/CONFIRMED)</h3>
+    ${!configured? `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">Not set up yet -- needs a Google Cloud OAuth client registered first. See <code>ops/GOOGLE_CALENDAR_SETUP.md</code>.</p>
+      <button class="btn btn-sm" disabled style="opacity:.55;cursor:not-allowed;">Connect Google Calendar</button>`
+    : st && st.connected ? `<div class="settings-row">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="pill pill-good">Connected</span>
+          <div><p style="margin:0;">${esc(st.email||'')}${st.connectedAt?` &middot; connected ${fmtDateShort(st.connectedAt.slice(0,10))}`:''}</p></div>
+        </div>
+        <a href="${gcalAuthorizeUrl()}" class="btn btn-sm btn-ghost">Reconnect</a>
+      </div>
+      <p style="font-size:11.5px;color:var(--ink-3);margin:8px 0 0;">Sending a contract can also create/update a HOLD on ASP's main calendar and each selected artist's calendar, moving to CONFIRMED once the deposit is received.</p>`
+    : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">Not connected yet. This is separate from the per-user "Connected Accounts" toggle above -- that's a one-way, no-auth "Add to Google Calendar" link; this is the real server-side sync that creates/updates events by exact calendar + event ID.</p>
+      <a href="${gcalAuthorizeUrl()}" class="btn btn-sm btn-primary">Connect Google Calendar</a>`}
   </div>`;
 }
 function renderDataMigrationCard(){
