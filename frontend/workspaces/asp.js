@@ -443,6 +443,14 @@ function migratePayeeProfiles(){
     Object.keys(fill).forEach(k=>{ if(!airschnitz[k]){ airschnitz[k] = fill[k]; migrated = true; } });
   }
   PAYEE_PROFILES.forEach(p=>{ if(p.wireBankAddress===undefined){ p.wireBankAddress = ''; migrated = true; } });
+  // Zelle QR fields (ops automation spec item 5) -- additive, matches the versioned-migration
+  // convention used everywhere else in this collection.
+  PAYEE_PROFILES.forEach(p=>{
+    if(p.zelleQrDataUrl===undefined){ p.zelleQrDataUrl = null; migrated = true; }
+    if(p.zelleRecipientLabel===undefined){ p.zelleRecipientLabel = ''; migrated = true; }
+    if(p.zelleInstructions===undefined){ p.zelleInstructions = ''; migrated = true; }
+    if(p.zelleActive===undefined){ p.zelleActive = true; migrated = true; }
+  });
   const mtArtist = ARTISTS.find(a=>/moshe tischler/i.test(a.name||''));
   if(mtArtist && !PAYEE_PROFILES.some(p=>p.artistId===mtArtist.id)){
     PAYEE_PROFILES.push({ id:'PP-'+(PPID++), artistId: mtArtist.id, entityName:'Moshe Tischler Inc',
@@ -923,6 +931,8 @@ function doSavePayeeProfile(){
       wireBankName:(f.wireBankName||'').trim(), wireAccountName:(f.wireAccountName||'').trim(), wireAccountNumber:(f.wireAccountNumber||'').trim(),
       wireRoutingNumber:(f.wireRoutingNumber||'').trim(), wireSwift:(f.wireSwift||'').trim(), notes:(f.notes||'').trim(),
       defaultOvertimeInterval: f.defaultOvertimeInterval||'half_hour',
+      zelleRecipientLabel:(f.zelleRecipientLabel||'').trim(), zelleInstructions:(f.zelleInstructions||'').trim(),
+      zelleActive: f.zelleActive!==false, zelleQrDataUrl: f.zelleQrDataUrl||null,
     });
   } else {
     PAYEE_PROFILES.push({
@@ -930,6 +940,8 @@ function doSavePayeeProfile(){
       wireBankName:(f.wireBankName||'').trim(), wireAccountName:(f.wireAccountName||'').trim(), wireAccountNumber:(f.wireAccountNumber||'').trim(),
       wireRoutingNumber:(f.wireRoutingNumber||'').trim(), wireSwift:(f.wireSwift||'').trim(), notes:(f.notes||'').trim(),
       defaultBoilerplate: blankBoilerplateDefaults(), defaultOvertimeInterval: f.defaultOvertimeInterval||'half_hour',
+      zelleRecipientLabel:(f.zelleRecipientLabel||'').trim(), zelleInstructions:(f.zelleInstructions||'').trim(),
+      zelleActive: f.zelleActive!==false, zelleQrDataUrl: f.zelleQrDataUrl||null,
     });
   }
   savePayeeProfiles();
@@ -13302,16 +13314,28 @@ function paymentMethodLabel(ev){
 function altPaymentFollowUps(){
   return S.events.filter(e=>!e.unpaid && !isStandardPayment(e) && ['contract_sent','booked'].includes(e.status));
 }
-function zelleQrUrl(ev, artist){
-  const zelleText = `Zelle payment to ${artist.email} — ${money(zelleBalance(ev))} for ${artist.name} (${ev.type}, ${fmtDateShort(ev.date)})`;
+// Resolves strictly through the event's own artistId -- there is no path here that could hand
+// back a different artist's payee profile, which is what makes "never cross-send one artist's QR
+// to another" (ops automation spec item 5) hold structurally rather than by convention.
+function zelleProfileForEvent(ev, artist){
+  const profile = defaultPayeeProfileForArtist(ev.artistId);
+  return (profile && profile.zelleActive!==false) ? profile : null;
+}
+function zelleQrUrl(ev, artist, profile){
+  const identifier = (profile && profile.zelle) || artist.email;
+  const zelleText = `Zelle payment to ${identifier} — ${money(zelleBalance(ev))} for ${artist.name} (${ev.type}, ${fmtDateShort(ev.date)})`;
   return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(zelleText)}`;
 }
 function renderZelleQrBlock(ev, artist){
+  const profile = zelleProfileForEvent(ev, artist);
+  const usingRealQr = !!(profile && profile.zelleQrDataUrl);
+  const label = (profile && (profile.zelleRecipientLabel || profile.zelle)) || artist.email;
   return `<div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px;background:var(--surface-2);border-radius:var(--r-md);">
-    <img src="${zelleQrUrl(ev,artist)}" alt="Zelle QR code" width="180" height="180" style="border-radius:8px;background:#fff;padding:8px;"/>
-    <span class="u-mono" style="font-size:11.5px;color:var(--ink-2);">${esc(artist.email)}</span>
+    <img src="${usingRealQr? profile.zelleQrDataUrl : zelleQrUrl(ev,artist,profile)}" alt="Zelle QR code" width="180" height="180" style="border-radius:8px;background:#fff;padding:8px;"/>
+    <span class="u-mono" style="font-size:11.5px;color:var(--ink-2);">${esc(label)}</span>
+    ${profile && profile.zelleInstructions? `<span style="font-size:11px;color:var(--ink-3);text-align:center;">${esc(profile.zelleInstructions)}</span>` : ''}
   </div>
-  <p style="font-size:10.5px;color:var(--ink-3);margin:14px 0 0;text-align:center;">QR points to a mock Zelle reference — swap in the real Zelle deep link once ASP is online.</p>`;
+  ${usingRealQr? '' : `<p style="font-size:10.5px;color:var(--ink-3);margin:14px 0 0;text-align:center;">QR points to a mock Zelle reference — upload this artist's real Zelle QR on their Payee Profile once available.</p>`}`;
 }
 function renderReminderPreview(){
   const ev = getEvent(S.eventId); if(!ev) return '';
@@ -15046,7 +15070,19 @@ function renderPayeeProfileFormModal(){
             ${ARTISTS.map(a=>`<option value="${a.id}" ${f.artistId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
           </select>
         </div>
-        <div class="field"><label>Zelle</label><input data-field="zelle" value="${esc(f.zelle||'')}"/></div>
+        <div class="field-row">
+          <div class="field"><label>Zelle Identifier</label><input data-field="zelle" value="${esc(f.zelle||'')}" placeholder="email or phone"/></div>
+          <div class="field"><label>Zelle Display Name</label><input data-field="zelleRecipientLabel" value="${esc(f.zelleRecipientLabel||'')}" placeholder="shown on the QR block"/></div>
+        </div>
+        <div class="field"><label>Zelle Instructions (optional)</label><input data-field="zelleInstructions" value="${esc(f.zelleInstructions||'')}" placeholder="e.g. include the event date in the memo"/></div>
+        <div class="field" style="flex-direction:row;align-items:center;gap:8px;">
+          <input type="checkbox" id="zelleActiveCk" data-field="zelleActive" ${f.zelleActive!==false?'checked':''}/>
+          <label for="zelleActiveCk" style="text-transform:none;font-size:13px;color:var(--ink);font-weight:500;">Active — offered as this artist's balance-due Zelle payee</label>
+        </div>
+        <div class="field"><label>Zelle QR Image (optional — overrides the generated placeholder)</label>
+          ${f.zelleQrDataUrl? `<div style="display:flex;align-items:center;gap:10px;"><img src="${f.zelleQrDataUrl}" width="72" height="72" style="border-radius:6px;background:#fff;padding:4px;border:1px solid var(--border);"/><button type="button" class="btn btn-sm btn-ghost" data-action="remove-payee-zelle-qr">Remove</button></div>`
+          : `<label class="btn btn-sm" style="cursor:pointer;display:inline-flex;">Upload QR Image<input type="file" accept="image/*" data-action="upload-payee-zelle-qr" style="display:none;"/></label>`}
+        </div>
         <div class="field-row">
           <div class="field"><label>Check Payee</label><input data-field="checkPayee" value="${esc(f.checkPayee||'')}"/></div>
           <div class="field"><label>Check Address</label><input data-field="checkAddress" value="${esc(f.checkAddress||'')}"/></div>
@@ -16224,11 +16260,13 @@ function bindGlobal(){
       case 'contractbuilderdoc-overlay-close': if(e.target===t){ S.showContractBuilderDoc=false; render(); } break;
       case 'print-contract-builder': window.print(); break;
       case 'filter-contracts-status': S.contractsStatusFilter = t.getAttribute('data-status'); render(); break;
-      case 'open-payee-profile-form': S.showPayeeProfileForm=true; S.editingPayeeProfileId=id||null; S.payeeProfileForm = id? (()=>{ const p=getPayeeProfile(id); return p? {entityName:p.entityName, artistId:p.artistId, zelle:p.zelle, checkPayee:p.checkPayee, checkAddress:p.checkAddress, wireBankName:p.wireBankName, wireAccountName:p.wireAccountName, wireAccountNumber:p.wireAccountNumber, wireRoutingNumber:p.wireRoutingNumber, wireSwift:p.wireSwift, notes:p.notes, defaultOvertimeInterval:p.defaultOvertimeInterval} : {}; })() : {defaultOvertimeInterval:'half_hour'}; render(); break;
+      case 'open-payee-profile-form': S.showPayeeProfileForm=true; S.editingPayeeProfileId=id||null; S.payeeProfileForm = id? (()=>{ const p=getPayeeProfile(id); return p? {entityName:p.entityName, artistId:p.artistId, zelle:p.zelle, checkPayee:p.checkPayee, checkAddress:p.checkAddress, wireBankName:p.wireBankName, wireAccountName:p.wireAccountName, wireAccountNumber:p.wireAccountNumber, wireRoutingNumber:p.wireRoutingNumber, wireSwift:p.wireSwift, notes:p.notes, defaultOvertimeInterval:p.defaultOvertimeInterval, zelleRecipientLabel:p.zelleRecipientLabel, zelleInstructions:p.zelleInstructions, zelleActive:p.zelleActive, zelleQrDataUrl:p.zelleQrDataUrl} : {}; })() : {defaultOvertimeInterval:'half_hour', zelleActive:true};
+      render(); break;
       case 'close-payee-profile-form': S.showPayeeProfileForm=false; S.payeeProfileForm={}; S.editingPayeeProfileId=null; render(); break;
       case 'payeeprofileform-overlay-close': if(e.target===t){ S.showPayeeProfileForm=false; S.payeeProfileForm={}; S.editingPayeeProfileId=null; render(); } break;
       case 'pick-payee-overtime-interval': S.payeeProfileForm.defaultOvertimeInterval = t.getAttribute('data-value'); render(); break;
       case 'save-payee-profile': doSavePayeeProfile(); break;
+      case 'remove-payee-zelle-qr': S.payeeProfileForm.zelleQrDataUrl = null; render(); break;
       case 'delete-payee-profile': doDeletePayeeProfile(id); break;
       case 'preview-data-migration': S.migrationPreview = computeMigrationCounts(); render(); break;
       case 'migrate-payee-profiles': doMigratePayeeProfilesToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
@@ -16381,6 +16419,17 @@ function bindGlobal(){
   });
   document.querySelectorAll('[data-action="set-included-hours"]').forEach(inp=>{
     inp.addEventListener('change', ()=>{ setPricing(inp.getAttribute('data-artist'), inp.getAttribute('data-type'), {includedHours:Number(inp.value)||0}); toast('Rate updated.', 'system'); render(); });
+  });
+  document.querySelectorAll('[data-action="upload-payee-zelle-qr"]').forEach(inp=>{
+    if(inp.tagName!=='INPUT') return;
+    inp.addEventListener('change', ()=>{
+      if(!inp.files.length) return;
+      const file = inp.files[0];
+      const reader = new FileReader();
+      reader.onload = ()=>{ S.payeeProfileForm.zelleQrDataUrl = reader.result; render(); };
+      reader.onerror = ()=>{ toast(`Could not read ${file.name}.`, 'system'); };
+      reader.readAsDataURL(file);
+    });
   });
   document.querySelectorAll('[data-action="upload-project-cover"]').forEach(inp=>{
     if(inp.tagName!=='INPUT') return;
