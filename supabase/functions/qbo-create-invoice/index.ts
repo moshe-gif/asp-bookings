@@ -79,13 +79,13 @@ Deno.serve(async (req) => {
   const { data: isAdmin, error: adminErr } = await supabase.rpc("is_admin");
   if (adminErr || !isAdmin) return json({ ok: false, error: "not authorized" }, 403);
 
-  let body: { clientName?: string; clientEmail?: string; amount?: number; description?: string };
+  let body: { clientName?: string; clientEmail?: string; amount?: number; description?: string; eventId?: string; contractId?: string };
   try {
     body = await req.json();
   } catch {
     return json({ ok: false, error: "bad json" }, 400);
   }
-  const { clientName, clientEmail, amount, description } = body || {};
+  const { clientName, clientEmail, amount, description, eventId, contractId } = body || {};
   if (!clientName || !clientEmail || !amount || amount <= 0) {
     return json({ ok: false, error: "missing or invalid fields (clientName, clientEmail, amount required)" }, 400);
   }
@@ -133,6 +133,24 @@ Deno.serve(async (req) => {
     if (!sendResp.ok) {
       const sendData = await sendResp.json().catch(() => ({}));
       return json({ ok: false, error: sendData?.Fault?.Error?.[0]?.Message || "invoice created but could not be emailed", invoiceId }, 502);
+    }
+
+    // Record it locally so qbo-webhook can later resolve an incoming payment notification back to
+    // this event -- without this row, every payment for an invoice created here would show up as
+    // "unmatched" even though ASP itself created it moments earlier. Best-effort: the invoice is
+    // already sent at this point, so a failure here is logged, not returned as an overall failure
+    // (the caller already has invoiceId/docNumber and the client already has their invoice).
+    try {
+      const { realmId } = await getValidAccessToken();
+      const sb = serviceClient();
+      const { error: insertErr } = await sb.from("qbo_invoices").insert({
+        event_id: eventId || null, contract_id: contractId || null,
+        qbo_realm_id: realmId, qbo_invoice_id: String(invoiceId), doc_number: docNumber || null,
+        amount, description: description || "", status: "sent",
+      });
+      if (insertErr) console.error("qbo-create-invoice: could not record qbo_invoices row", insertErr);
+    } catch (err) {
+      console.error("qbo-create-invoice: could not record qbo_invoices row", err);
     }
 
     return json({ ok: true, invoiceId, docNumber });

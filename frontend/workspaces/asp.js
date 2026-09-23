@@ -1089,7 +1089,12 @@ async function doSendContractEmail(){
       try{
         const invResp = await fetch(`${SUPABASE_URL}/functions/v1/qbo-create-invoice`, {
           method: 'POST', headers: authHeaders,
-          body: JSON.stringify({ clientName: c.snapshot.clientName||to, clientEmail: to, amount: qboAmount, description: qboDescription }),
+          // eventId/contractId are intentionally omitted unless already migrated to real Supabase
+          // rows (c._supabaseId) -- c.leadId/c.id are local string ids ("EV-1063"/"CT-123"), not
+          // real UUIDs, and qbo_invoices.event_id/contract_id are uuid FK columns: sending a
+          // non-UUID string would fail the whole insert (including the qbo_invoice_id tracking
+          // the webhook actually keys off), not just leave those two fields blank.
+          body: JSON.stringify({ clientName: c.snapshot.clientName||to, clientEmail: to, amount: qboAmount, description: qboDescription, contractId: c._supabaseId||null }),
         });
         const invData = await invResp.json().catch(()=>({ ok:false, error:'Unexpected response from the server.' }));
         if(!invResp.ok || invData.ok===false){
