@@ -1113,6 +1113,131 @@ const ADMIN_USERS = [
 const isAdminUser = (id)=>ADMIN_USERS.some(u=>u.id===id);
 const adminById = (id)=>ADMIN_USERS.find(u=>u.id===id);
 
+/* ============ ORG SETTINGS (ops automation spec: "never hardcoded" integration addresses) ============ */
+// ASP-wide (not per-user) config that isn't tied to any one integration's own table -- currently
+// just Rivky's real travel-booking email. Kept in its own tiny collection rather than folding into
+// per-user getUserSettings() since this is an office-wide fact, not a personal preference.
+const ORG_SETTINGS_LS_KEY = 'asp_mock_org_settings_v1';
+function loadOrgSettings(){ try{ const raw = localStorage.getItem(ORG_SETTINGS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
+function saveOrgSettings(){ try{ localStorage.setItem(ORG_SETTINGS_LS_KEY, JSON.stringify(ORG_SETTINGS)); }catch(e){} }
+let ORG_SETTINGS = loadOrgSettings();
+if(!ORG_SETTINGS) ORG_SETTINGS = { rivkyEmail:'' };
+if(ORG_SETTINGS.rivkyEmail===undefined) ORG_SETTINGS.rivkyEmail='';
+
+/* ============ TRAVEL REQUESTS (Rivky workflow, ops automation spec item 7) ============ */
+// Draft -> reviewed -> sent -> answered/completed flow for requesting flights/hotel/ground
+// transport from ASP's travel booker. Never sent until an admin reviews it and Rivky's real email
+// is configured in Settings (org-wide, never hardcoded -- see ORG_SETTINGS above). Reuses the
+// existing send-contract-email Edge Function to actually send (it's a generic "send this HTML to
+// this address" function, nothing contract-specific about it, so no second email function was
+// needed). Automatic reply-monitoring/parsing would need Gmail API access (blocked on credentials,
+// same as Phase 6) -- this pass covers manual status tracking + a manual follow-up resend instead
+// of pretending to watch Rivky's inbox.
+const TRAVEL_REQUESTS_LS_KEY = 'asp_mock_travel_requests_v1';
+let TRVID = 1;
+function loadTravelRequests(){ try{ const raw = localStorage.getItem(TRAVEL_REQUESTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
+function saveTravelRequests(){ try{ localStorage.setItem(TRAVEL_REQUESTS_LS_KEY, JSON.stringify(TRAVEL_REQUESTS)); }catch(e){} }
+let TRAVEL_REQUESTS = loadTravelRequests();
+if(!TRAVEL_REQUESTS) TRAVEL_REQUESTS = [];
+TRVID = TRAVEL_REQUESTS.reduce((m,t)=>Math.max(m, Number((t.id||'TRV-0').split('-')[1])||0), 0) + 1;
+function getTravelRequest(id){ return TRAVEL_REQUESTS.find(t=>t.id===id); }
+function travelRequestsForEvent(eventId){ return TRAVEL_REQUESTS.filter(t=>t.eventId===eventId); }
+function travelRequestStatusLabel(s){ return {draft:'Draft', sent:'Sent to Rivky', awaiting_reply:'Awaiting Reply', answered:'Answered', completed:'Completed'}[s] || s; }
+function doCreateTravelRequest(eventId){
+  const ev = getEvent(eventId); if(!ev) return;
+  const artist = artistById(ev.artistId);
+  const tr = {
+    id:'TRV-'+(TRVID++), eventId, status:'draft', createdAt:new Date().toISOString(),
+    details: {
+      passengers: artist? artist.name : '', eventDate: ev.date||'', eventTime: ev.time||'', eventTimezone: 'America/New_York',
+      venue: ev.venue||'', city: ev.city||'', state: ev.state||'',
+      origin:'', destination:'', arriveBy:'', departAfter:'',
+      flightClass:'economy', flightQty:1,
+      hotelNeeded: !!ev.flightNeeded, hotelPrefs:'',
+      groundTransportNeeded: !!ev.groundTransportNeeded, groundTransportNotes:'',
+      notes:'',
+    },
+    sentAt:null, gmailThreadId:null, gmailMessageId:null, followUpAt:null, owner: S.user,
+  };
+  TRAVEL_REQUESTS.unshift(tr); saveTravelRequests();
+  S.showTravelRequestDetail=true; S.travelRequestDetailId=tr.id;
+  render();
+}
+function setTravelRequestFieldByPath(tr, path, value){
+  const parts = path.split('.');
+  if(parts[0]==='details'){ tr.details[parts[1]] = value; }
+}
+function travelRequestEmailHtml(tr){
+  const ev = getEvent(tr.eventId);
+  const brand = getBrandConfig('asp');
+  const d = tr.details;
+  const rows = [
+    ['Passenger(s)', d.passengers], ['Event Date', d.eventDate], ['Event Time', `${d.eventTime||''} ${d.eventTimezone||''}`],
+    ['Venue', [d.venue, d.city, d.state].filter(Boolean).join(', ')],
+    ['Origin', d.origin], ['Destination', d.destination],
+    ['Arrive By', d.arriveBy], ['Depart After', d.departAfter],
+    ['Flight Class', d.flightClass], ['Flight Qty', d.flightQty],
+    ['Hotel Needed', d.hotelNeeded? (d.hotelPrefs||'Yes') : 'No'],
+    ['Ground Transport', d.groundTransportNeeded? (d.groundTransportNotes||'Yes') : 'No'],
+  ].filter(([,v])=>v);
+  return `<!doctype html><html><head><meta charset="utf-8"/><style>
+    body{ margin:0; padding:24px; background:#F5F4EF; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#17171A; }
+    .doc{ max-width:600px; margin:0 auto; background:#fff; padding:28px; border-radius:10px; }
+    .wordmark{ font-size:1.1rem; font-weight:700; border-bottom:2px solid #17171A; padding-bottom:14px; margin-bottom:18px; }
+    .doc-facts{ display:table; width:100%; font-size:13px; }
+    .doc-facts > div{ display:table-row; }
+    .doc-facts .k{ display:table-cell; font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:#9A9AA1; font-weight:700; padding:5px 12px 5px 0; white-space:nowrap; vertical-align:top; }
+    .doc-facts > div > span:last-child{ display:table-cell; padding:5px 0; }
+    .doc-foot{ margin-top:22px; padding-top:12px; border-top:1px solid #E1E1E6; font-size:10.5px; color:#9A9AA1; }
+  </style></head><body><div class="doc">
+    <div class="wordmark">${esc(brand.label||'ASP')} — Travel Request</div>
+    <p style="font-size:13.5px;">Hi Rivky, could you help arrange travel for the following${ev?` (${esc(ev.type)})`:''}?</p>
+    <div class="doc-facts">${rows.map(([k,v])=>`<div><span class="k">${esc(k)}</span><span>${esc(String(v))}</span></div>`).join('')}</div>
+    ${d.notes? `<p style="font-size:13px;margin-top:16px;"><strong>Notes:</strong> ${esc(d.notes)}</p>` : ''}
+    <div class="doc-foot">Sent from ${esc(brand.label||'ASP')} Bookings.</div>
+  </div></body></html>`;
+}
+async function doSendTravelRequest(id){
+  const tr = getTravelRequest(id); if(!tr) return;
+  if(!ORG_SETTINGS.rivkyEmail){ toast('Set Rivky\'s email in Settings first — it is never hardcoded.', 'system'); return; }
+  if(!supabaseClient){ toast('Sign in with your real ASP account to send email (not available in Demo Mode).', 'system'); return; }
+  S.travelRequestBusy = true; render();
+  try{
+    const ev = getEvent(tr.eventId);
+    const html = travelRequestEmailHtml(tr);
+    const subject = `Travel Request — ${ev? (artistById(ev.artistId)||{}).name||'' : ''}${tr.details.eventDate? ` (${fmtDateShort(tr.details.eventDate)})`:''}`;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-contract-email`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${session ? session.access_token : SUPABASE_PUBLISHABLE_KEY}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
+      body: JSON.stringify({ to: ORG_SETTINGS.rivkyEmail, subject, html }),
+    });
+    const data = await resp.json().catch(()=>({ok:false, error:'Unexpected response from the server.'}));
+    if(!resp.ok || data.ok===false){ toast(data.error || 'Could not send the travel request.', 'system'); return; }
+    tr.status='sent'; tr.sentAt=new Date().toISOString(); saveTravelRequests();
+    if(ev) logEvent(ev, 'system', `Travel request sent to Rivky (${ORG_SETTINGS.rivkyEmail}).`);
+    saveEvents();
+    toast(`Travel request sent to ${ORG_SETTINGS.rivkyEmail}.`, 'success');
+  } catch(err){
+    toast('Could not send the travel request: ' + String(err), 'system');
+  } finally {
+    S.travelRequestBusy = false; render();
+  }
+}
+function doSetTravelRequestStatus(id, status){
+  const tr = getTravelRequest(id); if(!tr) return;
+  tr.status = status; saveTravelRequests();
+  const ev = getEvent(tr.eventId);
+  if(ev){ logEvent(ev, 'system', `Travel request marked ${travelRequestStatusLabel(status)}.`); saveEvents(); }
+  render();
+}
+function doDeleteTravelRequest(id){
+  TRAVEL_REQUESTS = TRAVEL_REQUESTS.filter(t=>t.id!==id);
+  saveTravelRequests();
+  S.showTravelRequestDetail=false; S.travelRequestDetailId=null;
+  render();
+}
+
 /* ============ PRICING ============ */
 const PRICING_LS_KEY = 'asp_mock_pricing_v1';
 const OVERTIME_MULTIPLIER = 1.5; // time-and-a-half, prorated to the minute past included hours
@@ -10750,6 +10875,9 @@ let S = {
   qboStatus:null, // null = unknown/not yet checked, else {connected, realmId, connectedAt}
   migrationPreview:null, // null until "Preview" clicked, else {payeeProfiles:{total,migrated}, contracts:{total,migrated}}
   sendContractInvoice:true,
+  showTravelRequestDetail:false,
+  travelRequestDetailId:null,
+  travelRequestBusy:false,
   contractsSearchQuery:'',
   contractsStatusFilter:'all',
 };
@@ -11137,6 +11265,7 @@ function closeAllOverlays(){
   S.showTemplatePicker=false; S.templatePickerLeadId=null;
   S.showPayeeProfileForm=false; S.payeeProfileForm={}; S.editingPayeeProfileId=null;
   S.showSendContractConfirm=false; S.sendContractForm={}; S.sendContractBusy=false;
+  S.showTravelRequestDetail=false; S.travelRequestDetailId=null;
 }
 let pendingViewTransition = false;
 let pendingViewDirection = 'right';
@@ -11335,6 +11464,7 @@ function render(){
     ${S.showNewInvoice ? renderNewInvoiceModal() : ''}
     ${S.showNewOutsideBooking ? renderNewOutsideBookingModal() : ''}
     ${S.showOutsideBookingDetail ? renderOutsideBookingDetailSheet() : ''}
+    ${S.showTravelRequestDetail ? renderTravelRequestDetailSheet() : ''}
     ${S.showDocumentBuilder ? renderDocumentBuilderModal() : ''}
     ${S.showAddArtist ? renderAddArtistModal() : ''}
     ${S.newArtistWelcome ? renderWelcomeEmailPreview() : ''}
@@ -11674,6 +11804,8 @@ function renderSettingsPage(){
   ${isAdmin ? renderQuickBooksCard() : ''}
 
   ${isAdmin ? renderDataMigrationCard() : ''}
+
+  ${isAdmin ? renderTravelSettingsCard() : ''}
 
   <div class="card card-pad" style="margin-bottom:20px;">
     <h3 style="margin-bottom:12px;">Connected Accounts</h3>
@@ -13325,6 +13457,7 @@ function renderEventSheet(ev){
         </div>` : ''}
         ${renderFlightBlock(ev, isAdmin)}
         ${renderGroundTransportBlock(ev, isAdmin)}
+        ${isAdmin && (ev.flightNeeded || ev.groundTransportNeeded) ? renderTravelRequestSummary(ev) : ''}
         ${(ev.flightBooked || ev.groundTransportBooked) ? `<div style="display:flex;gap:8px;">
           <button class="btn" style="flex:1;justify-content:flex-start;" data-action="view-itinerary" data-id="${ev.id}">${ICO.suitcase} View Itinerary</button>
           ${isAdmin? `<button class="btn btn-sm" data-action="email-itinerary" data-id="${ev.id}">${ICO.mail} Email to Artist</button>` : ''}
@@ -13368,6 +13501,16 @@ function renderConflictWarning(ev){
         <span style="text-decoration:underline;">View</span>
       </div>`).join('')}
     </div>
+  </div>`;
+}
+function renderTravelRequestSummary(ev){
+  const reqs = travelRequestsForEvent(ev.id);
+  if(!reqs.length) return `<button class="btn btn-sm" style="justify-content:flex-start;" data-action="create-travel-request" data-id="${ev.id}">${ICO.suitcase} Request Travel from Rivky</button>`;
+  return `<div style="display:flex;flex-direction:column;gap:6px;">
+    ${reqs.map(tr=>`<button class="btn btn-sm" style="justify-content:space-between;" data-action="open-travel-request" data-id="${tr.id}">
+      <span>${ICO.suitcase} Travel Request</span>
+      <span class="pill ${tr.status==='draft'?'':'pill-good'}">${esc(travelRequestStatusLabel(tr.status))}</span>
+    </button>`).join('')}
   </div>`;
 }
 function renderFlightBlock(ev, isAdmin){
@@ -14133,6 +14276,58 @@ function renderTemplatePickerModal(){
   </div>`;
 }
 
+function renderTravelRequestDetailSheet(){
+  const tr = getTravelRequest(S.travelRequestDetailId); if(!tr) return '';
+  const ev = getEvent(tr.eventId);
+  const d = tr.details;
+  const busy = !!S.travelRequestBusy;
+  const canSend = tr.status==='draft' && ORG_SETTINGS.rivkyEmail;
+  return `<div class="overlay" data-action="travelrequest-overlay-close">
+    <div class="sheet" data-stop style="width:520px;">
+      <div class="sheet-head">
+        <div><h2 style="font-size:1.2rem;margin-bottom:4px;">Travel Request</h2><span class="pill ${tr.status==='draft'?'':'pill-good'}">${esc(travelRequestStatusLabel(tr.status))}</span></div>
+        <div style="display:flex;gap:6px;">
+          <button class="icon-btn" data-action="delete-travel-request" data-id="${tr.id}" title="Delete">${ICO.trash}</button>
+          <button class="icon-btn" data-action="close-travel-request-detail">${ICO.x}</button>
+        </div>
+      </div>
+      <div class="sheet-body" style="display:flex;flex-direction:column;gap:10px;">
+        ${!ORG_SETTINGS.rivkyEmail? `<p style="font-size:11.5px;color:var(--warn-ink);background:var(--warn-wash);padding:8px 10px;border-radius:8px;margin:0;">Rivky's email isn't set yet — add it in Settings before sending.</p>` : ''}
+        <div class="field"><label>Passenger(s)</label><input data-travel-field="details.passengers" value="${esc(d.passengers||'')}" ${busy?'disabled':''}/></div>
+        <div class="field-row">
+          <div class="field"><label>Origin</label><input data-travel-field="details.origin" value="${esc(d.origin||'')}" placeholder="e.g. JFK" ${busy?'disabled':''}/></div>
+          <div class="field"><label>Destination</label><input data-travel-field="details.destination" value="${esc(d.destination||'')}" placeholder="e.g. MIA" ${busy?'disabled':''}/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Arrive By</label><input type="datetime-local" data-travel-field="details.arriveBy" value="${d.arriveBy||''}" ${busy?'disabled':''}/></div>
+          <div class="field"><label>Depart After</label><input type="datetime-local" data-travel-field="details.departAfter" value="${d.departAfter||''}" ${busy?'disabled':''}/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Flight Class</label><select data-travel-field="details.flightClass" ${busy?'disabled':''}>${['economy','premium_economy','business','first'].map(c=>`<option value="${c}" ${d.flightClass===c?'selected':''}>${c.replace('_',' ')}</option>`).join('')}</select></div>
+          <div class="field"><label>Flight Qty</label><input type="number" data-travel-field="details.flightQty" value="${d.flightQty||1}" ${busy?'disabled':''}/></div>
+        </div>
+        <div class="field" style="flex-direction:row;align-items:center;gap:8px;">
+          <input type="checkbox" id="trHotel" data-travel-field="details.hotelNeeded" ${d.hotelNeeded?'checked':''} ${busy?'disabled':''}/>
+          <label for="trHotel" style="text-transform:none;font-size:13px;color:var(--ink);font-weight:500;">Hotel needed</label>
+        </div>
+        ${d.hotelNeeded? `<div class="field"><label>Hotel Preferences</label><input data-travel-field="details.hotelPrefs" value="${esc(d.hotelPrefs||'')}" placeholder="e.g. 1 room, 1 night, standard" ${busy?'disabled':''}/></div>` : ''}
+        <div class="field" style="flex-direction:row;align-items:center;gap:8px;">
+          <input type="checkbox" id="trGround" data-travel-field="details.groundTransportNeeded" ${d.groundTransportNeeded?'checked':''} ${busy?'disabled':''}/>
+          <label for="trGround" style="text-transform:none;font-size:13px;color:var(--ink);font-weight:500;">Ground transport needed</label>
+        </div>
+        ${d.groundTransportNeeded? `<div class="field"><label>Ground Transport Notes</label><input data-travel-field="details.groundTransportNotes" value="${esc(d.groundTransportNotes||'')}" ${busy?'disabled':''}/></div>` : ''}
+        <div class="field"><label>Notes</label><textarea data-travel-field="details.notes" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);" ${busy?'disabled':''}>${esc(d.notes||'')}</textarea></div>
+        ${tr.status==='draft'? `<button class="btn btn-primary btn-block" data-action="send-travel-request" data-id="${tr.id}" ${canSend&&!busy?'':'disabled'}>${busy?'Sending…':'Send to Rivky'}</button>`
+        : `<div class="chip-row">
+            ${['sent','awaiting_reply','answered','completed'].map(s=>`<button class="filter-chip ${tr.status===s?'sel':''}" data-action="set-travel-request-status" data-id="${tr.id}" data-status="${s}">${esc(travelRequestStatusLabel(s))}</button>`).join('')}
+          </div>
+          <button class="btn btn-sm" data-action="send-travel-request" data-id="${tr.id}" ${busy?'disabled':''}>${busy?'Sending…':'Resend Follow-up'}</button>
+          ${tr.sentAt? `<p style="font-size:11px;color:var(--ink-3);margin:0;">Sent ${fmtDateShort(tr.sentAt.slice(0,10))}</p>` : ''}`}
+      </div>
+    </div>
+  </div>`;
+}
+
 /* ---- Send Contract confirm (calls the send-contract-email Supabase Edge Function) ---- */
 function renderSendContractConfirmModal(){
   const c = getContract(S.contractBuilderId); if(!c) return '';
@@ -14808,6 +15003,13 @@ function renderQuickBooksCard(){
       <p style="font-size:11.5px;color:var(--ink-3);margin:8px 0 0;">Sending a contract can also create and email a QuickBooks invoice for the deposit, payable by credit card.</p>`
     : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">Not connected yet. Connecting lets Send Contract also create and email a real QuickBooks invoice for the deposit.</p>
       <a href="${qboAuthorizeUrl()}" class="btn btn-sm btn-primary">Connect QuickBooks</a>`}
+  </div>`;
+}
+function renderTravelSettingsCard(){
+  return `<div class="card card-pad" style="margin-bottom:20px;">
+    <h3 style="margin-bottom:6px;">Travel (Rivky)</h3>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 12px;">Travel requests are never sent until this is set — per the spec, Rivky's address is never hardcoded into the app.</p>
+    <div class="field"><label>Rivky's Email</label><input data-field="rivkyEmail" data-form="orgsettings" type="email" value="${esc(ORG_SETTINGS.rivkyEmail||'')}" placeholder="rivky@example.com"/></div>
   </div>`;
 }
 function renderDataMigrationCard(){
@@ -15763,9 +15965,10 @@ function bindGlobal(){
       const form = el.closest('[data-form]')?.getAttribute('data-form');
       if(form==='task'){ S.newTaskText = el.value; return; }
       if(form==='comment'){ S.newCommentText = el.value; return; }
-      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm, payeeprofile:S.payeeProfileForm, sendcontract:S.sendContractForm };
+      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm, payeeprofile:S.payeeProfileForm, sendcontract:S.sendContractForm, orgsettings:ORG_SETTINGS };
       const target = formTargets[form] || S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
+      if(form==='orgsettings') saveOrgSettings();
       if(el.type==='checkbox') render();
     });
   });
@@ -15796,6 +15999,17 @@ function bindGlobal(){
       setOutsideBookingFieldByPath(b, path, val);
       saveOutsideBookings();
       if(el.type==='checkbox') render(); // reveals/hides dependent fields (flight/hotel/etc. sub-forms)
+    });
+  });
+  document.querySelectorAll('[data-travel-field]').forEach(el=>{
+    const evt = (el.tagName==='SELECT' || el.type==='checkbox') ? 'change' : 'input';
+    el.addEventListener(evt, ()=>{
+      const tr = getTravelRequest(S.travelRequestDetailId); if(!tr) return;
+      const path = el.getAttribute('data-travel-field');
+      const val = el.type==='checkbox' ? el.checked : (el.type==='number' ? Number(el.value)||0 : el.value);
+      setTravelRequestFieldByPath(tr, path, val);
+      saveTravelRequests();
+      if(el.type==='checkbox') render();
     });
   });
   document.querySelectorAll('[data-outside-reminder-field]').forEach(el=>{
@@ -16048,6 +16262,13 @@ function bindGlobal(){
       case 'open-outside-booking-detail': S.showOutsideBookingDetail=true; S.outsideBookingDetailId=id; render(); break;
       case 'close-outside-booking-detail': S.showOutsideBookingDetail=false; S.outsideBookingDetailId=null; render(); break;
       case 'outsidebookingdetail-overlay-close': if(e.target===t){ S.showOutsideBookingDetail=false; S.outsideBookingDetailId=null; render(); } break;
+      case 'create-travel-request': doCreateTravelRequest(id); break;
+      case 'open-travel-request': S.showTravelRequestDetail=true; S.travelRequestDetailId=id; render(); break;
+      case 'close-travel-request-detail': S.showTravelRequestDetail=false; S.travelRequestDetailId=null; render(); break;
+      case 'travelrequest-overlay-close': if(e.target===t){ S.showTravelRequestDetail=false; S.travelRequestDetailId=null; render(); } break;
+      case 'send-travel-request': doSendTravelRequest(id); break;
+      case 'set-travel-request-status': doSetTravelRequestStatus(id, t.getAttribute('data-status')); break;
+      case 'delete-travel-request': doDeleteTravelRequest(id); break;
       case 'add-outside-booking-reminder': doAddOutsideBookingReminder(S.outsideBookingDetailId); break;
       case 'remove-outside-booking-reminder': doRemoveOutsideBookingReminder(t.getAttribute('data-clause'), id); break;
       case 'complete-outside-booking-reminder': doCompleteOutsideBookingReminder(t.getAttribute('data-clause'), id); break;
