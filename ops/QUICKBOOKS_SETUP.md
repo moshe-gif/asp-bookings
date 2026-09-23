@@ -70,12 +70,39 @@ QuickBooks** → sign in to the real QuickBooks Online account and authorize. Yo
 Settings showing "Connected." From then on, the Send Contract confirm screen offers "Also send a
 QuickBooks invoice for the deposit," pre-filled with the deposit amount.
 
+## Part 6 — Payment sync webhook (optional, ~10 min)
+
+Once Part 5 is working, this closes the loop: QuickBooks pushes a real-time notification whenever
+a payment comes in, and the app records it as a real `payments` row instead of Moshe having to
+check QuickBooks separately. This is the PRIMARY signal; treat it as best-effort until it's been
+tested against a real payment (see the Notes in `supabase/functions/qbo-webhook/index.ts` — it was
+written against Intuit's documented payload shape but never exercised against a live sandbox).
+
+1. In the Intuit Developer app (same one from Part 1) → **Webhooks** tab.
+2. **Endpoint URL**: `https://psgpxbkncuavlnpplykf.supabase.co/functions/v1/qbo-webhook`
+3. Subscribe to the **Payment** entity (Invoice isn't needed — the app deliberately never marks a
+   payment received just because an invoice was created or sent, only from an actual Payment
+   notification).
+4. Copy the **Webhooks Verifier Token** shown there.
+5. Deploy `qbo-webhook` from `supabase/functions/qbo-webhook/index.ts` — turn OFF "Enforce JWT
+   Verification" (Intuit's webhook POST carries no Supabase auth token; this function verifies the
+   `intuit-signature` header itself instead).
+6. Add the Function Secret `QBO_WEBHOOK_VERIFIER_TOKEN` = the token from step 4.
+7. Run `supabase/migrations/0018_payments_unmatched_status.sql` in the SQL Editor if it hasn't run
+   yet — it adds the `unmatched` status a payment lands in when the webhook can't match it to a
+   known invoice (never silently discarded).
+8. In the app, **Settings → Payment Reconciliation Queue → Check Queue** shows anything unmatched.
+   Resolving one (linking it to the right invoice) happens directly in Supabase or QuickBooks for
+   now — a resolve-from-the-app action is a natural next step once this is confirmed working.
+
+A scheduled reconciliation poll (the backup signal for anything the webhook misses — downtime, a
+dropped delivery) isn't built yet; it would be a Supabase scheduled function calling the QuickBooks
+API for open invoices on a cron, using the same `getValidAccessToken()` pattern already in
+`qbo-create-invoice`/`qbo-webhook`.
+
 ## Notes
 
 - The connection is shared for the whole app (one QuickBooks company, not per-user) — whichever
   admin connects it first is fine, anyone can hit Reconnect later if it needs refreshing.
 - QuickBooks refresh tokens are valid ~100 days and rotate on every use; the Edge Functions handle
   refreshing automatically, but if it's ever untouched for 100+ days it will need reconnecting.
-- This does not yet track *when* an invoice actually gets paid inside the app (Moshe would still
-  see that in QuickBooks itself) — that's a natural next step (QuickBooks webhooks or a status-
-  check button) once this base flow is confirmed working.

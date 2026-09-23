@@ -996,6 +996,24 @@ function contractToSupabaseRow(c, payeeSupabaseId){
     qbo_invoice_id: c.qboInvoiceId||null, qbo_invoice_doc_number: c.qboInvoiceDocNumber||null, signed_at: c.signedAt||null,
   };
 }
+// Admin reconciliation queue (ops automation spec item 3/5): payments the qbo-webhook handler
+// couldn't resolve to a known invoice land here with status='unmatched' rather than being
+// silently discarded. Read-only for now -- resolving one (linking it to the right invoice, or
+// marking it handled) happens directly in Supabase/QuickBooks until a resolve action is built;
+// this pass is about making the queue visible and honest, not the full resolution workflow.
+async function loadReconciliationQueue(){
+  if(!supabaseClient) return;
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(!session) return;
+  S.reconciliationBusy = true; render();
+  try{
+    const { data, error } = await supabaseClient.from('payments').select('*').eq('status','unmatched').order('received_at', {ascending:false});
+    if(error){ toast('Could not load the reconciliation queue: ' + error.message, 'system'); return; }
+    S.reconciliationQueue = data||[];
+  } finally {
+    S.reconciliationBusy = false; render();
+  }
+}
 async function doMigratePayeeProfilesToSupabase(){
   if(!supabaseClient){ toast('Sign in with your real ASP account first (not available in Demo Mode).', 'system'); return; }
   const todo = PAYEE_PROFILES.filter(p=>!p._supabaseId);
@@ -10901,6 +10919,8 @@ let S = {
   sendContractBusy:false,
   qboStatus:null, // null = unknown/not yet checked, else {connected, realmId, connectedAt}
   gcalStatus:null, // null = unknown/not yet checked, else {connected, email, connectedAt}
+  reconciliationQueue:null, // null until checked, else array of unmatched payments rows
+  reconciliationBusy:false,
   migrationPreview:null, // null until "Preview" clicked, else {payeeProfiles:{total,migrated}, contracts:{total,migrated}}
   sendContractInvoice:true,
   showTravelRequestDetail:false,
@@ -11854,6 +11874,8 @@ function renderSettingsPage(){
   ${isAdmin ? renderQuickBooksCard() : ''}
 
   ${isAdmin ? renderGoogleCalendarSyncCard() : ''}
+
+  ${isAdmin ? renderReconciliationCard() : ''}
 
   ${isAdmin ? renderDataMigrationCard() : ''}
 
@@ -15095,6 +15117,20 @@ function renderGoogleCalendarSyncCard(){
       <a href="${gcalAuthorizeUrl()}" class="btn btn-sm btn-primary">Connect Google Calendar</a>`}
   </div>`;
 }
+function renderReconciliationCard(){
+  const queue = S.reconciliationQueue;
+  const busy = !!S.reconciliationBusy;
+  return `<div class="card card-pad" style="margin-bottom:20px;">
+    <h3 style="margin-bottom:6px;">Payment Reconciliation Queue</h3>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 12px;">QuickBooks payments the webhook couldn't match to a known invoice land here rather than being silently dropped. Read-only for now — resolve one directly in Supabase or QuickBooks.</p>
+    ${!queue? `<button class="btn btn-sm" data-action="check-reconciliation-queue" ${busy?'disabled':''}>${busy?'Checking…':'Check Queue'}</button>`
+    : queue.length===0? `<div class="settings-row" style="border-bottom:none;"><span class="pill pill-good">Nothing unmatched</span><button class="btn btn-sm btn-ghost" data-action="check-reconciliation-queue">Refresh</button></div>`
+    : `<div style="display:flex;flex-direction:column;gap:8px;">
+        ${queue.map(p=>`<div class="settings-row"><div><h4>${money(p.amount)}</h4><p>${esc(p.notes||'')} &middot; ${fmtDateShort((p.received_at||'').slice(0,10))}</p></div><span class="pill">Unmatched</span></div>`).join('')}
+        <button class="btn btn-sm btn-ghost" style="align-self:flex-start;" data-action="check-reconciliation-queue">Refresh</button>
+      </div>`}
+  </div>`;
+}
 function renderDataMigrationCard(){
   const preview = S.migrationPreview;
   return `<div class="card card-pad" style="margin-bottom:20px;">
@@ -16328,6 +16364,7 @@ function bindGlobal(){
       case 'remove-payee-zelle-qr': S.payeeProfileForm.zelleQrDataUrl = null; render(); break;
       case 'delete-payee-profile': doDeletePayeeProfile(id); break;
       case 'preview-data-migration': S.migrationPreview = computeMigrationCounts(); render(); break;
+      case 'check-reconciliation-queue': loadReconciliationQueue(); break;
       case 'migrate-payee-profiles': doMigratePayeeProfilesToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
       case 'migrate-contracts': doMigrateContractsToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
       case 'open-send-contract': { const c=getContract(id); if(c){ const figures=contractPaymentFigures(c); S.contractBuilderId=id; S.showSendContractConfirm=true; S.sendContractInvoice=true; S.sendContractForm={ to:c.snapshot.clientEmail||'', subject:`${contractTemplateLabel(c.template)} — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` — ${fmtDateShort(c.snapshot.eventDate)}`:''}`, qboAmount: figures.deposit||'', qboDescription: `Deposit — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` (${fmtDateShort(c.snapshot.eventDate)})`:''}` }; } render(); break; }
