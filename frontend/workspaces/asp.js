@@ -1192,10 +1192,56 @@ function doCreateTravelRequest(eventId){
       notes:'',
     },
     sentAt:null, gmailThreadId:null, gmailMessageId:null, followUpAt:null, owner: S.user,
+    flightSegments: [],
   };
   TRAVEL_REQUESTS.unshift(tr); saveTravelRequests();
   S.showTravelRequestDetail=true; S.travelRequestDetailId=tr.id;
   render();
+}
+// Flight tracking (ops automation spec item 8). No auto-extraction from Rivky's reply yet (needs
+// Gmail, blocked same as Phase 6) -- admin enters confirmed details by hand once known through any
+// channel, which the spec's own "admin approves parsed details" step already requires regardless
+// of how they were sourced. "Check Status" calls the flightaware-status adapter for real once
+// FLIGHTAWARE_API_KEY is configured; until then it reports that plainly rather than pretending.
+function doAddFlightSegment(trId){
+  const tr = getTravelRequest(trId); if(!tr) return;
+  tr.flightSegments = tr.flightSegments||[];
+  tr.flightSegments.push({ id:'FLT-'+Math.random().toString(36).slice(2,7), airline:'', flightNumber:'', confirmationCode:'', departureAirport:'', arrivalAirport:'', departureAt:'', arrivalAt:'', lastStatus:null, lastStatusAt:null });
+  saveTravelRequests(); render();
+}
+function doRemoveFlightSegment(trId, segId){
+  const tr = getTravelRequest(trId); if(!tr) return;
+  tr.flightSegments = (tr.flightSegments||[]).filter(s=>s.id!==segId);
+  saveTravelRequests(); render();
+}
+function setFlightSegmentFieldByPath(tr, segId, field, value){
+  const seg = (tr.flightSegments||[]).find(s=>s.id===segId); if(!seg) return;
+  seg[field] = value;
+}
+async function doCheckFlightStatus(trId, segId){
+  const tr = getTravelRequest(trId); if(!tr) return;
+  const seg = (tr.flightSegments||[]).find(s=>s.id===segId); if(!seg) return;
+  if(!seg.airline || !seg.flightNumber){ toast('Enter the airline and flight number first.', 'system'); return; }
+  if(!supabaseClient){ toast('Sign in with your real ASP account to check flight status (not available in Demo Mode).', 'system'); return; }
+  S.flightStatusBusy = segId; render();
+  try{
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/flightaware-status`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${session ? session.access_token : SUPABASE_PUBLISHABLE_KEY}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
+      body: JSON.stringify({ ident: `${seg.airline}${seg.flightNumber}` }),
+    });
+    const data = await resp.json().catch(()=>({ok:false, error:'Unexpected response from the server.'}));
+    if(!resp.ok || data.ok===false){ toast(data.error || 'Could not check flight status.', 'system'); return; }
+    seg.lastStatus = data.status || (data.cancelled? 'Cancelled' : null);
+    seg.lastStatusAt = new Date().toISOString();
+    saveTravelRequests();
+    toast(`Status: ${seg.lastStatus||'unknown'}.`, 'success');
+  } catch(err){
+    toast('Could not check flight status: ' + String(err), 'system');
+  } finally {
+    S.flightStatusBusy = null; render();
+  }
 }
 function setTravelRequestFieldByPath(tr, path, value){
   const parts = path.split('.');
@@ -10926,6 +10972,7 @@ let S = {
   showTravelRequestDetail:false,
   travelRequestDetailId:null,
   travelRequestBusy:false,
+  flightStatusBusy:null, // null, or the flight-segment id currently being checked
   contractsSearchQuery:'',
   contractsStatusFilter:'all',
 };
@@ -14362,6 +14409,32 @@ function renderTemplatePickerModal(){
   </div>`;
 }
 
+function renderFlightSegmentsSection(tr){
+  const segs = tr.flightSegments||[];
+  return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3 style="font-size:12.5px;margin:0;color:var(--ink-2);">Confirmed Flights</h3>
+      <button class="btn btn-sm btn-ghost" data-action="add-flight-segment" data-id="${tr.id}">${ICO.plus} Add</button>
+    </div>
+    ${segs.length===0? `<p style="font-size:11.5px;color:var(--ink-3);margin:0;">Nothing entered yet -- add a flight once Rivky confirms one, from any channel.</p>` : ''}
+    ${segs.map(seg=>`<div style="display:flex;flex-direction:column;gap:6px;padding:10px;background:var(--surface-2);border-radius:8px;">
+      <div class="field-row">
+        <div class="field"><label>Airline</label><input data-flight-seg-field="${seg.id}.airline" value="${esc(seg.airline||'')}" placeholder="e.g. AA" /></div>
+        <div class="field"><label>Flight #</label><input data-flight-seg-field="${seg.id}.flightNumber" value="${esc(seg.flightNumber||'')}" placeholder="123" /></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Confirmation</label><input data-flight-seg-field="${seg.id}.confirmationCode" value="${esc(seg.confirmationCode||'')}" /></div>
+        <div class="field"><label>Route</label><input data-flight-seg-field="${seg.id}.departureAirport" value="${esc(seg.departureAirport||'')}" placeholder="JFK" style="width:60px;flex:none;" />
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <button class="btn btn-sm" data-action="check-flight-status" data-id="${tr.id}" data-seg="${seg.id}" ${S.flightStatusBusy===seg.id?'disabled':''}>${S.flightStatusBusy===seg.id?'Checking…':'Check Status'}</button>
+        <button class="icon-btn" data-action="remove-flight-segment" data-id="${tr.id}" data-seg="${seg.id}" title="Remove">${ICO.x}</button>
+      </div>
+      ${seg.lastStatus? `<p style="font-size:11px;color:var(--ink-2);margin:0;">Last checked: <strong>${esc(seg.lastStatus)}</strong>${seg.lastStatusAt? ` (${fmtDateShort(seg.lastStatusAt.slice(0,10))})` : ''}</p>` : ''}
+    </div>`).join('')}
+  </div>`;
+}
 function renderTravelRequestDetailSheet(){
   const tr = getTravelRequest(S.travelRequestDetailId); if(!tr) return '';
   const ev = getEvent(tr.eventId);
@@ -14403,6 +14476,7 @@ function renderTravelRequestDetailSheet(){
         </div>
         ${d.groundTransportNeeded? `<div class="field"><label>Ground Transport Notes</label><input data-travel-field="details.groundTransportNotes" value="${esc(d.groundTransportNotes||'')}" ${busy?'disabled':''}/></div>` : ''}
         <div class="field"><label>Notes</label><textarea data-travel-field="details.notes" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);" ${busy?'disabled':''}>${esc(d.notes||'')}</textarea></div>
+        ${renderFlightSegmentsSection(tr)}
         ${tr.status==='draft'? `<button class="btn btn-primary btn-block" data-action="send-travel-request" data-id="${tr.id}" ${canSend&&!busy?'':'disabled'}>${busy?'Sending…':'Send to Rivky'}</button>`
         : `<div class="chip-row">
             ${['sent','awaiting_reply','answered','completed'].map(s=>`<button class="filter-chip ${tr.status===s?'sel':''}" data-action="set-travel-request-status" data-id="${tr.id}" data-status="${s}">${esc(travelRequestStatusLabel(s))}</button>`).join('')}
@@ -16143,6 +16217,14 @@ function bindGlobal(){
       if(el.type==='checkbox') render();
     });
   });
+  document.querySelectorAll('[data-flight-seg-field]').forEach(el=>{
+    el.addEventListener('input', ()=>{
+      const tr = getTravelRequest(S.travelRequestDetailId); if(!tr) return;
+      const [segId, field] = el.getAttribute('data-flight-seg-field').split('.');
+      setFlightSegmentFieldByPath(tr, segId, field, el.value);
+      saveTravelRequests();
+    });
+  });
   document.querySelectorAll('[data-outside-reminder-field]').forEach(el=>{
     el.addEventListener('input', ()=>{
       const b = getOutsideBooking(S.outsideBookingDetailId); if(!b) return;
@@ -16401,6 +16483,9 @@ function bindGlobal(){
       case 'close-travel-request-detail': S.showTravelRequestDetail=false; S.travelRequestDetailId=null; render(); break;
       case 'travelrequest-overlay-close': if(e.target===t){ S.showTravelRequestDetail=false; S.travelRequestDetailId=null; render(); } break;
       case 'send-travel-request': doSendTravelRequest(id); break;
+      case 'add-flight-segment': doAddFlightSegment(id); break;
+      case 'remove-flight-segment': doRemoveFlightSegment(id, t.getAttribute('data-seg')); break;
+      case 'check-flight-status': doCheckFlightStatus(id, t.getAttribute('data-seg')); break;
       case 'set-travel-request-status': doSetTravelRequestStatus(id, t.getAttribute('data-status')); break;
       case 'delete-travel-request': doDeleteTravelRequest(id); break;
       case 'add-outside-booking-reminder': doAddOutsideBookingReminder(S.outsideBookingDetailId); break;
