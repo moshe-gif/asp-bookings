@@ -10862,6 +10862,17 @@ function gcalAuthorizeUrl(){
   return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(GOOGLE_CALENDAR_CLIENT_ID)}&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(GOOGLE_CALENDAR_REDIRECT_URI)}&response_type=code&access_type=offline&prompt=consent&state=${state}`;
 }
 
+// Gmail mailbox connections (ops automation spec item 6: Zelle matching from artist mailboxes).
+// Unlike QBO/Google Calendar (one ASP-wide account), each mailbox here is authorized by its own
+// owner -- state carries WHICH gmail_mailboxes row this consent is for (see gmail-oauth-callback).
+// Narrowest read-only scope, per "narrowest scope" in the spec.
+const GMAIL_CLIENT_ID = '';
+const GMAIL_REDIRECT_URI = SUPABASE_URL + '/functions/v1/gmail-oauth-callback';
+function gmailAuthorizeUrl(mailboxId){
+  const scope = 'https://www.googleapis.com/auth/gmail.readonly';
+  return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(GMAIL_CLIENT_ID)}&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(GMAIL_REDIRECT_URI)}&response_type=code&access_type=offline&prompt=consent&state=${encodeURIComponent(mailboxId)}`;
+}
+
 /* ============ STATE ============ */
 const LS_KEY='asp_mock_state_v2';
 let S = {
@@ -10967,6 +10978,9 @@ let S = {
   gcalStatus:null, // null = unknown/not yet checked, else {connected, email, connectedAt}
   reconciliationQueue:null, // null until checked, else array of unmatched payments rows
   reconciliationBusy:false,
+  gmailMailboxes:null, // null until checked, else array of {id, mailboxType, artistId, email, connected, connectedAt, watchExpiresAt}
+  gmailMailboxesBusy:false,
+  newGmailMailboxForm:{},
   migrationPreview:null, // null until "Preview" clicked, else {payeeProfiles:{total,migrated}, contracts:{total,migrated}}
   sendContractInvoice:true,
   showTravelRequestDetail:false,
@@ -11174,6 +11188,35 @@ async function refreshQboStatus(){
     render();
   }catch(err){ /* Settings just shows "not connected" if this fails -- non-critical */ }
 }
+async function loadGmailStatus(){
+  if(!supabaseClient) return;
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(!session) return;
+  S.gmailMailboxesBusy = true; render();
+  try{
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/gmail-status`, {
+      headers: { 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
+    });
+    const data = await resp.json().catch(()=>null);
+    if(resp.ok && data && data.ok) S.gmailMailboxes = data.mailboxes;
+    else toast((data&&data.error) || 'Could not load Gmail mailboxes.', 'system');
+  } finally {
+    S.gmailMailboxesBusy = false; render();
+  }
+}
+async function doAddGmailMailbox(){
+  if(!supabaseClient){ toast('Sign in with your real ASP account (not available in Demo Mode).', 'system'); return; }
+  const f = S.newGmailMailboxForm||{};
+  const email = (f.email||'').trim();
+  if(!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ toast('Enter a valid mailbox email.', 'system'); return; }
+  const { error } = await supabaseClient.from('gmail_mailboxes').insert({
+    mailbox_type: f.mailboxType||'artist_payment', artist_id: f.artistId||null, email,
+  });
+  if(error){ toast('Could not add mailbox: ' + error.message, 'system'); return; }
+  S.newGmailMailboxForm = {};
+  toast('Mailbox added -- click Connect to authorize it.', 'success');
+  loadGmailStatus();
+}
 async function refreshGcalStatus(){
   if(!supabaseClient) return;
   try{
@@ -11187,6 +11230,14 @@ async function refreshGcalStatus(){
     render();
   }catch(err){ /* Settings just shows "not connected" if this fails -- non-critical */ }
 }
+(function checkGmailRedirect(){
+  const params = new URLSearchParams(location.search);
+  const gmail = params.get('gmail');
+  if(!gmail) return;
+  history.replaceState(null, '', location.pathname + location.hash);
+  if(gmail==='connected'){ toast('Gmail mailbox connected.', 'success'); loadGmailStatus(); }
+  else if(gmail==='error'){ toast('Could not connect that Gmail mailbox -- check the setup and try again.', 'system'); }
+})();
 (function checkGcalRedirect(){
   const params = new URLSearchParams(location.search);
   const gcal = params.get('gcal');
@@ -11923,6 +11974,8 @@ function renderSettingsPage(){
   ${isAdmin ? renderGoogleCalendarSyncCard() : ''}
 
   ${isAdmin ? renderReconciliationCard() : ''}
+
+  ${isAdmin ? renderGmailMailboxesCard() : ''}
 
   ${isAdmin ? renderDataMigrationCard() : ''}
 
@@ -15191,6 +15244,35 @@ function renderGoogleCalendarSyncCard(){
       <a href="${gcalAuthorizeUrl()}" class="btn btn-sm btn-primary">Connect Google Calendar</a>`}
   </div>`;
 }
+function renderGmailMailboxesCard(){
+  const configured = !!GMAIL_CLIENT_ID;
+  const boxes = S.gmailMailboxes;
+  const busy = !!S.gmailMailboxesBusy;
+  const f = S.newGmailMailboxForm||{};
+  return `<div class="card card-pad" style="margin-bottom:20px;">
+    <h3 style="margin-bottom:6px;">Gmail Mailboxes (Zelle Matching)</h3>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 12px;">Each artist's own mailbox is connected separately (narrowest read-only scope) so incoming Zelle notifications can be matched to a balance automatically. ${!configured? 'Not set up yet -- see <code>ops/GMAIL_SETUP.md</code>.' : ''}</p>
+    <div class="field-row" style="align-items:flex-end;">
+      <div class="field"><label>Artist</label>
+        <select data-field="artistId" data-form="gmailmailbox">
+          <option value="">— ASP sending mailbox —</option>
+          ${ARTISTS.map(a=>`<option value="${a.id}" ${f.artistId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Mailbox Email</label><input data-field="email" data-form="gmailmailbox" type="email" value="${esc(f.email||'')}" placeholder="name@gmail.com"/></div>
+    </div>
+    <button class="btn btn-sm" style="margin-bottom:12px;" data-action="add-gmail-mailbox">${ICO.plus} Add Mailbox</button>
+    ${!boxes? `<button class="btn btn-sm btn-ghost" data-action="check-gmail-mailboxes" ${busy?'disabled':''}>${busy?'Checking…':'Check Mailboxes'}</button>`
+    : boxes.length===0? `<p style="font-size:12px;color:var(--ink-3);margin:0;">No mailboxes added yet.</p>`
+    : `<div style="display:flex;flex-direction:column;gap:8px;">
+        ${boxes.map(m=>{ const a = m.artist_id ? artistById(m.artist_id) : null; return `<div class="settings-row">
+          <div><h4>${esc(a?a.name:'ASP Sending')}</h4><p>${esc(m.email)}</p></div>
+          ${m.connected? `<span class="pill pill-good">Connected</span>` : configured? `<a href="${gmailAuthorizeUrl(m.id)}" class="btn btn-sm btn-primary">Connect</a>` : `<span class="pill">Not connected</span>`}
+        </div>`; }).join('')}
+        <button class="btn btn-sm btn-ghost" style="align-self:flex-start;" data-action="check-gmail-mailboxes">Refresh</button>
+      </div>`}
+  </div>`;
+}
 function renderReconciliationCard(){
   const queue = S.reconciliationQueue;
   const busy = !!S.reconciliationBusy;
@@ -16170,7 +16252,7 @@ function bindGlobal(){
       const form = el.closest('[data-form]')?.getAttribute('data-form');
       if(form==='task'){ S.newTaskText = el.value; return; }
       if(form==='comment'){ S.newCommentText = el.value; return; }
-      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm, payeeprofile:S.payeeProfileForm, sendcontract:S.sendContractForm, orgsettings:ORG_SETTINGS };
+      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm, payeeprofile:S.payeeProfileForm, sendcontract:S.sendContractForm, orgsettings:ORG_SETTINGS, gmailmailbox:S.newGmailMailboxForm };
       const target = formTargets[form] || S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
       if(form==='orgsettings') saveOrgSettings();
@@ -16447,6 +16529,8 @@ function bindGlobal(){
       case 'delete-payee-profile': doDeletePayeeProfile(id); break;
       case 'preview-data-migration': S.migrationPreview = computeMigrationCounts(); render(); break;
       case 'check-reconciliation-queue': loadReconciliationQueue(); break;
+      case 'check-gmail-mailboxes': loadGmailStatus(); break;
+      case 'add-gmail-mailbox': doAddGmailMailbox(); break;
       case 'migrate-payee-profiles': doMigratePayeeProfilesToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
       case 'migrate-contracts': doMigrateContractsToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
       case 'open-send-contract': { const c=getContract(id); if(c){ const figures=contractPaymentFigures(c); S.contractBuilderId=id; S.showSendContractConfirm=true; S.sendContractInvoice=true; S.sendContractForm={ to:c.snapshot.clientEmail||'', subject:`${contractTemplateLabel(c.template)} — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` — ${fmtDateShort(c.snapshot.eventDate)}`:''}`, qboAmount: figures.deposit||'', qboDescription: `Deposit — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` (${fmtDateShort(c.snapshot.eventDate)})`:''}` }; } render(); break; }
