@@ -216,15 +216,48 @@ function getInvoice(id){ return CUSTOM_INVOICES.find(i=>i.id===id); }
 /* ============ OUTSIDE BOOKINGS (jobs that don't involve one of our own artists) ============ */
 let OBID = 1;
 function outsideBookingPayout(b){ return (b.totalAmount||0) - (b.aspCut||0); }
+// Additive-defaults migration (same convention as migrateContract()/migratePayeeProfiles()) for
+// the External Events expansion -- every already-saved outside booking opens unchanged, just with
+// the new fields defaulted. See supabase/migrations/0011_external_events_and_reminders.sql for
+// the eventual real-backend shape this mirrors.
+function migrateOutsideBooking(b){
+  let migrated = false;
+  if(b.performerArtistId===undefined){ b.performerArtistId = null; migrated = true; }
+  if(b.performerContact===undefined){ b.performerContact = ''; migrated = true; }
+  if(b.eventName===undefined){ b.eventName = ''; migrated = true; }
+  if(b.eventType===undefined){ b.eventType = ''; migrated = true; }
+  if(b.startTime===undefined){ b.startTime = ''; migrated = true; }
+  if(b.endTime===undefined){ b.endTime = ''; migrated = true; }
+  if(b.timezone===undefined){ b.timezone = 'America/New_York'; migrated = true; }
+  if(b.address===undefined){ b.address = ''; migrated = true; }
+  if(b.clientPhone===undefined){ b.clientPhone = ''; migrated = true; }
+  if(b.source===undefined){ b.source = ''; migrated = true; }
+  if(b.showOnAspCalendar===undefined){ b.showOnAspCalendar = false; migrated = true; }
+  if(!b.reminders){ b.reminders = []; migrated = true; }
+  if(b.flightNeeded===undefined){ b.flightNeeded = false; migrated = true; }
+  if(b.flightBooked===undefined){ b.flightBooked = false; migrated = true; }
+  if(b.flight===undefined){ b.flight = null; migrated = true; }
+  if(b.groundTransportNeeded===undefined){ b.groundTransportNeeded = false; migrated = true; }
+  if(b.groundTransportBooked===undefined){ b.groundTransportBooked = false; migrated = true; }
+  if(b.groundTransport===undefined){ b.groundTransport = null; migrated = true; }
+  if(b.hotelNeeded===undefined){ b.hotelNeeded = false; migrated = true; }
+  if(b.hotel===undefined){ b.hotel = null; migrated = true; }
+  return migrated;
+}
 function makeOutsideBooking(performerName, clientName, clientEmail, date, venue, city, state, totalAmount, aspCut, notes, status, daysAgo){
   const created = addDays(new Date(), -daysAgo);
   const log = [{ts:created.toISOString(), type:'system', text:`Outside booking created — ${performerName} for ${clientName}.`}];
   const paid = status==='paid';
   if(paid) log.push({ts:addDays(created, Math.max(1,Math.round(daysAgo/2))).toISOString(), type:'success', text:'Marked paid.'});
   return {
-    id:'OB-'+(OBID++), performerName, performerContact:'', clientName, clientEmail: clientEmail||'',
-    date, venue: venue||'', city: city||'', state: state||'',
-    totalAmount, aspCut, notes: notes||'', status,
+    id:'OB-'+(OBID++), performerArtistId:null, performerName, performerContact:'', clientName, clientEmail: clientEmail||'', clientPhone:'',
+    eventName:'', eventType:'', date, startTime:'', endTime:'', timezone:'America/New_York',
+    venue: venue||'', address:'', city: city||'', state: state||'',
+    totalAmount, aspCut, notes: notes||'', source:'', status, showOnAspCalendar:false,
+    reminders: [],
+    flightNeeded:false, flightBooked:false, flight:null,
+    groundTransportNeeded:false, groundTransportBooked:false, groundTransport:null,
+    hotelNeeded:false, hotel:null,
     createdAt: fmtISO(created), log,
   };
 }
@@ -240,6 +273,9 @@ function saveOutsideBookings(){ try{ localStorage.setItem(OUTSIDE_BOOKINGS_LS_KE
 let OUTSIDE_BOOKINGS = loadOutsideBookings();
 if(!OUTSIDE_BOOKINGS){ OUTSIDE_BOOKINGS = seedOutsideBookings(); saveOutsideBookings(); }
 else {
+  let anyObMigrated = false;
+  OUTSIDE_BOOKINGS.forEach(b=>{ if(migrateOutsideBooking(b)) anyObMigrated = true; });
+  if(anyObMigrated) saveOutsideBookings();
   OBID = OUTSIDE_BOOKINGS.reduce((max,b)=>{ const n=parseInt(String(b.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, OBID);
 }
 function getOutsideBooking(id){ return OUTSIDE_BOOKINGS.find(b=>b.id===id); }
@@ -10611,6 +10647,8 @@ let S = {
   showNewInvoice:false,
   newInvoiceForm:{},
   showNewOutsideBooking:false,
+  showOutsideBookingDetail:false,
+  outsideBookingDetailId:null,
   newOutsideBookingForm:{},
   showDocumentBuilder:false,
   documentId:null,
@@ -11052,6 +11090,7 @@ function closeAllOverlays(){
   S.showEditEvent=false;
   S.showGigInfoForm=false; S.gigInfoForm={}; S.newGigContactForm={}; S.showGigInfoDoc=false; S.gigInfoDocEventId=null;
   S.showNewInvoice=false; S.showInvoiceDoc=false; S.invoiceDocId=null; S.showNewOutsideBooking=false;
+  S.showOutsideBookingDetail=false; S.outsideBookingDetailId=null;
   S.showDocumentBuilder=false; S.documentId=null; S.showAiEditNotice=false;
   S.showAddCharge=false; S.showEventMenu=false; S.projectTab='tasks'; S.taskAssigneeFilter=null; S.showReminderPreview=false; S.showBookingConfirmation=false;
   S.showMobileMenu=false; S.showAddRealUser=false;
@@ -11256,6 +11295,7 @@ function render(){
     ${S.showAskAI ? renderAskAIModal() : ''}
     ${S.showNewInvoice ? renderNewInvoiceModal() : ''}
     ${S.showNewOutsideBooking ? renderNewOutsideBookingModal() : ''}
+    ${S.showOutsideBookingDetail ? renderOutsideBookingDetailSheet() : ''}
     ${S.showDocumentBuilder ? renderDocumentBuilderModal() : ''}
     ${S.showAddArtist ? renderAddArtistModal() : ''}
     ${S.newArtistWelcome ? renderWelcomeEmailPreview() : ''}
@@ -11328,7 +11368,7 @@ function pageTitle(){
   if(S.view==='project_detail'){ const p=getProject(S.projectId); return p ? p.title : 'Project'; }
   const t = {
     dashboard:'Dashboard', calendar:'Calendar', leads:'Open Leads', artists:'Artists', financials:'Financials', projects:'Projects', pricing:'Pricing',
-    travel:'Travel', international:'International Opportunities', daily_digest:'Daily Digest', messages:'Messages', outside_bookings:'Outside Bookings', documents:'Documents', contracts:'Contracts',
+    travel:'Travel', international:'International Opportunities', daily_digest:'Daily Digest', messages:'Messages', outside_bookings:'External Events', documents:'Documents', contracts:'Contracts',
     artist_detail: artistById(S.artistDetailId)?.name || '',
     a_dashboard:'My Dashboard', a_calendar:'Calendar', a_gigs:'My Gigs', a_travel:'Travel', a_financials:'Financials', a_projects:'My Projects', settings:'Settings',
   };
@@ -11349,7 +11389,7 @@ function renderUserChip(){
 const MGMT_NAV_ITEMS = [
   ['dashboard','Dashboard',ICO.dash], ['calendar','Calendar',ICO.cal], ['leads','Leads',ICO.leads],
   ['artists','Artists',ICO.artists], ['travel','Travel',ICO.suitcase], ['projects','Projects',ICO.kanban], ['pricing','Pricing',ICO.tag], ['financials','Financials',ICO.money],
-  ['outside_bookings','Outside Bookings',ICO.leads],
+  ['outside_bookings','External Events',ICO.leads],
   ['documents','Documents',ICO.leads],
   ['contracts','Contracts',ICO.leads],
   ['contract_builder','Contract Builder',ICO.edit],
@@ -12254,31 +12294,141 @@ function renderFinancialsPage(){
 }
 
 /* ============ OUTSIDE BOOKINGS PAGE (own nav tab — office/bookkeeping only, not CEO) ============ */
+function outsideBookingOpenReminders(b){ return (b.reminders||[]).filter(r=>!r.completedAt && (!r.snoozedUntil || r.snoozedUntil<=fmtISO(new Date()))); }
 function renderOutsideBookingsPage(){
   return `
   <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
-    <div class="card stat-tile"><span class="u-label">Outside Bookings Open</span><span class="val">${OUTSIDE_BOOKINGS.filter(b=>b.status==='open').length}</span><span class="sub">Not yet paid</span></div>
-    <div class="card stat-tile"><span class="u-label">ASP Earned (Outside)</span><span class="val">${money(OUTSIDE_BOOKINGS.reduce((s,b)=>s+b.aspCut,0))}</span><span class="sub">Across ${OUTSIDE_BOOKINGS.length} booking${OUTSIDE_BOOKINGS.length===1?'':'s'}</span></div>
+    <div class="card stat-tile"><span class="u-label">External Events Open</span><span class="val">${OUTSIDE_BOOKINGS.filter(b=>b.status==='open').length}</span><span class="sub">Not yet paid</span></div>
+    <div class="card stat-tile"><span class="u-label">ASP Earned (External)</span><span class="val">${money(OUTSIDE_BOOKINGS.reduce((s,b)=>s+b.aspCut,0))}</span><span class="sub">Across ${OUTSIDE_BOOKINGS.length} event${OUTSIDE_BOOKINGS.length===1?'':'s'}</span></div>
   </div>
 
-  <div class="section-head"><h2>Outside Bookings (${OUTSIDE_BOOKINGS.length})</h2><button class="btn btn-sm btn-primary" data-action="open-new-outside-booking">+ New Outside Booking</button></div>
-  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Jobs that don't involve one of our own roster artists — outside acts we coordinate or refer.</p>
+  <div class="section-head"><h2>External Events (${OUTSIDE_BOOKINGS.length})</h2><button class="btn btn-sm btn-primary" data-action="open-new-outside-booking">+ New External Event</button></div>
+  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Jobs that don't involve one of our own roster artists — outside acts we coordinate or refer. Kept separate from ASP's own leads/calendar unless explicitly shown there.</p>
   <div class="card u-scroll-x table-cards"><table>
-    <thead><tr><th>Performer</th><th>Client</th><th>Date</th><th>Total</th><th>ASP Cut</th><th>Payout to Performer</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Performer</th><th>Event</th><th>Client</th><th>Date</th><th>Total</th><th>ASP Cut</th><th>Payout</th><th>Reminders</th><th>Status</th><th></th></tr></thead>
     <tbody>${OUTSIDE_BOOKINGS.length? OUTSIDE_BOOKINGS.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(b=>{
-      return `<tr>
-        <td data-label="Performer">${esc(b.performerName)}</td><td data-label="Client">${esc(b.clientName)}</td>
+      const openReminders = outsideBookingOpenReminders(b);
+      return `<tr class="row-link" data-action="open-outside-booking-detail" data-id="${b.id}">
+        <td data-label="Performer">${esc(b.performerName)}${b.showOnAspCalendar? ` <span class="pill pill-accent" title="Shown on ASP main calendar">ASP Cal</span>`:''}</td>
+        <td data-label="Event">${esc(b.eventName)||'—'}</td>
+        <td data-label="Client">${esc(b.clientName)}</td>
         <td data-label="Date" class="u-mono">${fmtDateShort(b.date)}</td><td data-label="Total" class="u-mono">${money(b.totalAmount)}</td>
-        <td data-label="ASP Cut" class="u-mono">${money(b.aspCut)}</td><td data-label="Payout to Performer" class="u-mono">${money(outsideBookingPayout(b))}</td>
+        <td data-label="ASP Cut" class="u-mono">${money(b.aspCut)}</td><td data-label="Payout" class="u-mono">${money(outsideBookingPayout(b))}</td>
+        <td data-label="Reminders">${openReminders.length? `<span class="pill pill-warn">${openReminders.length} due</span>` : `<span style="color:var(--ink-3);">—</span>`}</td>
         <td data-label="Status"><span class="pill ${b.status==='paid'?'pill-good':'pill-warn'}">${b.status==='paid'?'Paid':'Open'}</span></td>
         <td data-label="" style="display:flex;gap:6px;flex-wrap:wrap;">
           ${b.status==='open'? `<button class="btn btn-sm" data-action="mark-outside-booking-paid" data-id="${b.id}">Mark Paid</button>` : ''}
           <button class="btn btn-sm" data-action="open-outside-doc-builder" data-id="${b.id}">${DOCUMENTS.some(d=>d.subjectType==='outside'&&d.subjectId===b.id)?'Edit Document':'Document'}</button>
         </td>
       </tr>`;
-    }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--ink-3);padding:20px;">No outside bookings yet.</td></tr>`}
+    }).join('') : `<tr><td colspan="10" style="text-align:center;color:var(--ink-3);padding:20px;">No external events yet.</td></tr>`}
     </tbody></table></div>
   `;
+}
+function renderOutsideBookingTravelSection(b){
+  return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
+    <h3 style="font-size:13.5px;margin:0;">Travel</h3>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-outside-field="top.flightNeeded" ${b.flightNeeded?'checked':''}/> Flight needed</label>
+    ${b.flightNeeded? `<div class="field-row">
+      <div class="field"><label>Airline</label><input data-outside-field="flight.airline" value="${esc((b.flight&&b.flight.airline)||'')}"/></div>
+      <div class="field"><label>Confirmation</label><input data-outside-field="flight.confirmation" value="${esc((b.flight&&b.flight.confirmation)||'')}"/></div>
+    </div>` : ''}
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-outside-field="top.groundTransportNeeded" ${b.groundTransportNeeded?'checked':''}/> Ground transport needed</label>
+    ${b.groundTransportNeeded? `<div class="field-row">
+      <div class="field"><label>Driver</label><input data-outside-field="groundTransport.driverName" value="${esc((b.groundTransport&&b.groundTransport.driverName)||'')}"/></div>
+      <div class="field"><label>Phone</label><input data-outside-field="groundTransport.driverPhone" value="${esc((b.groundTransport&&b.groundTransport.driverPhone)||'')}"/></div>
+    </div>` : ''}
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-outside-field="top.hotelNeeded" ${b.hotelNeeded?'checked':''}/> Hotel needed</label>
+    ${b.hotelNeeded? `<div class="field-row">
+      <div class="field"><label>Hotel Name</label><input data-outside-field="hotel.name" value="${esc((b.hotel&&b.hotel.name)||'')}"/></div>
+      <div class="field"><label>Confirmation</label><input data-outside-field="hotel.confirmation" value="${esc((b.hotel&&b.hotel.confirmation)||'')}"/></div>
+    </div>` : ''}
+  </div>`;
+}
+function renderOutsideBookingRemindersSection(b){
+  return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3 style="font-size:13.5px;margin:0;">Reminders</h3>
+      <button class="btn btn-sm" data-action="add-outside-booking-reminder" data-id="${b.id}">${ICO.plus} Add Reminder</button>
+    </div>
+    ${b.reminders.length? b.reminders.map(r=>`<div style="display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--surface-2);border-radius:8px;">
+      <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
+        <div class="field"><label>Due</label><input type="date" data-outside-reminder-field="${r.id}.dueAt" value="${r.dueAt?r.dueAt.slice(0,10):''}"/></div>
+        <div class="field"><label>Owner</label><input data-outside-reminder-field="${r.id}.owner" value="${esc(r.owner||'')}" placeholder="e.g. Rivky"/></div>
+        <div class="field" style="width:120px;"><label>Repeat (days)</label><input type="number" data-outside-reminder-field="${r.id}.recurrenceDays" value="${r.recurrenceDays||''}" placeholder="one-time"/></div>
+        <button class="icon-btn" data-action="remove-outside-booking-reminder" data-clause="${b.id}" data-id="${r.id}" title="Remove" style="flex:none;">${ICO.trash}</button>
+      </div>
+      <input data-outside-reminder-field="${r.id}.notes" value="${esc(r.notes||'')}" placeholder="What's this reminder for?"/>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        ${r.completedAt? `<span class="pill pill-good">Completed ${fmtDateShort(r.completedAt.slice(0,10))}</span>` : `<button class="btn btn-sm" data-action="complete-outside-booking-reminder" data-clause="${b.id}" data-id="${r.id}">Mark Done</button><button class="btn btn-sm btn-ghost" data-action="snooze-outside-booking-reminder" data-clause="${b.id}" data-id="${r.id}">Snooze 3 days</button>`}
+        ${r.snoozedUntil && !r.completedAt? `<span class="pill pill-neutral">Snoozed to ${fmtDateShort(r.snoozedUntil)}</span>` : ''}
+      </div>
+    </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0;">No reminders yet.</p>`}
+  </div>`;
+}
+function renderOutsideBookingDetailSheet(){
+  const b = getOutsideBooking(S.outsideBookingDetailId); if(!b) return '';
+  return `<div class="overlay" data-action="outsidebookingdetail-overlay-close">
+    <div class="sheet" data-stop>
+      <div class="sheet-head">
+        <div>
+          <h2 style="font-size:1.2rem;margin-bottom:4px;">${esc(b.eventName||b.performerName)}</h2>
+          <span class="pill pill-accent">External Event</span>
+          <span class="pill ${b.status==='paid'?'pill-good':'pill-warn'}">${b.status==='paid'?'Paid':'Open'}</span>
+        </div>
+        <button class="icon-btn" data-action="close-outside-booking-detail">${ICO.x}</button>
+      </div>
+      <div class="sheet-body">
+        <div class="field-row">
+          <div class="field"><label>Performer</label><input data-outside-field="top.performerName" value="${esc(b.performerName||'')}"/></div>
+          <div class="field"><label>Performer Contact</label><input data-outside-field="top.performerContact" value="${esc(b.performerContact||'')}"/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Event Name</label><input data-outside-field="top.eventName" value="${esc(b.eventName||'')}"/></div>
+          <div class="field"><label>Event Type</label><input data-outside-field="top.eventType" value="${esc(b.eventType||'')}" placeholder="e.g. Wedding, Corporate"/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Date</label><input type="date" data-outside-field="top.date" value="${b.date||''}"/></div>
+          <div class="field"><label>Start Time</label><input type="time" data-outside-field="top.startTime" value="${b.startTime||''}"/></div>
+          <div class="field"><label>End Time</label><input type="time" data-outside-field="top.endTime" value="${b.endTime||''}"/></div>
+        </div>
+        <div class="field"><label>Timezone</label><input data-outside-field="top.timezone" value="${esc(b.timezone||'')}"/></div>
+        <div class="field-row">
+          <div class="field"><label>Venue</label><input data-outside-field="top.venue" value="${esc(b.venue||'')}"/></div>
+          <div class="field"><label>Full Address</label><input data-outside-field="top.address" value="${esc(b.address||'')}"/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>City</label><input data-outside-field="top.city" value="${esc(b.city||'')}"/></div>
+          <div class="field"><label>State</label><input data-outside-field="top.state" value="${esc(b.state||'')}"/></div>
+        </div>
+        ${hasLocation(b)? `<div style="display:flex;gap:14px;margin:-6px 0 4px;">
+          <a href="${gmapsUrl(b)}" target="_blank" rel="noopener" style="font-size:12px;font-weight:700;color:var(--accent);text-decoration:none;">Maps</a>
+          <a href="${wazeUrl(b)}" target="_blank" rel="noopener" style="font-size:12px;font-weight:700;color:var(--accent);text-decoration:none;">Waze</a>
+        </div>` : ''}
+        <div class="field-row">
+          <div class="field"><label>Client Name</label><input data-outside-field="top.clientName" value="${esc(b.clientName||'')}"/></div>
+          <div class="field"><label>Client Email</label><input data-outside-field="top.clientEmail" value="${esc(b.clientEmail||'')}"/></div>
+        </div>
+        <div class="field"><label>Client Phone</label><input data-outside-field="top.clientPhone" value="${esc(b.clientPhone||'')}"/></div>
+        <div class="field-row">
+          <div class="field"><label>Total Amount</label><input type="number" data-outside-field="top.totalAmount" value="${b.totalAmount||0}"/></div>
+          <div class="field"><label>ASP Cut</label><input type="number" data-outside-field="top.aspCut" value="${b.aspCut||0}"/></div>
+        </div>
+        <div class="field"><label>Source</label><input data-outside-field="top.source" value="${esc(b.source||'')}" placeholder="e.g. referral, direct inquiry"/></div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-outside-field="top.showOnAspCalendar" ${b.showOnAspCalendar?'checked':''}/> Show on ASP main calendar</label>
+        <div class="field"><label>Notes</label><textarea data-outside-field="top.notes" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(b.notes||'')}</textarea></div>
+
+        ${renderOutsideBookingTravelSection(b)}
+        ${renderOutsideBookingRemindersSection(b)}
+
+        <div style="display:flex;gap:8px;">
+          ${b.status==='open'? `<button class="btn btn-sm" data-action="mark-outside-booking-paid" data-id="${b.id}">Mark Paid</button>` : ''}
+          <button class="btn btn-sm" data-action="open-outside-doc-builder" data-id="${b.id}">${DOCUMENTS.some(d=>d.subjectType==='outside'&&d.subjectId===b.id)?'Edit Document':'Document'}</button>
+          <button class="btn btn-sm btn-primary btn-block" data-action="close-outside-booking-detail">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
 }
 
 /* ============ DOCUMENTS PAGE (general doc builder hub — office/bookkeeping only, not CEO) ============ */
@@ -14867,6 +15017,43 @@ function doSubmitOutsideBooking(){
   toast(`Outside booking created for ${performerName}.`, 'success');
   S.showNewOutsideBooking=false; S.newOutsideBookingForm={}; render();
 }
+// Generic field-path writer for the External Event detail sheet, same direct-mutate + autosave
+// convention as setContractFieldByPath() -- handles the plain top-level fields and the nested
+// flight/groundTransport/hotel objects.
+function setOutsideBookingFieldByPath(b, path, value){
+  const parts = path.split('.');
+  const kind = parts[0];
+  if(kind==='top') b[parts[1]] = value;
+  else if(kind==='flight'){ if(!b.flight) b.flight = {}; b.flight[parts[1]] = value; }
+  else if(kind==='groundTransport'){ if(!b.groundTransport) b.groundTransport = {}; b.groundTransport[parts[1]] = value; }
+  else if(kind==='hotel'){ if(!b.hotel) b.hotel = {}; b.hotel[parts[1]] = value; }
+}
+function doAddOutsideBookingReminder(bookingId){
+  const b = getOutsideBooking(bookingId); if(!b) return;
+  b.reminders.push({ id:'REM-'+Math.random().toString(36).slice(2,7), dueAt: fmtISO(addDays(new Date(),7)), owner:'', recurrenceDays:null, completedAt:null, snoozedUntil:null, notes:'' });
+  saveOutsideBookings(); render();
+}
+function doRemoveOutsideBookingReminder(bookingId, reminderId){
+  const b = getOutsideBooking(bookingId); if(!b) return;
+  b.reminders = b.reminders.filter(r=>r.id!==reminderId);
+  saveOutsideBookings(); render();
+}
+function doCompleteOutsideBookingReminder(bookingId, reminderId){
+  const b = getOutsideBooking(bookingId); if(!b) return;
+  const r = b.reminders.find(x=>x.id===reminderId); if(!r) return;
+  r.completedAt = new Date().toISOString(); r.snoozedUntil = null;
+  b.log.push({ ts:new Date().toISOString(), type:'success', text:'Reminder completed.' });
+  saveOutsideBookings(); render();
+}
+function doSnoozeOutsideBookingReminder(bookingId, reminderId, days){
+  const b = getOutsideBooking(bookingId); if(!b) return;
+  const r = b.reminders.find(x=>x.id===reminderId); if(!r) return;
+  r.snoozedUntil = fmtISO(addDays(new Date(), days));
+  saveOutsideBookings(); render();
+}
+function setOutsideBookingReminderFieldByPath(b, reminderId, field, value){
+  const r = b.reminders.find(x=>x.id===reminderId); if(r) r[field] = value;
+}
 function doMarkOutsideBookingPaid(id){
   const b = getOutsideBooking(id); if(!b) return;
   b.status = 'paid';
@@ -15512,6 +15699,26 @@ function bindGlobal(){
       if(el.dataset.live!==undefined) renderPreservingFocus();
     });
   });
+  document.querySelectorAll('[data-outside-field]').forEach(el=>{
+    const evt = (el.tagName==='SELECT' || el.type==='checkbox') ? 'change' : 'input';
+    el.addEventListener(evt, ()=>{
+      const b = getOutsideBooking(S.outsideBookingDetailId); if(!b) return;
+      const path = el.getAttribute('data-outside-field');
+      const val = el.type==='checkbox' ? el.checked : (el.type==='number' ? Number(el.value)||0 : el.value);
+      setOutsideBookingFieldByPath(b, path, val);
+      saveOutsideBookings();
+      if(el.type==='checkbox') render(); // reveals/hides dependent fields (flight/hotel/etc. sub-forms)
+    });
+  });
+  document.querySelectorAll('[data-outside-reminder-field]').forEach(el=>{
+    el.addEventListener('input', ()=>{
+      const b = getOutsideBooking(S.outsideBookingDetailId); if(!b) return;
+      const [reminderId, field] = el.getAttribute('data-outside-reminder-field').split('.');
+      const val = field==='dueAt' ? (el.value? el.value+'T00:00:00.000Z' : '') : (field==='recurrenceDays' ? (el.value?Number(el.value):null) : el.value);
+      setOutsideBookingReminderFieldByPath(b, reminderId, field, val);
+      saveOutsideBookings();
+    });
+  });
   document.querySelectorAll('.contract-performer-select').forEach(sel=>{
     sel.addEventListener('change', ()=>{
       doSetContractPerformer(sel.getAttribute('data-id'), sel.value||null);
@@ -15736,6 +15943,13 @@ function bindGlobal(){
       case 'mark-invoice-paid': doMarkInvoicePaid(id); break;
       case 'open-new-outside-booking': closeAllOverlays(); S.newOutsideBookingForm={}; S.showNewOutsideBooking=true; render(); break;
       case 'submit-outside-booking': doSubmitOutsideBooking(); break;
+      case 'open-outside-booking-detail': S.showOutsideBookingDetail=true; S.outsideBookingDetailId=id; render(); break;
+      case 'close-outside-booking-detail': S.showOutsideBookingDetail=false; S.outsideBookingDetailId=null; render(); break;
+      case 'outsidebookingdetail-overlay-close': if(e.target===t){ S.showOutsideBookingDetail=false; S.outsideBookingDetailId=null; render(); } break;
+      case 'add-outside-booking-reminder': doAddOutsideBookingReminder(S.outsideBookingDetailId); break;
+      case 'remove-outside-booking-reminder': doRemoveOutsideBookingReminder(t.getAttribute('data-clause'), id); break;
+      case 'complete-outside-booking-reminder': doCompleteOutsideBookingReminder(t.getAttribute('data-clause'), id); break;
+      case 'snooze-outside-booking-reminder': doSnoozeOutsideBookingReminder(t.getAttribute('data-clause'), id, 3); break;
       case 'mark-outside-booking-paid': doMarkOutsideBookingPaid(id); break;
       case 'open-outside-doc-builder': doOpenOutsideBookingDoc(id); break;
       case 'open-new-document': closeAllOverlays(); S.documentId=null; S.documentForm={subjectType:'artist'}; S.showDocumentBuilder=true; render(); break;
