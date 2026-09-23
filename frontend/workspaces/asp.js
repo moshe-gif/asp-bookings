@@ -540,6 +540,7 @@ function migrateContract(c){
   if(c.signedAt===undefined){ c.signedAt = null; migrated = true; }
   if(c.qboInvoiceId===undefined){ c.qboInvoiceId = null; migrated = true; }
   if(c.qboInvoiceDocNumber===undefined){ c.qboInvoiceDocNumber = null; migrated = true; }
+  if(c.calendarHoldsStatus===undefined){ c.calendarHoldsStatus = null; migrated = true; }
   // ---- v3 additions (office-drive audit against real contracts) ----
   if(c.snapshot.clientPhone===undefined){ c.snapshot.clientPhone = ''; migrated = true; }
   if(c.snapshot.eventName===undefined){ c.snapshot.eventName = ''; migrated = true; }
@@ -763,6 +764,18 @@ function doCreateContractFromLead(eventId, template){
     contract.cancellationPolicy = { type:'tiered', flatPercent:80, tiers:[
       { id:'TR-1', withinDays:60, percent:0 }, { id:'TR-2', withinDays:30, percent:80 }, { id:'TR-3', withinDays:0, percent:100 },
     ], creditWindowMonths:0, withinDays:40 };
+    // New Artist Event workflow (item 2, "select one or more ASP artists"): a multi-artist lead
+    // already carries its full roster on ev.additionalArtists -- pre-fill one line item per artist
+    // (primary + additional) instead of leaving the editor empty, since the data already exists.
+    if((ev.additionalArtists||[]).length){
+      contract.lineItems = [
+        { id:'LI-'+Math.random().toString(36).slice(2,7), label: performerArtist?performerArtist.name:'', performerArtistId, fee: ev.price||0, date:'', overtimeRate:'', notes:'', travelClause: blankTravelClause() },
+        ...ev.additionalArtists.map(x=>{
+          const a = artistById(x.artistId);
+          return { id:'LI-'+Math.random().toString(36).slice(2,7), label: a?a.name:x.artistId, performerArtistId: x.artistId, fee: x.feeAmount||0, date:'', overtimeRate:'', notes:'', travelClause: blankTravelClause() };
+        }),
+      ];
+    }
   }
   CONTRACTS.unshift(contract); saveContracts();
   S.showContractBuilder = true; S.contractBuilderId = contract.id;
@@ -1059,11 +1072,37 @@ async function doSendContractEmail(){
         toast('Contract sent, but the QuickBooks invoice failed: ' + String(err), 'system');
       }
     }
+
+    // Calendar holds (ops automation spec item 2/4): "create calendar holds" is part of the same
+    // bundled action, but Google Calendar OAuth (Phase 4) hasn't been built/connected yet -- report
+    // that honestly as a skipped step rather than silently doing nothing or claiming it happened.
+    // c.calendarHoldsStatus is the idempotency marker for once Phase 4 ships: a retry after Phase 4
+    // goes live should attempt this step even though the email/invoice steps already succeeded.
+    if(!c.calendarHoldsStatus){
+      const calResult = doCreateCalendarHoldsForContract(c);
+      c.calendarHoldsStatus = calResult.status; c.updatedAt = new Date().toISOString(); saveContracts();
+      if(calResult.status==='skipped') toast(calResult.detail, 'system');
+    }
+
+    // Balance reminders: already live via ev.reminderIntervalDays, set at lead creation -- this
+    // step just confirms that mechanism is active for the linked lead rather than building a
+    // second one, per "reuse... reminders" in the spec's own instruction.
+    const lead = c.leadId ? getEvent(c.leadId) : null;
+    if(lead && !lead.unpaid) toast(`Balance reminders active — every ${lead.reminderIntervalDays} days until paid.`, 'system');
   } catch(err){
     toast('Could not send the email: ' + String(err), 'system');
   } finally {
     S.sendContractBusy = false; render();
   }
+}
+
+// Phase 4 (Google Calendar HOLD/CONFIRMED sync) scaffolding: no Google OAuth client is configured
+// yet (see .env.example), so this always reports "not connected" rather than pretending to create
+// real calendar events. Once Phase 4 ships, this becomes a real call to a gcal-create-hold Edge
+// Function and this stub is replaced, not wrapped -- keeping the call site (doSendContractEmail)
+// unchanged either way.
+function doCreateCalendarHoldsForContract(c){
+  return { status:'skipped', detail:'Contract sent, but calendar holds were skipped — Google Calendar isn\'t connected yet (Settings → Integrations, once Phase 4 ships).' };
 }
 
 const ADMIN_USERS = [
@@ -12947,6 +12986,30 @@ function renderBandFieldsSection(f, ev){
     <div class="field"><label>Band Size (optional)</label><input type="number" min="0" data-field="bandSize" value="${esc(bandSize)}" placeholder="e.g. 5"/></div>
   </div>`;
 }
+// New Artist Event workflow (ops automation spec item 2): "select one or more ASP artists" for a
+// single booking. events.artistId stays the one primary/booking artist everywhere else in the app
+// (matches the Supabase event_artists design -- primary via events.artist_id, full roster via a
+// separate additive table); this is the local-storage equivalent, additive on the event record
+// (ev.additionalArtists, each {artistId, feeAmount}) so none of the existing single-artist call
+// sites need to change. When set, doCreateContractFromLead defaults to the multiline template and
+// pre-fills one line item per artist -- that template already models "multiple performers, one
+// event" so no new contract shape is needed.
+function renderAdditionalArtistsSection(f){
+  const others = ARTISTS.filter(a=>a.id!==f.artistId);
+  const selected = f.additionalArtists||[];
+  return `<div class="field">
+    <label>Additional ASP Artists (optional)</label>
+    <div class="chip-row">${others.map(a=>{
+      const on = selected.some(x=>x.artistId===a.id);
+      return `<button type="button" class="filter-chip ${on?'sel':''}" data-action="toggle-additional-artist" data-id="${a.id}"><span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${a.initials}</span>${esc(a.name.split(' ')[0])}</button>`;
+    }).join('')}</div>
+    ${selected.length? `<p style="font-size:11.5px;color:var(--ink-3);margin:6px 0 0;">Each additional artist gets their own fee. Only admin sees another artist's numbers on a shared event.</p>
+    ${selected.map(x=>{ const a=artistById(x.artistId); return `<div class="field-row" style="margin-top:4px;">
+      <div class="field" style="flex:none;width:90px;"><label style="font-size:10px;">${esc(a?a.name.split(' ')[0]:x.artistId)}</label></div>
+      <div class="field"><label>Fee ($)</label><input type="number" data-lead-artist-fee="${x.artistId}" value="${x.feeAmount||''}" placeholder="0"/></div>
+    </div>`; }).join('')}` : ''}
+  </div>`;
+}
 function renderNewLeadModal(){
   const f = S.newLeadForm;
   const kind = f.kind || 'client';
@@ -12965,6 +13028,7 @@ function renderNewLeadModal(){
         <div class="field"><label>Artist</label>
           <div class="chip-row">${ARTISTS.map(a=>`<button type="button" class="filter-chip ${f.artistId===a.id?'sel':''}" data-action="pick-artist" data-id="${a.id}"><span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${a.initials}</span>${esc(a.name.split(' ')[0])}</button>`).join('')}</div>
         </div>
+        ${!isInternal? renderAdditionalArtistsSection(f) : ''}
         <div class="field-row">
           ${!isInternal? `<div class="field"><label>Client Name</label><input data-field="clientName" value="${esc(f.clientName||'')}" placeholder="Full name"/></div>` : ''}
           <div class="field"><label>Event Type</label><select data-action="pick-event-type">${typeList.map(t=>`<option ${f.type===t?'selected':''}>${t}</option>`).join('')}</select></div>
@@ -13277,6 +13341,7 @@ function renderEventSheet(ev){
 
         ${isAdmin ? renderAdminActions(ev) : ''}
 
+        ${isAdmin && (ev.additionalArtists||[]).length ? renderAdditionalArtistsRoster(ev) : ''}
         ${!ev.unpaid ? `<button class="btn btn-sm btn-ghost" data-action="view-contract" data-id="${ev.id}" style="justify-content:flex-start;color:var(--ink-2);">${ICO.leads} ${ev.status==='lead'?'Preview Draft Contract':'View Contract'}</button>` : ''}
         ${!ev.unpaid ? renderLedger(ev, isAdmin, {compact:true}) : ''}
 
@@ -13361,6 +13426,22 @@ function renderGroundTransportBlock(ev, isAdmin){
   </div>`;
 }
 
+// Admin-only: additional artists don't yet appear in their own eventsFor() gig list or get
+// per-artist RLS-scoped visibility on this shared event -- that needs events synced to Supabase
+// (event_artists + its RLS policy already exist from migration 0012) which hasn't happened yet
+// (215 real imported events, its own careful follow-up per the ops automation spec). Showing this
+// roster admin-only avoids a client-side-only "privacy" gate that isn't real access control.
+function renderAdditionalArtistsRoster(ev){
+  const rows = (ev.additionalArtists||[]).map(x=>{
+    const a = artistById(x.artistId);
+    return `<div class="ledger-row"><span>${esc(a?a.name:x.artistId)}</span><span class="amt">${money(x.feeAmount)} fee &middot; ${money(x.netAmount)} net</span></div>`;
+  }).join('');
+  return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:6px;">
+    <h3 style="font-size:12.5px;margin:0;color:var(--ink-2);">Additional Artists</h3>
+    ${rows}
+    <p style="font-size:11px;color:var(--ink-3);margin:2px 0 0;">Not yet visible on their own gig lists -- pending the events-to-Supabase migration.</p>
+  </div>`;
+}
 function renderLedger(ev, isAdmin, opts={}){
   const extras = ev.charges||[];
   const extrasSum = chargesTotal(ev);
@@ -14038,11 +14119,14 @@ function renderLeadContractsCard(ev){
 
 /* ---- Template picker (shown once at creation; locked afterward) ---- */
 function renderTemplatePickerModal(){
+  const lead = S.templatePickerLeadId ? getEvent(S.templatePickerLeadId) : null;
+  const hasMultipleArtists = lead && (lead.additionalArtists||[]).length;
   return `<div class="overlay center" data-action="templatepicker-overlay-close">
     <div class="modal" data-stop style="width:420px;">
       <div class="sheet-head"><h2 style="font-size:1.2rem;">Choose a Contract Template</h2><button class="icon-btn" data-action="close-template-picker">${ICO.x}</button></div>
       <div class="sheet-body" style="display:flex;flex-direction:column;gap:10px;">
         <p style="font-size:12px;color:var(--ink-3);margin:0;">The template can't be changed once the contract is created.</p>
+        ${hasMultipleArtists? `<p style="font-size:12px;color:var(--accent-ink);margin:0;background:var(--accent-wash);padding:8px 10px;border-radius:8px;">This lead has ${lead.additionalArtists.length+1} artists -- Multi-Line Package will pre-fill one line item per artist.</p>` : ''}
         ${CONTRACT_TEMPLATES.map(([key,label])=>`<button class="btn btn-block" data-action="pick-template-create" data-template="${key}" data-id="${S.templatePickerLeadId||''}" style="text-align:left;justify-content:flex-start;">${esc(label)}</button>`).join('')}
       </div>
     </div>
@@ -15461,6 +15545,10 @@ function doSubmitLead(){
     flightNeeded: !!f.flightNeeded, flightBooked:false, flight:null,
     groundTransportNeeded: !!f.groundTransportNeeded, groundTransportBooked:false, groundTransport:null,
     charges: isInternal? [] : (f.charges||[]), dressCode: isInternal? '' : (f.dressCode||''), prepSheets:[], createdAt: fmtISO(new Date()),
+    additionalArtists: isInternal? [] : (f.additionalArtists||[]).filter(x=>x.artistId).map(x=>{
+      const fee = Number(x.feeAmount)||0; const cut = Math.round(fee*0.15);
+      return { artistId:x.artistId, feeAmount:fee, aspCut:cut, netAmount:fee-cut };
+    }),
     band: f.type==='Wedding' ? (f.band||'').trim()||null : null,
     bandSize: f.type==='Wedding' && f.bandSize ? Number(f.bandSize) : null,
     log:[{ts:new Date().toISOString(), type:'system', text: isInternal? `${resolvedType} scheduled for ${artistById(f.artistId).name}.` : `Lead created for ${artistById(f.artistId).name} — client info entered by management.`}],
@@ -15719,6 +15807,13 @@ function bindGlobal(){
       saveOutsideBookings();
     });
   });
+  document.querySelectorAll('[data-lead-artist-fee]').forEach(el=>{
+    el.addEventListener('input', ()=>{
+      const artistId = el.getAttribute('data-lead-artist-fee');
+      const entry = (S.newLeadForm.additionalArtists||[]).find(x=>x.artistId===artistId);
+      if(entry) entry.feeAmount = Number(el.value)||0;
+    });
+  });
   document.querySelectorAll('.contract-performer-select').forEach(sel=>{
     sel.addEventListener('change', ()=>{
       doSetContractPerformer(sel.getAttribute('data-id'), sel.value||null);
@@ -15786,6 +15881,13 @@ function bindGlobal(){
       case 'ask-ai-suggestion': S.askAIForm={query:t.getAttribute('data-q')}; doAskAI(); break;
       case 'close-sheet': closeSheet(); break;
       case 'pick-artist': S.newLeadForm.artistId = id; applyStandardPricing(); render(); break;
+      case 'toggle-additional-artist': {
+        S.newLeadForm.additionalArtists = S.newLeadForm.additionalArtists||[];
+        const idx = S.newLeadForm.additionalArtists.findIndex(x=>x.artistId===id);
+        if(idx>=0) S.newLeadForm.additionalArtists.splice(idx,1);
+        else S.newLeadForm.additionalArtists.push({artistId:id, feeAmount:0});
+        render(); break;
+      }
       case 'pick-booking-kind': { const kind = t.getAttribute('data-kind'); S.newLeadForm.kind = kind; S.newLeadForm.type = null; render(); break; }
       case 'switch-to-outside-booking': { const carryDate = S.newLeadForm.date; closeAllOverlays(); S.newOutsideBookingForm={date:carryDate||''}; S.showNewOutsideBooking=true; render(); break; }
       case 'submit-lead': doSubmitLead(); break;
