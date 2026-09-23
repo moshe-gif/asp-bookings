@@ -11534,7 +11534,6 @@ function render(){
     ${S.showNewInvoice ? renderNewInvoiceModal() : ''}
     ${S.showNewOutsideBooking ? renderNewOutsideBookingModal() : ''}
     ${S.showOutsideBookingDetail ? renderOutsideBookingDetailSheet() : ''}
-    ${S.showTravelRequestDetail ? renderTravelRequestDetailSheet() : ''}
     ${S.showDocumentBuilder ? renderDocumentBuilderModal() : ''}
     ${S.showAddArtist ? renderAddArtistModal() : ''}
     ${S.newArtistWelcome ? renderWelcomeEmailPreview() : ''}
@@ -11543,6 +11542,7 @@ function render(){
     ${S.dayListDate ? renderDayList() : ''}
     ${S.showNewProject ? renderNewProjectModal() : ''}
     ${S.eventId ? renderEventSheet(getEvent(S.eventId)) : ''}
+    ${S.showTravelRequestDetail ? renderTravelRequestDetailSheet() : ''}
     ${S.showReminderPreview ? renderReminderPreview() : ''}
     ${S.showBookingConfirmation ? renderBookingConfirmationPreview() : ''}
     ${renderInstallBanner()}
@@ -14355,7 +14355,7 @@ function renderTemplatePickerModal(){
       <div class="sheet-head"><h2 style="font-size:1.2rem;">Choose a Contract Template</h2><button class="icon-btn" data-action="close-template-picker">${ICO.x}</button></div>
       <div class="sheet-body" style="display:flex;flex-direction:column;gap:10px;">
         <p style="font-size:12px;color:var(--ink-3);margin:0;">The template can't be changed once the contract is created.</p>
-        ${hasMultipleArtists? `<p style="font-size:12px;color:var(--accent-ink);margin:0;background:var(--accent-wash);padding:8px 10px;border-radius:8px;">This lead has ${lead.additionalArtists.length+1} artists -- Multi-Line Package will pre-fill one line item per artist.</p>` : ''}
+        ${hasMultipleArtists? `<p style="font-size:12px;color:var(--accent-ink);margin:0;background:var(--accent-wash);padding:8px 10px;border-radius:8px;">This lead has ${lead.additionalArtists.length+1} artists -- Multi-Performer / Package Agreement will pre-fill one line item per artist.</p>` : ''}
         ${CONTRACT_TEMPLATES.map(([key,label])=>`<button class="btn btn-block" data-action="pick-template-create" data-template="${key}" data-id="${S.templatePickerLeadId||''}" style="text-align:left;justify-content:flex-start;">${esc(label)}</button>`).join('')}
       </div>
     </div>

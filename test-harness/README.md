@@ -74,6 +74,7 @@ than grepping the source to check.
 | `test_documents.py` | General Documents builder (own nav tab): brand-swap between ASP and SING Entertainment letterhead via the Outside Bookings entry point, and the "On behalf of {artist}" attribution line when a document's subject is one of ASP's own roster artists. |
 | `test_edit_event.py` | The "Edit details" button on an event sheet: creates a fresh lead, edits its core fields (client name, venue, price) after creation, and asserts commission/payout recompute correctly (not just the raw price). |
 | `test_modularization.py` | Parent-app Phase 1a: `window.Workspaces.asp` is really registered via the mount/unmount contract (not just working-when-inlined), and the post-extraction `APP_VERSION` bump renders — the acceptance check that the ASP/shell/VOX seam is real. |
+| `test_ops_automation.py` | ASP bookings operations automation project (2026-09-22/23): External Events (event name + a reminder survive a reload), multi-artist leads (roster on event detail, Multi-Performer / Package Agreement contract pre-fill), the Rivky travel request Send button gated on her email being configured in Settings, and the Zelle QR fields present on the payee profile form. |
 | `test_wedding_band.py` | The wedding-only "Band" section (band name + size): hidden until Event Type is set to Wedding in both New Lead and Edit Details, saved onto the event, and shown on its detail sheet — including switching an existing non-Wedding lead into Wedding via Edit Details. |
 
 ## Conventions for updating this harness
