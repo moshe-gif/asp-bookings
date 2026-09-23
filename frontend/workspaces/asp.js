@@ -1108,10 +1108,14 @@ async function doSendContractEmail(){
     // that honestly as a skipped step rather than silently doing nothing or claiming it happened.
     // c.calendarHoldsStatus is the idempotency marker for once Phase 4 ships: a retry after Phase 4
     // goes live should attempt this step even though the email/invoice steps already succeeded.
-    if(!c.calendarHoldsStatus){
-      const calResult = doCreateCalendarHoldsForContract(c);
-      c.calendarHoldsStatus = calResult.status; c.updatedAt = new Date().toISOString(); saveContracts();
-      if(calResult.status==='skipped') toast(calResult.detail, 'system');
+    if(c.calendarHoldsStatus!=='created'){
+      const calResult = await doCreateCalendarHoldsForContract(c);
+      // Only 'created' is sticky (blocks a future retry) -- 'skipped'/'error' must NOT be, or a
+      // contract sent once before Google Calendar was configured would never retry this step even
+      // after it gets connected/mapped later, which defeats the point of resending.
+      c.calendarHoldsStatus = calResult.status==='created' ? 'created' : null;
+      c.updatedAt = new Date().toISOString(); saveContracts();
+      if(calResult.detail) toast(calResult.detail, calResult.status==='error'? 'system' : (calResult.status==='skipped'?'system':'success'));
     }
 
     // Balance reminders: already live via ev.reminderIntervalDays, set at lead creation -- this
@@ -1126,17 +1130,43 @@ async function doSendContractEmail(){
   }
 }
 
-// Phase 4 (Google Calendar HOLD/CONFIRMED sync): the OAuth connect flow exists (Settings), but the
-// gcal-create-hold Edge Function and the per-artist calendar ID mapping (which calendar to write
-// to for each artist + ASP's main calendar) don't exist yet -- that's real scope on top of "is the
-// account connected," so this still always skips rather than pretending to create real events.
-// Once that lands, this becomes a real call and this function is replaced, not wrapped -- keeping
-// the call site (doSendContractEmail) unchanged either way.
-function doCreateCalendarHoldsForContract(c){
+// Phase 4 (Google Calendar HOLD/CONFIRMED sync): calls the real gcal-create-hold Edge Function
+// once Google Calendar is configured -- still honestly reports "not connected" or "not mapped"
+// when either piece is missing, rather than pretending. UNVERIFIED beyond that: no real Google
+// account was available in this environment to confirm the created/updated events look right.
+async function doCreateCalendarHoldsForContract(c){
   if(!GOOGLE_CALENDAR_CLIENT_ID){
     return { status:'skipped', detail:'Contract sent, but calendar holds were skipped — Google Calendar isn\'t connected yet (Settings → Google Calendar Sync).' };
   }
-  return { status:'skipped', detail:'Contract sent, but calendar holds were skipped — calendar mapping isn\'t set up yet for this artist.' };
+  const lead = c.leadId ? getEvent(c.leadId) : null;
+  if(!lead) return { status:'skipped', detail:'Contract sent, but calendar holds were skipped — no linked lead to create an event for.' };
+  if(!supabaseClient) return { status:'skipped', detail:'Calendar holds need a real signed-in session (not available in Demo Mode).' };
+  try{
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if(!session) return { status:'skipped', detail:'Calendar holds need a real signed-in session (not available in Demo Mode).' };
+    const artist = artistById(lead.artistId);
+    const artistIds = [lead.artistId, ...(lead.additionalArtists||[]).map(x=>x.artistId)].filter(Boolean);
+    const startISO = `${lead.date}T${(lead.time||'19:00')}:00`;
+    const endISO = lead.endTime ? `${lead.date}T${lead.endTime}:00` : `${lead.date}T${addMinutesToTime(lead.time||'19:00', 180)}:00`;
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/gcal-create-hold`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
+      body: JSON.stringify({
+        eventId: lead.id, summary: `${artist?artist.name:''} — ${lead.type}${lead.venue?` @ ${lead.venue}`:''}`,
+        description: `Client: ${lead.clientName||''}`, startISO, endISO, timezone:'America/New_York',
+        status:'hold', artistIds,
+      }),
+    });
+    const data = await resp.json().catch(()=>({ok:false, error:'Unexpected response from the server.'}));
+    if(!resp.ok || data.ok===false) return { status:'error', detail: 'Contract sent, but calendar holds failed: ' + (data.error||'unknown error') };
+    const skipped = data.results.filter(r=>r.status==='skipped_not_mapped').length;
+    const done = data.results.filter(r=>r.status==='created'||r.status==='updated').length;
+    const errored = data.results.filter(r=>r.status==='error').length;
+    if(errored) return { status:'error', detail: `Contract sent, but ${errored} calendar hold(s) failed.` };
+    return { status: done? 'created' : 'skipped', detail: done? `Calendar hold created/updated on ${done} calendar(s)${skipped?`, ${skipped} not mapped`:''}.` : 'Contract sent, but calendar holds were skipped — no calendars mapped yet for this artist/ASP main.' };
+  } catch(err){
+    return { status:'error', detail: 'Contract sent, but calendar holds failed: ' + String(err) };
+  }
 }
 
 const ADMIN_USERS = [
@@ -10976,6 +11006,8 @@ let S = {
   sendContractBusy:false,
   qboStatus:null, // null = unknown/not yet checked, else {connected, realmId, connectedAt}
   gcalStatus:null, // null = unknown/not yet checked, else {connected, email, connectedAt}
+  calendarMappings:null, // null until checked, else array of integration_connections rows (type='google_calendar')
+  calendarMappingsBusy:false,
   reconciliationQueue:null, // null until checked, else array of unmatched payments rows
   reconciliationBusy:false,
   gmailMailboxes:null, // null until checked, else array of {id, mailboxType, artistId, email, connected, connectedAt, watchExpiresAt}
@@ -11187,6 +11219,34 @@ async function refreshQboStatus(){
     if(resp.ok && data && data.ok) S.qboStatus = data;
     render();
   }catch(err){ /* Settings just shows "not connected" if this fails -- non-critical */ }
+}
+async function loadCalendarMappings(){
+  if(!supabaseClient) return;
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(!session) return;
+  S.calendarMappingsBusy = true; render();
+  try{
+    const { data, error } = await supabaseClient.from('integration_connections').select('*').eq('type','google_calendar');
+    if(error){ toast('Could not load calendar mappings: ' + error.message, 'system'); return; }
+    S.calendarMappings = data||[];
+  } finally {
+    S.calendarMappingsBusy = false; render();
+  }
+}
+async function doSaveCalendarMapping(target, calendarId){
+  if(!supabaseClient) return;
+  const artistId = target==='asp_main' ? null : target;
+  const label = artistId ? (artistById(artistId)||{}).name || target : 'ASP Main Calendar';
+  const existing = (S.calendarMappings||[]).find(m=> artistId? m.artist_id===artistId : !m.artist_id);
+  if(existing){
+    const { error } = await supabaseClient.from('integration_connections').update({ config:{calendar_id:calendarId}, account_label:label, updated_at:new Date().toISOString() }).eq('id', existing.id);
+    if(error){ toast('Could not save mapping: ' + error.message, 'system'); return; }
+    existing.config = {calendar_id:calendarId};
+  } else {
+    const { data, error } = await supabaseClient.from('integration_connections').insert({ type:'google_calendar', artist_id:artistId, account_label:label, config:{calendar_id:calendarId}, status: calendarId? 'connected':'not_connected' }).select().single();
+    if(error){ toast('Could not save mapping: ' + error.message, 'system'); return; }
+    S.calendarMappings = S.calendarMappings||[]; S.calendarMappings.push(data);
+  }
 }
 async function loadGmailStatus(){
   if(!supabaseClient) return;
@@ -15242,6 +15302,31 @@ function renderGoogleCalendarSyncCard(){
       <p style="font-size:11.5px;color:var(--ink-3);margin:8px 0 0;">Sending a contract can also create/update a HOLD on ASP's main calendar and each selected artist's calendar, moving to CONFIRMED once the deposit is received.</p>`
     : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">Not connected yet. This is separate from the per-user "Connected Accounts" toggle above -- that's a one-way, no-auth "Add to Google Calendar" link; this is the real server-side sync that creates/updates events by exact calendar + event ID.</p>
       <a href="${gcalAuthorizeUrl()}" class="btn btn-sm btn-primary">Connect Google Calendar</a>`}
+    ${renderCalendarMappingSection()}
+  </div>`;
+}
+// Which real Google Calendar ID each target (ASP main + each artist) writes to -- can be filled
+// in before the account is even connected (the Connect step above only authorizes read/write
+// access; it doesn't know which specific calendars to use). doCreateCalendarHoldsForContract()
+// only attempts a target once both this mapping AND the connection exist.
+function renderCalendarMappingSection(){
+  const mappings = S.calendarMappings;
+  const busy = !!S.calendarMappingsBusy;
+  const mapFor = (artistId)=> (mappings||[]).find(m=> artistId? m.artist_id===artistId : !m.artist_id);
+  return `<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+    <h4 style="font-size:12px;margin:0 0 8px;color:var(--ink-2);">Calendar ID Mapping</h4>
+    ${!mappings? `<button class="btn btn-sm btn-ghost" data-action="check-calendar-mappings" ${busy?'disabled':''}>${busy?'Loading…':'Load Mapping'}</button>`
+    : `<div style="display:flex;flex-direction:column;gap:6px;">
+        <div class="field-row" style="align-items:center;">
+          <div class="field" style="flex:none;width:120px;"><label style="font-size:10px;">ASP Main</label></div>
+          <div class="field"><input data-calendar-mapping="asp_main" value="${esc((mapFor(null)||{}).config?.calendar_id||'')}" placeholder="calendar id or email"/></div>
+        </div>
+        ${ARTISTS.map(a=>`<div class="field-row" style="align-items:center;">
+          <div class="field" style="flex:none;width:120px;"><label style="font-size:10px;">${esc(a.name.split(' ')[0])}</label></div>
+          <div class="field"><input data-calendar-mapping="${a.id}" value="${esc((mapFor(a.id)||{}).config?.calendar_id||'')}" placeholder="calendar id or email"/></div>
+        </div>`).join('')}
+        <button class="btn btn-sm btn-ghost" style="align-self:flex-start;" data-action="check-calendar-mappings">Refresh</button>
+      </div>`}
   </div>`;
 }
 function renderGmailMailboxesCard(){
@@ -16299,6 +16384,11 @@ function bindGlobal(){
       if(el.type==='checkbox') render();
     });
   });
+  document.querySelectorAll('[data-calendar-mapping]').forEach(el=>{
+    el.addEventListener('blur', ()=>{
+      doSaveCalendarMapping(el.getAttribute('data-calendar-mapping'), el.value.trim());
+    });
+  });
   document.querySelectorAll('[data-flight-seg-field]').forEach(el=>{
     el.addEventListener('input', ()=>{
       const tr = getTravelRequest(S.travelRequestDetailId); if(!tr) return;
@@ -16530,6 +16620,7 @@ function bindGlobal(){
       case 'preview-data-migration': S.migrationPreview = computeMigrationCounts(); render(); break;
       case 'check-reconciliation-queue': loadReconciliationQueue(); break;
       case 'check-gmail-mailboxes': loadGmailStatus(); break;
+      case 'check-calendar-mappings': loadCalendarMappings(); break;
       case 'add-gmail-mailbox': doAddGmailMailbox(); break;
       case 'migrate-payee-profiles': doMigratePayeeProfilesToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
       case 'migrate-contracts': doMigrateContractsToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;

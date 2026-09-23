@@ -1,9 +1,10 @@
 # Setup: Google Calendar HOLD/CONFIRMED sync
 
 Lets "Send Contract" also create a HOLD event on ASP's main calendar and every selected artist's
-calendar, automatically moving to CONFIRMED once the deposit is received. This doc covers the
-OAuth connection piece only -- the create-hold Edge Function and per-artist calendar ID mapping
-are a follow-up on top of this (see Notes at the end).
+calendar. The connection, the create-hold call, and the calendar-ID mapping UI all exist now --
+this doc covers all of it. The one piece still missing is automatically moving a HOLD to CONFIRMED
+when the deposit actually arrives (see Notes at the end) -- today every hold this creates stays a
+HOLD until that's built.
 
 ## Part 1 — Register a Google Cloud OAuth client (~15 min)
 
@@ -21,7 +22,7 @@ are a follow-up on top of this (see Notes at the end).
    ```
 6. Note the **Client ID** and **Client Secret** — keep the secret private, treat like a password.
 
-## Part 2 — Deploy the two Edge Functions (~5 min)
+## Part 2 — Deploy the three Edge Functions (~10 min)
 
 In the Supabase dashboard for the **asp-bookings** project, under **Edge Functions**, create each
 of these (paste the file's contents from this repo, then Deploy):
@@ -30,6 +31,9 @@ of these (paste the file's contents from this repo, then Deploy):
   **Important**: on this function's page, turn OFF "Enforce JWT Verification" — Google's redirect
   to this endpoint carries no Supabase login token, so the default JWT check would block it.
 - `gcal-status` — from `supabase/functions/gcal-status/index.ts` (leave JWT verification ON).
+- `gcal-create-hold` — from `supabase/functions/gcal-create-hold/index.ts` (leave JWT verification
+  ON — admin-gated, called from Send Contract). **UNVERIFIED** — written against the Calendar API
+  v3 docs, never exercised against a real account; expect to debug it against your real calendars.
 
 Then add these **Function Secrets** (Supabase dashboard → Edge Functions → Secrets):
 - `GOOGLE_CALENDAR_CLIENT_ID` = the Client ID from Part 1
@@ -64,16 +68,27 @@ Make sure that account has **write access** to every artist's calendar and to AS
 (share each one with it, same as you would with a human assistant), since it's the one account
 that writes HOLD/CONFIRMED events everywhere.
 
+## Part 6 — Map each calendar (~5 min)
+
+Still in Settings → Google Calendar Sync, the **Calendar ID Mapping** section (Load Mapping if it
+hasn't loaded) lists ASP Main plus every artist. For each one, paste that calendar's ID — for a
+Google Calendar, this is usually its owner's email address (the primary calendar) or, for a
+secondary calendar, **Settings → [that calendar] → Integrate calendar → Calendar ID**. Click out of
+the field to save (a real live write to `integration_connections`).
+
+Only targets with BOTH a mapping here AND the connection from Part 5 get an actual event created
+when Send Contract runs — anything else is reported as skipped, not silently ignored.
+
 ## Notes — what's still needed after this
 
-This setup gets the OAuth connection working and visible in Settings, but "Send Contract" will
-still report calendar holds as skipped until two more pieces land:
+Everything above gets real HOLD events created/updated on the right calendars. Still missing:
 
-- **`gcal-create-hold` Edge Function** — the actual Calendar API call that creates/updates a HOLD
-  event by exact calendar ID + event ID (never by title search), storing the result in the
-  `calendar_links` table (already exists, migration 0013) so later updates target the right event.
-- **Per-artist calendar ID mapping** — a Settings screen for entering ASP main's calendar ID plus
-  each artist's calendar ID (the `integration_connections` table, migration 0013, is designed to
-  hold these as `type='google_calendar'` rows).
-
-Both are naturally scoped as their own follow-up once this connection piece is confirmed working.
+- **Auto-moving HOLD → CONFIRMED** when the deposit is actually received — `gcal-create-hold`
+  accepts a `status: 'confirmed'` parameter already (it just changes the title prefix and the
+  `calendar_links.calendar_status` value), but nothing calls it with that status yet. The natural
+  hook is wherever a payment gets marked received (the QuickBooks webhook, `qbo-webhook`, or a
+  manual "mark paid" action) — call `gcal-create-hold` again with `status:'confirmed'` for the same
+  `eventId`, which will PATCH the existing HOLD event in place (idempotent, same `calendar_links`
+  row) rather than creating a duplicate.
+- **Per-artist calendar visibility rules** (which fields show on an artist's own view vs. ASP's) —
+  not addressed; the spec doesn't detail this further either.
