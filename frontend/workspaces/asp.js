@@ -1312,6 +1312,106 @@ function travelRequestEmailHtml(tr){
     <div class="doc-foot">Sent from ${esc(brand.label||'ASP')} Bookings.</div>
   </div></body></html>`;
 }
+// Self-contained (no CSS custom properties -- those only exist inside the app's own stylesheet,
+// not in a standalone outbound email) equivalent of renderZelleQrBlock() for real emails. Same
+// zelleProfileForEvent() resolution, so "never cross-send one artist's QR to another" holds here
+// exactly as it does in the in-app preview.
+function zelleQrEmailBlock(ev, artist){
+  const profile = zelleProfileForEvent(ev, artist);
+  const usingRealQr = !!(profile && profile.zelleQrDataUrl);
+  const label = (profile && (profile.zelleRecipientLabel || profile.zelle)) || artist.email;
+  return `<div style="text-align:center;padding:16px;background:#F5F4EF;border-radius:10px;margin:16px 0;">
+    <img src="${usingRealQr? profile.zelleQrDataUrl : zelleQrUrl(ev,artist,profile)}" alt="Zelle QR code" width="180" height="180" style="border-radius:8px;background:#fff;padding:8px;"/>
+    <div style="font-size:11.5px;color:#67676D;margin-top:8px;">${esc(label)}</div>
+    ${profile && profile.zelleInstructions? `<div style="font-size:11px;color:#9A9AA1;margin-top:4px;">${esc(profile.zelleInstructions)}</div>` : ''}
+  </div>`;
+}
+// Client-facing notice emails (booking confirmation + balance reminder, ops automation spec item
+// 5): same branded wrapper as travelRequestEmailHtml, parameterized by the one paragraph that
+// actually differs between the two.
+function clientNoticeEmailHtml(ev, artist, introHtml){
+  const brand = getBrandConfig('asp');
+  const balance = zelleBalance(ev);
+  return `<!doctype html><html><head><meta charset="utf-8"/><style>
+    body{ margin:0; padding:24px; background:#F5F4EF; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#17171A; }
+    .doc{ max-width:560px; margin:0 auto; background:#fff; padding:28px; border-radius:10px; }
+    .wordmark{ font-size:1.1rem; font-weight:700; border-bottom:2px solid #17171A; padding-bottom:14px; margin-bottom:18px; }
+    .doc-foot{ margin-top:22px; padding-top:12px; border-top:1px solid #E1E1E6; font-size:10.5px; color:#9A9AA1; }
+  </style></head><body><div class="doc">
+    <div class="wordmark">${esc(brand.label||'ASP')}</div>
+    ${introHtml}
+    ${hasLocation(ev)? `<p style="margin:0 0 8px;font-size:13px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:#4C6FA5;">Open in Maps</a></p>` : ''}
+    ${isStandardPayment(ev)? zelleQrEmailBlock(ev, artist) : ''}
+    <div class="doc-foot">Sent from ${esc(brand.label||'ASP')}. Remaining balance: ${money(balance)}.</div>
+  </div></body></html>`;
+}
+async function sendClientNoticeEmail(ev, subject, html){
+  if(!supabaseClient) return { ok:false, error:'Sign in with your real ASP account to send email (not available in Demo Mode).' };
+  // Guard on a real SESSION, not just supabaseClient (which always exists, Demo Mode included) --
+  // without this, Demo Mode fires a real network request that fails at the connection level and
+  // logs a browser-level console error regardless of this function's own try/catch, exactly the
+  // loadBrandConfig() bug fixed earlier this project (see the memory note on that lesson).
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(!session) return { ok:false, error:'Sign in with your real ASP account to send email (not available in Demo Mode).' };
+  const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-contract-email`, {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
+    body: JSON.stringify({ to: ev.clientEmail, subject, html }),
+  });
+  const data = await resp.json().catch(()=>({ok:false, error:'Unexpected response from the server.'}));
+  if(!resp.ok || data.ok===false) return { ok:false, error: data.error || 'Could not send the email.' };
+  return { ok:true };
+}
+// Fires automatically right after a deposit is marked received (doMarkDeposit) -- "after verified
+// payment... send an ASP-branded confirmation with balance + QR for the correct payee" (item 5).
+// Also reachable manually via a Resend button on the preview, per "manual resend + audit log."
+async function doSendBookingConfirmationEmail(id){
+  const ev = getEvent(id); if(!ev) return;
+  const artist = artistById(ev.artistId);
+  const balance = zelleBalance(ev);
+  const subject = `You're booked! — ${artist.name}, ${fmtDateShort(ev.date)}`;
+  const intro = `<p style="margin:0 0 8px;">Hi ${esc((ev.clientName||'').split(' ')[0])},</p>
+    <p style="margin:0 0 8px;">You're all set — ${esc(artist.name)} is booked for your ${esc(ev.type)} on ${esc(fmtDate(ev.date))} at ${esc(fmtTime(ev.time))}.</p>
+    <p style="margin:0 0 8px;">Remaining balance of ${money(balance)} is due before the event${isStandardPayment(ev)? ' via Zelle — scan the code below or send directly to '+esc(artist.email) : ` (${esc(paymentMethodLabel(ev))})`}.</p>`;
+  const html = clientNoticeEmailHtml(ev, artist, intro);
+  S.bookingConfirmationBusy = true; render();
+  const result = await sendClientNoticeEmail(ev, subject, html);
+  S.bookingConfirmationBusy = false;
+  if(result.ok){
+    ev.bookingConfirmationSentAt = new Date().toISOString();
+    logEvent(ev,'email',`Booking confirmation emailed to ${ev.clientEmail} (balance ${money(balance)}).`);
+    saveEvents();
+    toast('Booking confirmation sent.', 'success');
+  } else {
+    logEvent(ev,'system',`Booking confirmation email failed: ${result.error}`);
+    saveEvents();
+    toast('Could not send booking confirmation: ' + result.error, 'system');
+  }
+  render();
+}
+async function doSendReminderEmail(id){
+  const ev = getEvent(id); if(!ev) return;
+  const artist = artistById(ev.artistId);
+  const balance = zelleBalance(ev);
+  const subject = `Balance reminder — ${artist.name}, ${fmtDateShort(ev.date)}`;
+  const intro = `<p style="margin:0 0 8px;">Hi ${esc((ev.clientName||'').split(' ')[0])},</p>
+    <p style="margin:0 0 8px;">Just a reminder — the remaining balance of ${money(balance)} for ${esc(artist.name)}'s ${esc(ev.type)} on ${esc(fmtDate(ev.date))} is due${isStandardPayment(ev)? ' via Zelle. Scan the code below or send to '+esc(artist.email) : ` (${esc(paymentMethodLabel(ev))})`}.</p>`;
+  const html = clientNoticeEmailHtml(ev, artist, intro);
+  S.reminderBusy = true; render();
+  const result = await sendClientNoticeEmail(ev, subject, html);
+  S.reminderBusy = false;
+  if(result.ok){
+    ev.lastReminderSent = fmtISO(new Date());
+    logEvent(ev,'email',`Balance reminder emailed to ${ev.clientEmail}.`);
+    saveEvents();
+    toast('Reminder sent.', 'success');
+  } else {
+    logEvent(ev,'system',`Balance reminder email failed: ${result.error}`);
+    saveEvents();
+    toast('Could not send reminder: ' + result.error, 'system');
+  }
+  render();
+}
 async function doSendTravelRequest(id){
   const tr = getTravelRequest(id); if(!tr) return;
   if(!ORG_SETTINGS.rivkyEmail){ toast('Set Rivky\'s email in Settings first — it is never hardcoded.', 'system'); return; }
@@ -11025,6 +11125,8 @@ let S = {
   showTravelRequestDetail:false,
   travelRequestDetailId:null,
   travelRequestBusy:false,
+  bookingConfirmationBusy:false,
+  reminderBusy:false,
   flightStatusBusy:null, // null, or the flight-segment id currently being checked
   contractsSearchQuery:'',
   contractsStatusFilter:'all',
@@ -13585,6 +13687,8 @@ function renderReminderPreview(){
           ${hasLocation(ev)? `<p style="margin:0 0 8px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:var(--accent);">Open in Maps</a></p>` : ''}
         </div>
         ${isStandardPayment(ev)? renderZelleQrBlock(ev, artist) : ''}
+        <button class="btn btn-primary btn-block" style="margin-top:14px;" data-action="resend-reminder" data-id="${ev.id}" ${S.reminderBusy?'disabled':''}>${S.reminderBusy?'Sending…':'Send'}</button>
+        ${ev.lastReminderSent? `<p style="font-size:11px;color:var(--ink-3);text-align:center;margin:8px 0 0;">Last sent ${fmtDateShort(ev.lastReminderSent)}</p>` : ''}
       </div>
     </div>
   </div>`;
@@ -13593,9 +13697,10 @@ function renderBookingConfirmationPreview(){
   const ev = getEvent(S.eventId); if(!ev) return '';
   const artist = artistById(ev.artistId);
   const balance = zelleBalance(ev);
+  const busy = !!S.bookingConfirmationBusy;
   return `<div class="overlay center" data-action="overlay-close-bookingconfirmation">
     <div class="doc" data-stop style="width:440px;">
-      <div class="sheet-head"><h2 style="font-size:1.1rem;">Booking Confirmation Preview</h2><button class="icon-btn" data-action="close-booking-confirmation">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.1rem;">Booking Confirmation</h2><button class="icon-btn" data-action="close-booking-confirmation">${ICO.x}</button></div>
       <div class="doc-body" style="padding:24px 26px 30px;">
         <div style="font-size:12.5px;line-height:1.6;margin-bottom:16px;">
           <div><strong>To:</strong> ${esc(ev.clientEmail)}</div>
@@ -13607,6 +13712,8 @@ function renderBookingConfirmationPreview(){
           <p style="margin:0 0 8px;">Remaining balance of ${money(balance)} is due before the event${isStandardPayment(ev)? ' via Zelle — scan the code below or send directly to '+esc(artist.email) : ` (${esc(paymentMethodLabel(ev))})`}.</p>
         </div>
         ${isStandardPayment(ev)? renderZelleQrBlock(ev, artist) : ''}
+        <button class="btn btn-primary btn-block" style="margin-top:14px;" data-action="resend-booking-confirmation" data-id="${ev.id}" ${busy?'disabled':''}>${busy?'Sending…':(ev.bookingConfirmationSentAt?'Resend':'Send')}</button>
+        ${ev.bookingConfirmationSentAt? `<p style="font-size:11px;color:var(--ink-3);text-align:center;margin:8px 0 0;">Sent ${fmtDateShort(ev.bookingConfirmationSentAt.slice(0,10))}</p>` : ''}
       </div>
     </div>
   </div>`;
@@ -15540,16 +15647,15 @@ function doSendContract(id){
 }
 function doMarkDeposit(id){
   const ev = getEvent(id); ev.status='booked'; ev.depositReceived=true; ev.depositReceivedDate=fmtISO(new Date());
-  const balance = zelleBalance(ev);
-  const standard = isStandardPayment(ev);
   logEvent(ev,'success',`Bookkeeping marked booking fee received (${paymentMethodLabel(ev)}) — job officially booked & locked on calendar.`);
-  logEvent(ev,'email', standard
-    ? `Booking confirmation emailed to client with gig details, remaining balance (${money(balance)}), and a Zelle QR code.`
-    : `Booking confirmation emailed to client with gig details and remaining balance (${money(balance)}) — payment method: ${paymentMethodLabel(ev)}, follow up directly.`);
+  // Internal team notification stays mocked -- no internal-notification channel exists yet, and
+  // it's not what the spec's item 5 requires be real (that's specifically the client-facing
+  // confirmation, sent for real below).
   logEvent(ev,'email',`Booking-confirmed notification emailed to ${artistById(ev.artistId).name}, Ilan, and Moshe.`);
-  toast('Booking locked in — client, artist, Ilan & Moshe notified.', 'success');
   S.showBookingConfirmation = true;
   saveEvents(); render();
+  if(ev.clientEmail) doSendBookingConfirmationEmail(id);
+  else toast('Booking locked in — no client email on file, confirmation not sent.', 'system');
 }
 function doToggleFlight(id){
   const ev = getEvent(id); ev.flightNeeded=true;
@@ -15798,11 +15904,13 @@ function doEmailItinerary(id){
   toast('Itinerary emailed to artist.', 'email'); saveEvents(); openEvent(id);
 }
 function doSendReminder(id){
-  const ev = getEvent(id); ev.lastReminderSent = fmtISO(new Date());
+  const ev = getEvent(id); if(!ev) return;
+  // SMS stays mocked -- no SMS provider is wired into this app. The email half is real now.
   const via = isStandardPayment(ev) ? ' (Zelle link included)' : ` (payment method: ${paymentMethodLabel(ev)})`;
-  logEvent(ev,'email',`Balance reminder emailed to ${ev.clientEmail}${via}.`);
   logEvent(ev,'sms',`Balance reminder texted to ${ev.clientPhone}${via}.`);
-  toast('Reminder sent — email and text.', 'email'); saveEvents(); openEvent(id);
+  saveEvents();
+  if(ev.clientEmail) doSendReminderEmail(id);
+  else toast('No client email on file — reminder not sent.', 'system');
 }
 function doMarkBalance(id){
   const ev = getEvent(id); ev.balanceReceived=true; ev.balanceReceivedDate=fmtISO(new Date()); ev.status='paid';
@@ -16721,6 +16829,8 @@ function bindGlobal(){
       case 'ai-edit-document': S.showAiEditNotice = true; render(); break;
       case 'send-reminder': doSendReminder(id); break;
       case 'preview-reminder': S.showReminderPreview=true; render(); break;
+      case 'resend-reminder': doSendReminderEmail(id); break;
+      case 'resend-booking-confirmation': doSendBookingConfirmationEmail(id); break;
       case 'close-reminder-preview': S.showReminderPreview=false; render(); break;
       case 'overlay-close-reminderpreview': if(e.target===t){ S.showReminderPreview=false; render(); } break;
       case 'close-booking-confirmation': S.showBookingConfirmation=false; render(); break;
