@@ -11195,7 +11195,16 @@ function loadEvents(){
   try{ const raw = localStorage.getItem(LS_KEY); if(raw) return JSON.parse(raw); }catch(e){}
   return seedAll();
 }
-function saveEvents(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(S.events)); }catch(e){} }
+function saveEvents(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(S.events)); return { ok:true }; }
+  catch(e){
+    // Was a silent catch(e){} before -- a full browser storage quota or private-mode block would
+    // lose the user's last change with zero feedback. Surface it instead of failing quietly.
+    console.error('saveEvents failed', e);
+    toast('Could not save — your browser storage may be full or unavailable. Your latest change was NOT saved.', 'system');
+    return { ok:false, error:e };
+  }
+}
 S.events = loadEvents();
 EVID = S.events.reduce((max,e)=>{ const n=parseInt(String(e.id).split('-')[1],10); return isNaN(n)? max : Math.max(max,n+1); }, EVID);
 
@@ -11531,6 +11540,35 @@ function getUserSettings(userId){
 function esc(s){ return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function eventsFor(artistId){ return S.events.filter(e=>e.artistId===artistId); }
 function getEvent(id){ return S.events.find(e=>e.id===id); }
+/* ---- EventStore (navigation/data-layer refactor, Wave A): a real revision check + visible save
+   failures on top of the existing getEvent()/saveEvents() primitives -- without changing their
+   underlying storage shape (still one S.events array, one localStorage key). New call sites
+   should prefer updateEvent(id, patch) over the established "mutate the object returned by
+   getEvent(), then remember to call saveEvents()" pattern; existing call sites are migrated
+   incrementally across several PRs, not all at once -- see the plan file for the full sequence.
+   Conflict detection: re-reads what's ACTUALLY persisted in localStorage right now (not just this
+   tab's in-memory S.events) and compares updatedAt against what this tab last knew for the same
+   event. A mismatch means something else -- another tab, a stale reload -- wrote a newer version
+   since this tab loaded; the previous code had no such check and would silently clobber it
+   (saveEvents() just serializes the whole in-memory array over whatever's in localStorage).
+   Deliberately does NOT require ev.updatedAt to already be set: most seeded/legacy events have
+   never been through updateEvent() and so have no updatedAt yet at all -- that first-ever write
+   is exactly the common case this needs to protect, not just the second and later ones. */
+function updateEvent(id, patch, opts={}){
+  const ev = getEvent(id);
+  if(!ev) return { ok:false, error:'not_found' };
+  if(!opts.force){
+    let persisted = null;
+    try{ const raw = localStorage.getItem(LS_KEY); if(raw) persisted = JSON.parse(raw).find(e=>e.id===id); }catch(e){}
+    if(persisted && persisted.updatedAt && persisted.updatedAt !== (ev.updatedAt||null)){
+      return { ok:false, error:'conflict', persisted };
+    }
+  }
+  Object.assign(ev, patch, { updatedAt: new Date().toISOString() });
+  const saved = saveEvents();
+  if(!saved.ok) return { ok:false, error:'save_failed' };
+  return { ok:true, event: ev };
+}
 function fmtDate(iso){ const d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{weekday:'short', month:'short', day:'numeric', year:'numeric'}); }
 function fmtDateShort(iso){ const d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short', day:'numeric'}); }
 function fmtDateWeekday(iso){ const d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{weekday:'short', month:'short', day:'numeric'}); }
@@ -15778,9 +15816,14 @@ function doConfirmBooking(id, {method, note} = {}){
   // confirmation email) -- the verification gate above adds rigor in front of this, it doesn't
   // reinvent what "booked" already correctly does.
   doMarkDeposit(id);
-  ev.bookingStatus = 'confirmed'; // new, additive column (migration 0020) -- ev.status above is untouched
-  ev.updatedAt = new Date().toISOString();
-  saveEvents();
+  // First real call site for the new EventStore primitive (Wave A) -- a conflict here (another
+  // tab/session changed this event since this one loaded it) surfaces as a toast instead of
+  // silently overwriting whatever that other write did.
+  const result = updateEvent(id, { bookingStatus: 'confirmed' }); // new, additive column (migration 0020) -- ev.status above is untouched
+  if(!result.ok){
+    toast(result.error==='conflict' ? 'This booking changed elsewhere since you loaded it — reload before confirming.' : 'Could not save the confirmed status.', 'system');
+    return;
+  }
   logEvent(ev, 'system', `Deposit verified (${method||'manual'}): ${note||'—'}. Booking status: confirmed.`);
   // Best-effort structured audit trail (booking_exceptions/booking_status_history, migration 0021)
   // -- only possible once this event has a real Supabase row, which no local event does yet (no
@@ -16840,7 +16883,15 @@ function bindGlobal(){
       case 'fin-filter': S.finArtistFilter = id; render(); break;
       case 'filter-leads-artist': S.leadsArtistFilter = id; render(); break;
       case 'filter-needsreview-artist': S.needsReviewArtistFilter = id; render(); break;
-      case 'mark-event-reviewed': { const ev=getEvent(id); if(ev){ ev.needsReview=false; saveEvents(); toast('Marked reviewed.', 'success'); } render(); break; }
+      case 'mark-event-reviewed': {
+        const ev=getEvent(id);
+        if(ev){
+          const result = updateEvent(id, { needsReview:false });
+          if(!result.ok) toast(result.error==='conflict' ? 'This gig changed elsewhere since you loaded it — reload before marking reviewed.' : 'Could not save.', 'system');
+          else toast('Marked reviewed.', 'success');
+        }
+        render(); break;
+      }
       case 'pricing-artist': S.pricingArtist = id; render(); break;
       case 'send-contract': doSendContract(id); break;
       case 'mark-deposit': doMarkDeposit(id); break;

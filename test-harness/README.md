@@ -77,6 +77,7 @@ than grepping the source to check.
 | `test_ops_automation.py` | ASP bookings operations automation project (2026-09-22/23): External Events (event name + a reminder survive a reload), multi-artist leads (roster on event detail, Multi-Performer / Package Agreement contract pre-fill), the Rivky travel request Send button gated on her email being configured in Settings, and the Zelle QR fields present on the payee profile form. |
 | `test_wedding_band.py` | The wedding-only "Band" section (band name + size): hidden until Event Type is set to Wedding in both New Lead and Edit Details, saved onto the event, and shown on its detail sheet — including switching an existing non-Wedding lead into Wedding via Edit Details. |
 | `test_booking_state_machine.py` | Durable booking record architecture PR 6: the new "Verify Deposit & Confirm (audited)" button exists alongside (not instead of) the original "Mark Booking Fee Received" button; submitting the verification modal with an empty note is blocked; submitting with a note runs the real existing booking-confirmation flow and writes a structured "Deposit verified (...)" entry to the activity log. |
+| `test_event_store.py` | Navigation/data-layer refactor PR 11: the new `updateEvent()` primitive (proven against `mark-event-reviewed`) still behaves like the old direct-mutate-then-save code for the normal case, and — using two real pages sharing one browser context/localStorage — surfaces a conflict toast instead of silently clobbering a concurrent write from a second tab. |
 
 ## Conventions for updating this harness
 
