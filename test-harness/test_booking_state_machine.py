@@ -85,3 +85,37 @@ def test_verify_deposit_with_note_confirms_booking_and_logs_audit_trail(live_ser
         "verification note not recorded in the activity log"
     )
     assert not errors, f"console errors during verified-deposit confirm flow: {errors}"
+
+
+def test_concurrent_mark_deposit_surfaces_conflict_instead_of_silent_overwrite(live_server, page):
+    """
+    Navigation/data-layer refactor PR 13: doMarkDeposit (the original blind "Mark Booking Fee
+    Received" button) now goes through updateEvent() too. Two real tabs (same browser context,
+    same localStorage) both load the same contract_sent event; tab B marks the deposit received
+    first; tab A, still holding its stale in-memory copy, then tries the same -- this must surface
+    a conflict toast, not silently re-save tab A's stale view over tab B's write.
+    """
+    errors_a = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    _create_lead_to_contract_sent(page, "Test Harness Concurrent Deposit")
+
+    page_b = page.context.new_page()
+    errors_b = collect_console_errors(page_b)
+    page_b.goto(live_server)
+    login_as(page_b, "admin_bookings")
+    page_b.get_by_text("Test Harness Concurrent Deposit").first.click()
+    page_b.locator('[data-action="mark-deposit"]').click()
+    assert page_b.get_by_text("Booking Confirmation").is_visible()
+    page_b.locator('[data-action="close-booking-confirmation"]').click()
+    page_b.close()
+
+    # Tab A never reloaded -- its in-memory copy still says contract_sent with no updatedAt from
+    # tab B's write. Marking the deposit from here must hit updateEvent()'s conflict path.
+    page.locator('[data-action="mark-deposit"]').click()
+
+    assert page.get_by_text("changed elsewhere since you loaded it").is_visible(), (
+        "stale tab's mark-deposit attempt did not surface the expected conflict toast"
+    )
+    assert not errors_a, f"console errors in tab A: {errors_a}"
+    assert not errors_b, f"console errors in tab B: {errors_b}"

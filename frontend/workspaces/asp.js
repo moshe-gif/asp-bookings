@@ -15792,14 +15792,19 @@ function doSendContract(id){
   toast(`Contract & invoice sent to ${ev.clientName}.`, 'email'); saveEvents(); openEvent(id);
 }
 function doMarkDeposit(id){
-  const ev = getEvent(id); ev.status='booked'; ev.depositReceived=true; ev.depositReceivedDate=fmtISO(new Date());
+  const ev = getEvent(id); if(!ev) return;
   logEvent(ev,'success',`Bookkeeping marked booking fee received (${paymentMethodLabel(ev)}) — job officially booked & locked on calendar.`);
   // Internal team notification stays mocked -- no internal-notification channel exists yet, and
   // it's not what the spec's item 5 requires be real (that's specifically the client-facing
   // confirmation, sent for real below).
   logEvent(ev,'email',`Booking-confirmed notification emailed to ${artistById(ev.artistId).name}, Ilan, and Moshe.`);
+  const result = updateEvent(id, { status:'booked', depositReceived:true, depositReceivedDate:fmtISO(new Date()) });
+  if(!result.ok){
+    toast(result.error==='conflict' ? 'This booking changed elsewhere since you loaded it — reload before marking the deposit received.' : 'Could not save.', 'system');
+    return;
+  }
   S.showBookingConfirmation = true;
-  saveEvents(); render();
+  render();
   if(ev.clientEmail) doSendBookingConfirmationEmail(id);
   else toast('Booking locked in — no client email on file, confirmation not sent.', 'system');
 }
@@ -17063,7 +17068,11 @@ function bindGlobal(){
       case 'toggle-artist-paidout': doToggleArtistPaidOut(id); break;
       case 'gcal': window.open(gcalUrl(getEvent(id)), '_blank'); break;
       case 'ics': downloadIcs(getEvent(id)); break;
-      case 'dismiss-intl': { const ev=getEvent(id); ev.intlOpportunityDismissed=true; saveEvents(); toast('Dismissed.', 'system'); render(); break; }
+      case 'dismiss-intl': {
+        const result = updateEvent(id, { intlOpportunityDismissed:true });
+        toast(result.ok ? 'Dismissed.' : (result.error==='conflict' ? 'This gig changed elsewhere since you loaded it — reload before dismissing.' : 'Could not save.'), result.ok?'system':'system');
+        render(); break;
+      }
       case 'reset-demo': if(confirm('Reset all demo data back to the seeded example set?')) resetDemo(); break;
       case 'load-real-projects': S.showMobileMenu=false; doLoadRealProjects(); break;
       case 'set-theme': setThemePref(t.getAttribute('data-theme-pref')); break;
