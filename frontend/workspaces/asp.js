@@ -11301,8 +11301,18 @@ async function linkRealSessionToRoster(session){
 async function doSubmitMagicLink(){
   const email = (S.realSignInEmail||'').trim();
   if(!email){ toast('Enter your email.', 'system'); return; }
-  const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href.split('#')[0] } });
-  if(error){ toast('Could not send sign-in link: ' + error.message, 'system'); return; }
+  // Navigation/data-layer refactor (PR 17): shouldCreateUser:false closes a real open-signup
+  // hole -- without it, Supabase happily mints a brand-new (if ultimately useless, since app
+  // access is separately roster-gated) auth.users row for any email a stranger types in here.
+  // "Block open signups: only emails the office has added can get an account" (the brief). This
+  // also fails fast with a clear message instead of sending an email that leads to "No account
+  // set up yet" only after the person clicks through it.
+  const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: window.location.href.split('#')[0] } });
+  if(error){
+    const notFound = /not.*found|signups.*not.*allowed|user.*not.*found/i.test(error.message||'');
+    toast(notFound ? 'That email isn\'t set up yet — contact the office to get added.' : 'Could not send sign-in link: ' + error.message, 'system');
+    return;
+  }
   S.realSignInSent = true;
   render();
 }
