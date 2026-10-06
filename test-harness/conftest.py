@@ -3,6 +3,7 @@ Shared fixtures for the asp-bookings real-browser test harness.
 See README.md for the full registry of what's available and why.
 """
 import http.server
+import os
 import socketserver
 import threading
 import pathlib
@@ -10,6 +11,27 @@ import pytest
 
 FRONTEND_DIR = pathlib.Path(__file__).parent.parent / "frontend"
 PORT = 8791
+
+
+def _load_dotenv():
+    """
+    Tiny manual .env loader (no python-dotenv dependency for two lines) -- populates
+    ASP_TEST_HARNESS_EMAIL/ASP_TEST_HARNESS_PASSWORD for helpers.login_as_real() from
+    test-harness/.env, which is gitignored and never committed. See README.md "Real-auth test
+    account setup" for how that file gets created.
+    """
+    env_path = pathlib.Path(__file__).parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+_load_dotenv()
 
 
 class _QuietHandler(http.server.SimpleHTTPRequestHandler):

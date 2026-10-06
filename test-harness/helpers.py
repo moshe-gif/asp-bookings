@@ -2,6 +2,7 @@
 Reusable actions for driving the real asp-bookings app in a real browser.
 See README.md for the full registry — any new helper added here must also be added there.
 """
+import os
 
 # Mirrors frontend/index.html's ADMIN_USERS / ARTISTS id lists (source of truth for the roster
 # lives there — index.html:761-765 and :578-585 as of this writing). Update here if the roster
@@ -65,6 +66,44 @@ def login_as(page, user_id):
 
 def is_admin(user_id):
     return user_id in ADMIN_IDS
+
+
+def login_as_real(page, email=None, password=None):
+    """
+    Signs in via the REAL Supabase auth path (signInWithPassword) instead of clicking through
+    Demo Mode -- uses only the publishable/anon key already shipped in the frontend
+    (window.supabaseClient, asp.js:17290), never a service-role key. Requires a pre-seeded
+    admin_users/artists row whose user_id already matches this account's auth.users row (the
+    roster-link trigger only fires on NEW auth.users inserts, so a roster row created after the
+    account exists needs its user_id set directly) -- see README.md "Real-auth test account
+    setup" for how the one asp-bookings test-harness account was created.
+
+    Reads ASP_TEST_HARNESS_EMAIL/ASP_TEST_HARNESS_PASSWORD from test-harness/.env (gitignored,
+    loaded by conftest.py) if not passed explicitly -- never hardcode a real credential in a
+    spec file. Call after page.goto(live_server), same as login_as().
+    """
+    email = email or os.environ.get("ASP_TEST_HARNESS_EMAIL")
+    password = password or os.environ.get("ASP_TEST_HARNESS_PASSWORD")
+    if not email or not password:
+        raise RuntimeError(
+            "Real-auth test credentials not configured -- set ASP_TEST_HARNESS_EMAIL / "
+            "ASP_TEST_HARNESS_PASSWORD in test-harness/.env (see README.md)."
+        )
+    dismiss_opener(page)
+    page.wait_for_function("window.supabaseClient !== undefined", timeout=10000)
+    error_message = page.evaluate(
+        """async ({email, password}) => {
+            const { error } = await window.supabaseClient.auth.signInWithPassword({ email, password });
+            return error ? error.message : null;
+        }""",
+        {"email": email, "password": password},
+    )
+    if error_message:
+        raise RuntimeError(f"Real sign-in failed: {error_message}")
+    # Mirrors login_as()'s own wait -- linkRealSessionToRoster() (asp.js) runs a Supabase query
+    # before S.user is set and the real page renders, so this takes a beat longer than the
+    # synchronous Demo Mode click-through.
+    page.wait_for_selector("h1", timeout=15000)
 
 
 def goto_nav(page, view_key, mobile=False):

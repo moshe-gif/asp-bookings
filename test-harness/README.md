@@ -45,6 +45,43 @@ playwright show-trace test-results/<failing-test-folder>/trace.zip
 That gives a full timeline replay of the failing run — DOM snapshots, network, console — usually
 enough to diagnose a failure without re-running anything interactively.
 
+## Real-auth test account setup
+
+`login_as_real()` (navigation/data-layer refactor PR 16) needs one dedicated Supabase account,
+created once, outside this repo:
+
+1. In the Supabase Dashboard → Authentication → Users → **Add user** → **Create new user**, use a
+   test-only email (e.g. `test-harness@aspmgmt.com`) and a strong generated password, with
+   **Auto confirm user** checked. Note the UID it creates.
+2. Insert the matching roster row **with that UID already set** — the roster-link DB trigger
+   (`link_new_user_to_roster()`, migration `0002_auth_linking.sql`) only fires on a *new*
+   `auth.users` insert, so a roster row created afterward needs its `user_id` set directly, not
+   left for the trigger to backfill:
+   ```sql
+   insert into admin_users (name, email, role, initials, user_id)
+   values ('Test Harness', 'test-harness@aspmgmt.com', 'admin_bookings', 'TH', '<uid-from-step-1>')
+   on conflict (email) do update set user_id = excluded.user_id;
+   ```
+3. Create `test-harness/.env` (gitignored — never commit this file) with:
+   ```
+   ASP_TEST_HARNESS_EMAIL=test-harness@aspmgmt.com
+   ASP_TEST_HARNESS_PASSWORD=<the password from step 1>
+   ```
+
+`login_as_real()` then signs in with `supabaseClient.auth.signInWithPassword()` using only the
+publishable/anon key already shipped in the frontend — no service-role key is ever used by this
+harness. Tests that need it (`test_real_auth.py`) skip cleanly if `.env` isn't present, rather than
+failing the whole suite in an environment where this hasn't been set up.
+
+**Found while setting this up (now fixed, migration `0028_grant_authenticated_table_access.sql`):**
+every table in `public` was missing its base Postgres `GRANT ... TO authenticated` — a real signed-in
+session got `permission denied for table admin_users` on a plain select, which is a privilege-layer
+error, not an RLS one (Postgres checks GRANTs before it ever evaluates a row-level security policy).
+This silently blocked **every** real (non-service-role, non-Demo-Mode) session from reading any
+data at all, including a real admin's own sign-in — not specific to this test account. If a fresh
+Supabase project is ever stood up for staging, re-apply migration `0028` (or confirm the project's
+default grants already cover `authenticated`) before assuming real auth works end to end.
+
 ## Registry: fixtures & helpers (`conftest.py`, `helpers.py`)
 
 Anyone adding a new helper or fixture **must add a row here in the same commit** — this table is
@@ -57,6 +94,7 @@ than grepping the source to check.
 | `page` | pytest-playwright (built-in) | Fresh browser page per test, standard fixture, not ours. |
 | `dismiss_opener(page)` | `helpers.py` | Clicks through the splash screen instead of waiting on its auto-dismiss timer (which can slip under this harness's back-to-back browser load). Called automatically by `login_as` — most callers never need this directly. |
 | `login_as(page, user_id)` | `helpers.py` | Drives the real login UI (dismisses the splash screen, clicks "Sign In (Demo Mode)" → the matching account row). Not a state shortcut. |
+| `login_as_real(page, email=None, password=None)` | `helpers.py` | Navigation/data-layer refactor PR 16. Signs in via the REAL Supabase auth path (`signInWithPassword`, publishable key only — no service-role key) instead of Demo Mode. Reads `ASP_TEST_HARNESS_EMAIL`/`ASP_TEST_HARNESS_PASSWORD` from `test-harness/.env` (gitignored) if not passed explicitly. See "Real-auth test account setup" below. |
 | `goto_nav(page, view_key, mobile=False)` | `helpers.py` | Clicks the real nav control for a view — desktop rail/top-tabs, or the mobile bottom-nav pill if `mobile=True`. |
 | `collect_console_errors(page)` | `helpers.py` | Call right after page creation; returns a list that fills up with any console errors/page errors as you drive the page. |
 | `has_no_horizontal_overflow(page)` | `helpers.py` | Real check for the app's "no sideways scrolling, ever" rule (`scrollWidth <= innerWidth`). Returns bool, not an assertion, so callers can report actual values on failure. |
@@ -81,6 +119,7 @@ than grepping the source to check.
 | `test_financials_payout_consistency.py` | Navigation/data-layer refactor PR 12: reproduces the confirmed bug where the Financials page's "All Jobs" and "Artist Payouts — Gig Breakdown" tables showed two different payout numbers for the same event once it had a post-signing charge (one read the stored, possibly-stale `ev.balance`; the other already derived `zelleBalance(e)` live) — now both read the same derived value and agree. |
 | `test_general_projects.py` | Navigation/data-layer refactor PR 14: a plain "New Project" no longer requires picking an artist (only the Recording Day batch flow still does) — creates one via the explicit "None" tile and confirms it renders correctly on both the project detail page and the "All Projects" board (the exact code paths that used to assume a non-null artist). |
 | `test_artist_fee_privacy.py` | Navigation/data-layer refactor PR 15: an artist's own session never sees the full client package price — My Gigs shows a relabeled "Your Fee" column (not "Price"), and the event detail sheet's "Price Breakdown" hides "Performance Fee"/"Total charged to client" for a non-admin viewer, showing only their own payout line. |
+| `test_real_auth.py` | Navigation/data-layer refactor PR 16: validates `login_as_real()` against the same coverage `test_smoke.py` gives Demo Mode — lands on the real admin dashboard, sweeps every nav item, and confirms the session survives a reload (unlike Demo Mode, which deliberately doesn't persist). Skips cleanly if `test-harness/.env` isn't configured. |
 
 ## Conventions for updating this harness
 
