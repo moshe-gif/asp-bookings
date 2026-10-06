@@ -1545,6 +1545,15 @@ function addDays(base, days){ const d=new Date(base); d.setDate(d.getDate()+days
 function fmtISO(d){ return d.toISOString().slice(0,10); }
 function money(n){ return '$'+Math.round(n).toLocaleString('en-US'); }
 function chargesTotal(ev){ return (ev.charges||[]).reduce((s,c)=>s+c.amount,0); }
+// Navigation/data-layer refactor (PR 12): ev.balance used to be a stored field, set once at
+// creation and only recomputed inside the edit-event save handler -- every other balance/payout
+// read across financials/dashboard/CSV-export consumed that possibly-stale stored value directly,
+// which is exactly how the Financials page's "All Jobs" table came to silently disagree with its
+// own "Artist Payouts" table (and "payouts" vs. "owedTotal" a few lines apart on the very same
+// page) whenever an event had post-signing charges. eventBalance() replaces the stored field with
+// a pure derivation (the same formula the edit-handler already used) -- there is nothing left to
+// go stale. zelleBalance(), the one place that already got this right, now composes on top of it.
+function eventBalance(ev){ return (ev.price||0) - (ev.commission||0); }
 
 let EVID = 1000;
 
@@ -11783,7 +11792,7 @@ function exportCSV(){
   const lines = [cols.join(',')];
   rows.sort((a,b)=>a.date.localeCompare(b.date)).forEach(e=>{
     const a = artistById(e.artistId); const sm = statusMeta(e);
-    lines.push([a.name, e.clientName, e.date, e.type, e.venue, e.city, e.state, e.price, chargesTotal(e), e.commission, e.balance+chargesTotal(e), sm.label].map(csvEsc).join(','));
+    lines.push([a.name, e.clientName, e.date, e.type, e.venue, e.city, e.state, e.price, chargesTotal(e), e.commission, zelleBalance(e), sm.label].map(csvEsc).join(','));
   });
   const blob = new Blob([lines.join('\r\n')], {type:'text/csv'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -12734,7 +12743,7 @@ function renderArtistsPage(){
     ${ARTISTS.map(a=>{
       const evs = eventsFor(a.id);
       const upcoming = evs.filter(e=>!isPast(e.date) && ['booked','paid'].includes(e.status)).length;
-      const ytdPayout = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+e.balance,0);
+      const ytdPayout = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+zelleBalance(e),0);
       return `<div class="card card-pad" style="cursor:pointer;display:flex;flex-direction:column;gap:10px;" data-action="open-artist" data-id="${a.id}">
         <div style="display:flex;align-items:center;gap:10px;">
           <span class="avatar" data-slot="${a.slot}" style="width:44px;height:44px;font-size:15px;">${a.initials}</span>
@@ -12803,7 +12812,7 @@ function renderFinancialsPage(){
   const booked = filt.filter(e=>['booked','paid'].includes(e.status));
   const gross = booked.reduce((s,e)=>s+e.price,0);
   const commission = booked.reduce((s,e)=>s+e.commission,0);
-  const payouts = booked.reduce((s,e)=>s+e.balance,0);
+  const payouts = booked.reduce((s,e)=>s+zelleBalance(e),0);
   const avg = booked.length ? Math.round(gross/booked.length) : 0;
   const openInvoices = CUSTOM_INVOICES.filter(i=>i.status==='open');
   const openInvoiceTotal = openInvoices.reduce((s,i)=>s+invoiceTotal(i),0);
@@ -12902,7 +12911,7 @@ function renderFinancialsPage(){
     <tbody>${booked.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const a=artistById(e.artistId); const sm=statusMeta(e);
       return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
         <td data-label="Artist">${esc(a.name)}</td><td data-label="Client">${esc(e.clientName)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
-        <td data-label="Price" class="u-mono">${money(e.price)}</td><td data-label="Commission" class="u-mono">${money(e.commission)}</td><td data-label="Payout" class="u-mono">${money(e.balance)}</td>
+        <td data-label="Price" class="u-mono">${money(e.price)}</td><td data-label="Commission" class="u-mono">${money(e.commission)}</td><td data-label="Payout" class="u-mono">${money(zelleBalance(e))}</td>
         <td data-label="Status"><span class="pill ${sm.cls}">${sm.label}</span></td></tr>`;}).join('')}
     </tbody></table></div>
   `;
@@ -13479,13 +13488,13 @@ function renderArtistDashboard(artistId){
 function renderArtistFinancials(artistId){
   const evs = eventsFor(artistId);
   const booked = evs.filter(e=>['booked','paid'].includes(e.status));
-  const totalPayout = booked.reduce((s,e)=>s+e.balance,0);
+  const totalPayout = booked.reduce((s,e)=>s+zelleBalance(e),0);
   const avgPayout = booked.length ? Math.round(totalPayout/booked.length) : 0;
-  const ytdPayout = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+e.balance,0);
+  const ytdPayout = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+zelleBalance(e),0);
 
   const months=[]; for(let i=5;i>=0;i--){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-i); months.push(d); }
   const monthlyPayout = months.map(md=>{
-    const sum = booked.filter(e=>{const ed=new Date(e.date+'T00:00:00'); return ed.getMonth()===md.getMonth()&&ed.getFullYear()===md.getFullYear();}).reduce((s,e)=>s+e.balance,0);
+    const sum = booked.filter(e=>{const ed=new Date(e.date+'T00:00:00'); return ed.getMonth()===md.getMonth()&&ed.getFullYear()===md.getFullYear();}).reduce((s,e)=>s+zelleBalance(e),0);
     return {label: md.toLocaleDateString('en-US',{month:'short'}), val:sum};
   });
   const maxMonthly = Math.max(...monthlyPayout.map(m=>m.val),1);
@@ -13515,7 +13524,7 @@ function renderArtistFinancials(artistId){
     <tbody>${booked.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const sm=statusMeta(e);
       return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
         <td data-label="Client">${esc(e.clientName)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
-        <td data-label="Price" class="u-mono">${money(e.price)}</td><td data-label="Payout" class="u-mono">${money(e.balance)}</td>
+        <td data-label="Price" class="u-mono">${money(e.price)}</td><td data-label="Payout" class="u-mono">${money(zelleBalance(e))}</td>
         <td data-label="Status"><span class="pill ${sm.cls}">${sm.label}</span></td></tr>`;}).join('')}
     </tbody></table></div>
   `;
@@ -13724,7 +13733,7 @@ function renderAddArtistModal(){
   </div>`;
 }
 
-function zelleBalance(ev){ return ev.balance + chargesTotal(ev); }
+function zelleBalance(ev){ return eventBalance(ev) + chargesTotal(ev); }
 /* ============ PAYMENT METHOD (deposit exceptions) ============ */
 // Default is 'standard' (QuickBooks invoice for the deposit + Zelle for the balance, per
 // WORKFLOWS.md). No paymentMethod field at all means standard too -- undefined behaves as
@@ -14050,7 +14059,7 @@ function renderLedger(ev, isAdmin, opts={}){
   const extras = ev.charges||[];
   const extrasSum = chargesTotal(ev);
   const total = ev.price + extrasSum;
-  const artistTotal = ev.balance + extrasSum;
+  const artistTotal = zelleBalance(ev);
   const compact = !!opts.compact;
   return `<div class="card card-pad" style="${compact?'padding:12px 14px;':''}">
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
@@ -14692,7 +14701,7 @@ function renderContractDoc(){
         <div class="doc-section"><h3>Payment</h3>
           <p style="font-size:12.5px;line-height:1.7;margin:0;">
             <strong>Booking Fee</strong> (${money(ev.commission)}) — emailed as a QuickBooks invoice upon signing; pay by card or ACH directly from the invoice.<br/>
-            <strong>Balance</strong> (${money(ev.balance + chargesTotal(ev))}) — Zelle to <span class="u-mono">${esc(artist.email)}</span>, due no later than the day of the event.<br/>
+            <strong>Balance</strong> (${money(zelleBalance(ev))}) — Zelle to <span class="u-mono">${esc(artist.email)}</span>, due no later than the day of the event.<br/>
             Prefer to pay by check? Contact <span class="u-mono">office@aspmanagement.com</span> to arrange.
           </p>
         </div>
@@ -15966,7 +15975,8 @@ function doSaveEditEvent(id){
     ev.commission = Math.max(0, Number(f.commission)||0);
     if(ev.commission!==oldCommission) notes.push(`deposit changed from ${money(oldCommission)} to ${money(ev.commission)}`);
   }
-  if(!ev.unpaid) ev.balance = ev.price - ev.commission;
+  // ev.balance is no longer a stored field (PR 12) -- eventBalance(ev)/zelleBalance(ev) derive it
+  // live from price/commission/charges on every read, so there's nothing to recompute here.
   if(!ev.unpaid && f.paymentMethod!==undefined){
     const oldMethod = ev.paymentMethod || 'standard';
     ev.paymentMethod = f.paymentMethod;
@@ -16242,7 +16252,7 @@ function doAddProject(){
       clientName:null, clientEmail:'', clientPhone:'',
       date: f.recordingDate, time:'10:00', endTime:null,
       venue:'', city:'', state:'',
-      price:0, commission:0, balance:0, status:'scheduled', depositReceived:false, depositReceivedDate:null,
+      price:0, commission:0, status:'scheduled', depositReceived:false, depositReceivedDate:null,
       balanceReceived:false, balanceReceivedDate:null, reminderIntervalDays: defaultReminderCadence(f.recordingDate), lastReminderSent:null,
       flightNeeded:false, flightBooked:false, flight:null,
       groundTransportNeeded:false, groundTransportBooked:false, groundTransport:null,
@@ -16455,7 +16465,7 @@ function doSubmitLead(){
     clientEmail: isInternal? '' : (f.clientEmail||''), clientPhone: isInternal? '' : (f.clientPhone||''),
     date: f.date, time: f.time||'19:00', endTime: f.endTime||null,
     venue: f.venue||'', city: f.city||'', state: f.state||'',
-    price, commission, balance: price-commission, status: isInternal? 'scheduled':'lead', depositReceived:false, depositReceivedDate:null,
+    price, commission, status: isInternal? 'scheduled':'lead', depositReceived:false, depositReceivedDate:null,
     balanceReceived:false, balanceReceivedDate:null, reminderIntervalDays: defaultReminderCadence(f.date), lastReminderSent:null,
     flightNeeded: !!f.flightNeeded, flightBooked:false, flight:null,
     groundTransportNeeded: !!f.groundTransportNeeded, groundTransportBooked:false, groundTransport:null,
@@ -16492,7 +16502,7 @@ function doSubmitBlockTime(){
       clientName:null, clientEmail:'', clientPhone:'',
       date, time: allDay?'00:00':f.startTime, endTime: allDay?null:f.endTime,
       venue:'', city:'', state:'',
-      price:0, commission:0, balance:0, status:'scheduled', depositReceived:false, depositReceivedDate:null,
+      price:0, commission:0, status:'scheduled', depositReceived:false, depositReceivedDate:null,
       balanceReceived:false, balanceReceivedDate:null, reminderIntervalDays:5, lastReminderSent:null,
       flightNeeded:false, flightBooked:false, flight:null,
       groundTransportNeeded:false, groundTransportBooked:false, groundTransport:null,
@@ -16514,7 +16524,7 @@ function answerAskAI(q, isAdmin){
   if(!isAdmin){
     const evs = eventsFor(S.user);
     const nextGig = upcoming(evs).sort((a,b)=>a.date.localeCompare(b.date))[0];
-    const ytd = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+e.balance,0);
+    const ytd = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+zelleBalance(e),0);
     if(ql.includes('next gig') || ql.includes('next booking')) return nextGig ? `Your next gig is ${nextGig.type} for ${nextGig.clientName||'you'} on ${fmtDateShort(nextGig.date)}.` : `You don't have any upcoming gigs booked yet.`;
     if(ql.includes('this month')){ const n=new Date(); const thisMonth = upcoming(evs).filter(e=>{const d=new Date(e.date+'T00:00:00'); return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear();}); return `You have ${thisMonth.length} gig${thisMonth.length===1?'':'s'} this month.`; }
     if(ql.includes('ytd') || ql.includes('payout') || ql.includes('earn')) return `You've been paid ${money(ytd)} so far this year.`;
@@ -16528,7 +16538,7 @@ function answerAskAI(q, isAdmin){
   if(matchedArtist){
     const evs = eventsFor(matchedArtist.id);
     const up = upcoming(evs).sort((a,b)=>a.date.localeCompare(b.date));
-    const ytd = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+e.balance,0);
+    const ytd = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+zelleBalance(e),0);
     return `${matchedArtist.name}: ${up.length} upcoming gig${up.length===1?'':'s'}${up[0]?`, next on ${fmtDateShort(up[0].date)}`:''}. YTD payout: ${money(ytd)}.`;
   }
   if(ql.includes('conflict')) return conflictPairs.length ? `There ${conflictPairs.length===1?'is':'are'} ${conflictPairs.length} scheduling conflict${conflictPairs.length===1?'':'s'} right now — check the Dashboard for details.` : `No scheduling conflicts right now.`;
