@@ -482,6 +482,41 @@ function migratePayeeProfiles(){
       defaultTravelClause: { flightsCount:1, flightsClass:'business', hotelRooms:1, hotelNights:1, hotelTier:'standard', food:false, shabbos:false, groundTransport:false } });
     migrated = true;
   }
+  // Standard pricing (PR 19, 2026-10-06) -- real 2026-27 contract/calendar fee data he supplied,
+  // per artist. Each is the single clearest "standard" anchor figure from his notes (usually the
+  // wedding rate -- Baruch and Dovie's primary booking type is "events," not weddings, so those
+  // use their standard-event figure instead); the fuller range/context he gave goes in notes so
+  // the office sees it's an approximation, not a quote. Never overwrites a defaultFee someone's
+  // already set (0/undefined only) -- same "only touch the still-blank seed default" rule as the
+  // rest of this migration.
+  const STANDARD_PRICING = {
+    benny:  { fee:12000, note:'Standard pricing (2026-10-06): wedding $12,000 (range $10-13k, $15k+ with extras). Bar mitzvah $12,000. Events/concerts vary widely ($12k dinner up to $25-40k big shows), no standard.' },
+    moshe:  { fee:7500,  note:'Standard pricing (2026-10-06): wedding $7,500 (very consistent; $7k for repeat/mezumen clients). Events vary, no standard.' },
+    eli:    { fee:6000,  note:'Standard pricing (2026-10-06): wedding $6,000 ($5.5k mezumen, $6.5k common upper end). Out-of-town wedding $8,000 + travel. Events $10-18k, no standard.' },
+    yaakov: { fee:4500,  note:'Standard pricing (2026-10-06): wedding $4,500 ($4k for mezumen or with Manavich/Kunstler). Bar mitzvah $4,000. Out-of-town ~$6,000 + flights/hotel.' },
+    shmili: { fee:6000,  note:'Standard pricing (2026-10-06): full wedding $6,000. Third dance/short set $3,500. Bar mitzvah/events $3,500-5,000. Out-of-town/camps $4-6k + travel.' },
+    dovie:  { fee:6000,  note:'Standard pricing (2026-10-06): standard event $6,000 (recent bookings trending $6,500-8,000). Schools/camps/corporate $5-10k. Big shows $12k+, no standard.' },
+    baruch: { fee:10000, note:'Standard pricing (2026-10-06): standard dinner/event $8,000-10,000 ($10k most common). Smaller events $4,000-7,700. Wedding/chuppah $4,500-5,500. Big weekends $11-26k, no standard.' },
+  };
+  PAYEE_PROFILES.forEach(p=>{
+    const row = p.artistId && STANDARD_PRICING[p.artistId];
+    if(!row) return;
+    if(!p.defaultFee){ p.defaultFee = row.fee; migrated = true; }
+    if(!p.notes || !p.notes.includes('Standard pricing (2026-10-06)')){
+      p.notes = p.notes ? `${p.notes}\n\n${row.note}` : row.note;
+      migrated = true;
+    }
+  });
+  // Deposit: he gave one office-wide figure ($2,000 flat, not a per-artist percent), so it lives
+  // on the house profile once -- doCreateContractFromLead() falls back to it for any artist that
+  // doesn't have its own deposit default set.
+  const house = PAYEE_PROFILES.find(p=>!p.artistId);
+  if(house && !house.defaultDepositAmount){
+    house.defaultDepositAmount = 2000;
+    const depositNote = 'Standard pricing (2026-10-06): deposit typically $2,000 flat (mezumen-type weddings run roughly $500 lower on the total fee).';
+    if(!house.notes || !house.notes.includes(depositNote)) house.notes = house.notes ? `${house.notes}\n\n${depositNote}` : depositNote;
+    migrated = true;
+  }
   if(migrated) savePayeeProfiles();
 }
 migratePayeeProfiles();
@@ -741,11 +776,16 @@ function doCreateContractFromLead(eventId, template){
   // not every lead has a negotiated price yet) -- it should prefill from each artist's own
   // standard rate, like hours/overtime/cancellation already do via the payee profile. ev.price
   // still wins when it's a real known figure (never override an actual negotiated price with a
-  // generic default); the payee profile's defaultFee/defaultHours/defaultDepositPercent are opt-in
-  // per artist (Settings -> Payee Profiles) -- blank until someone enters the real number, never
-  // invented here.
+  // generic default); the payee profile's defaultFee/defaultHours/defaultDeposit* are opt-in per
+  // artist (Settings -> Payee Profiles) -- populated from his real 2026-27 pricing data, never
+  // invented here. Deposit is usually a flat amount, not a %, across the roster (he gave one
+  // number -- $2,000 -- not a per-artist percent), so percent only wins when someone's actually
+  // set one for that artist; otherwise fall back to the artist's own flat amount, then the house
+  // profile's (the office-wide $2,000 figure lives there, not duplicated onto every artist).
   const hours = (payeeProfile && payeeProfile.defaultHours) || '5 hours';
-  const depositPercent = (payeeProfile && payeeProfile.defaultDepositPercent) || 15;
+  const houseDepositAmount = housePayeeProfile().defaultDepositAmount || 0;
+  const depositPercent = (payeeProfile && payeeProfile.defaultDepositPercent) || 0;
+  const depositAmount = (payeeProfile && payeeProfile.defaultDepositAmount) || houseDepositAmount || 0;
   const contract = {
     id:'CT-'+(CTID++), schemaVersion: CONTRACTS_SCHEMA_VERSION, leadId: ev.id, template: template||'standard', status:'draft',
     createdAt: now, updatedAt: now,
@@ -753,7 +793,9 @@ function doCreateContractFromLead(eventId, template){
     performerArtistId, performerLabel:'',
     payeeProfileId: payeeProfile ? payeeProfile.id : null,
     fee: { amount: ev.price || (payeeProfile && payeeProfile.defaultFee) || 0, note:'' },
-    deposit: { amount:0, percent:depositPercent, nonRefundable:false },
+    deposit: depositPercent ? { amount:0, percent:depositPercent, nonRefundable:false }
+      : depositAmount ? { amount:depositAmount, percent:0, nonRefundable:false }
+      : { amount:0, percent:15, nonRefundable:false },
     overtime: { rate:0, interval: payeeProfile ? payeeProfile.defaultOvertimeInterval : 'half_hour' },
     cancellationPolicy: { type:'flat_percent', flatPercent:80, tiers:[], creditWindowMonths:6, withinDays:40, ...(payeeProfile&&payeeProfile.defaultCancellation||{}) },
     boilerplate: payeeProfile ? { ...payeeProfile.defaultBoilerplate, notBindingUntilDeposit:true } : { ...blankBoilerplateDefaults(), notBindingUntilDeposit:true },
@@ -954,6 +996,7 @@ function doSavePayeeProfile(){
       zelleActive: f.zelleActive!==false, zelleQrDataUrl: f.zelleQrDataUrl||null,
       defaultFee: f.defaultFee? Number(f.defaultFee) : 0,
       defaultHours: (f.defaultHours||'').trim(),
+      defaultDepositAmount: f.defaultDepositAmount? Number(f.defaultDepositAmount) : 0,
       defaultDepositPercent: f.defaultDepositPercent? Number(f.defaultDepositPercent) : 0,
     });
   } else {
@@ -966,6 +1009,7 @@ function doSavePayeeProfile(){
       zelleActive: f.zelleActive!==false, zelleQrDataUrl: f.zelleQrDataUrl||null,
       defaultFee: f.defaultFee? Number(f.defaultFee) : 0,
       defaultHours: (f.defaultHours||'').trim(),
+      defaultDepositAmount: f.defaultDepositAmount? Number(f.defaultDepositAmount) : 0,
       defaultDepositPercent: f.defaultDepositPercent? Number(f.defaultDepositPercent) : 0,
     });
   }
@@ -15788,7 +15832,10 @@ function renderPayeeProfileFormModal(){
           <div class="field"><label>Standard Fee ($, optional)</label><input type="number" data-field="defaultFee" value="${f.defaultFee||''}" placeholder="prefills new contracts, never overwrites a known price"/></div>
           <div class="field"><label>Standard Hours (optional)</label><input data-field="defaultHours" value="${esc(f.defaultHours||'')}" placeholder="e.g. 5 hours"/></div>
         </div>
-        <div class="field"><label>Standard Deposit (% of total, optional)</label><input type="number" data-field="defaultDepositPercent" value="${f.defaultDepositPercent||''}" placeholder="defaults to 15 if left blank"/></div>
+        <div class="field-row">
+          <div class="field"><label>Standard Deposit ($, optional)</label><input type="number" data-field="defaultDepositAmount" value="${f.defaultDepositAmount||''}" placeholder="flat amount, e.g. 2000"/></div>
+          <div class="field"><label>— or Deposit (% of total)</label><input type="number" data-field="defaultDepositPercent" value="${f.defaultDepositPercent||''}" placeholder="% wins if both are set"/></div>
+        </div>
         <div class="field"><label>Notes</label><textarea data-field="notes" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(f.notes||'')}</textarea></div>
         <button class="btn btn-primary btn-block" data-action="save-payee-profile">Save Profile</button>
       </div>
