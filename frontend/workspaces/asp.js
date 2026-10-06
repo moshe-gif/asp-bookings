@@ -737,15 +737,23 @@ function doCreateContractFromLead(eventId, template){
   const performerArtist = performerArtistId ? artistById(performerArtistId) : null;
   const payeeProfile = template==='creative' ? airschnitzPayeeProfile()
     : performerArtistId ? defaultPayeeProfileForArtist(performerArtistId) : housePayeeProfile();
-  const hours = '5 hours';
+  // His ask (2026-10-06): the fee shouldn't just be whatever ev.price happens to be (often 0 --
+  // not every lead has a negotiated price yet) -- it should prefill from each artist's own
+  // standard rate, like hours/overtime/cancellation already do via the payee profile. ev.price
+  // still wins when it's a real known figure (never override an actual negotiated price with a
+  // generic default); the payee profile's defaultFee/defaultHours/defaultDepositPercent are opt-in
+  // per artist (Settings -> Payee Profiles) -- blank until someone enters the real number, never
+  // invented here.
+  const hours = (payeeProfile && payeeProfile.defaultHours) || '5 hours';
+  const depositPercent = (payeeProfile && payeeProfile.defaultDepositPercent) || 15;
   const contract = {
     id:'CT-'+(CTID++), schemaVersion: CONTRACTS_SCHEMA_VERSION, leadId: ev.id, template: template||'standard', status:'draft',
     createdAt: now, updatedAt: now,
     snapshot: { clientName: ev.clientName||'', clientEmail: ev.clientEmail||'', clientPhone: ev.clientPhone||'', eventName:'', eventDate: ev.date||'', venue: ev.venue||'', city: ev.city||'', state: ev.state||'', occasion: ev.type||'' },
     performerArtistId, performerLabel:'',
     payeeProfileId: payeeProfile ? payeeProfile.id : null,
-    fee: { amount: ev.price||0, note:'' },
-    deposit: { amount:0, percent:15, nonRefundable:false },
+    fee: { amount: ev.price || (payeeProfile && payeeProfile.defaultFee) || 0, note:'' },
+    deposit: { amount:0, percent:depositPercent, nonRefundable:false },
     overtime: { rate:0, interval: payeeProfile ? payeeProfile.defaultOvertimeInterval : 'half_hour' },
     cancellationPolicy: { type:'flat_percent', flatPercent:80, tiers:[], creditWindowMonths:6, withinDays:40, ...(payeeProfile&&payeeProfile.defaultCancellation||{}) },
     boilerplate: payeeProfile ? { ...payeeProfile.defaultBoilerplate, notBindingUntilDeposit:true } : { ...blankBoilerplateDefaults(), notBindingUntilDeposit:true },
@@ -944,6 +952,9 @@ function doSavePayeeProfile(){
       defaultOvertimeInterval: f.defaultOvertimeInterval||'half_hour',
       zelleRecipientLabel:(f.zelleRecipientLabel||'').trim(), zelleInstructions:(f.zelleInstructions||'').trim(),
       zelleActive: f.zelleActive!==false, zelleQrDataUrl: f.zelleQrDataUrl||null,
+      defaultFee: f.defaultFee? Number(f.defaultFee) : 0,
+      defaultHours: (f.defaultHours||'').trim(),
+      defaultDepositPercent: f.defaultDepositPercent? Number(f.defaultDepositPercent) : 0,
     });
   } else {
     PAYEE_PROFILES.push({
@@ -953,6 +964,9 @@ function doSavePayeeProfile(){
       defaultBoilerplate: blankBoilerplateDefaults(), defaultOvertimeInterval: f.defaultOvertimeInterval||'half_hour',
       zelleRecipientLabel:(f.zelleRecipientLabel||'').trim(), zelleInstructions:(f.zelleInstructions||'').trim(),
       zelleActive: f.zelleActive!==false, zelleQrDataUrl: f.zelleQrDataUrl||null,
+      defaultFee: f.defaultFee? Number(f.defaultFee) : 0,
+      defaultHours: (f.defaultHours||'').trim(),
+      defaultDepositPercent: f.defaultDepositPercent? Number(f.defaultDepositPercent) : 0,
     });
   }
   savePayeeProfiles();
@@ -15770,6 +15784,11 @@ function renderPayeeProfileFormModal(){
         <div class="field"><label>Default Overtime Interval</label>
           <div class="chip-row">${['half_hour','15_min','hour'].map(iv=>`<button class="filter-chip ${(f.defaultOvertimeInterval||'half_hour')===iv?'sel':''}" data-action="pick-payee-overtime-interval" data-value="${iv}">${overtimeIntervalLabel(iv)}</button>`).join('')}</div>
         </div>
+        <div class="field-row">
+          <div class="field"><label>Standard Fee ($, optional)</label><input type="number" data-field="defaultFee" value="${f.defaultFee||''}" placeholder="prefills new contracts, never overwrites a known price"/></div>
+          <div class="field"><label>Standard Hours (optional)</label><input data-field="defaultHours" value="${esc(f.defaultHours||'')}" placeholder="e.g. 5 hours"/></div>
+        </div>
+        <div class="field"><label>Standard Deposit (% of total, optional)</label><input type="number" data-field="defaultDepositPercent" value="${f.defaultDepositPercent||''}" placeholder="defaults to 15 if left blank"/></div>
         <div class="field"><label>Notes</label><textarea data-field="notes" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(f.notes||'')}</textarea></div>
         <button class="btn btn-primary btn-block" data-action="save-payee-profile">Save Profile</button>
       </div>
