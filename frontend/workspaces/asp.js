@@ -12656,20 +12656,28 @@ function renderCalendarPage(events, opts={}){
 }
 
 /* ============ LEADS TABLE ============ */
+// opts.asArtist (navigation/data-layer refactor PR 15): the artist-facing "My Gigs" table reused
+// this unchanged, including the office "Price" column -- e.unpaid? '-' : money(e.price) -- which
+// is the full CLIENT package price, not the artist's own fee. An artist should see their own net
+// (what zelleBalance() already computes correctly for Financials), never another number labeled
+// ambiguously as just "Price". Office call sites (showArtist:true dashboard/leads tables, the
+// admin's per-artist detail page) are unaffected -- only pass asArtist:true for an artist's own
+// session.
 function renderEventTable(events, opts={}){
   if(!events.length) return `<div class="card empty">Nothing here yet.</div>`;
   return `<div class="card u-scroll-x table-cards"><table>
     <thead><tr>
       ${opts.showArtist?'<th>Artist</th>':''}
-      <th>Client</th><th>Type</th><th>Date</th><th>Location</th><th>Price</th><th>Status</th>
+      <th>Client</th><th>Type</th><th>Date</th><th>Location</th><th>${opts.asArtist?'Your Fee':'Price'}</th><th>Status</th>
     </tr></thead>
     <tbody>
       ${events.map(e=>{
         const a = artistById(e.artistId); const sm = statusMeta(e);
+        const amountCell = e.unpaid? '—' : money(opts.asArtist? zelleBalance(e) : e.price);
         return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
           ${opts.showArtist?`<td data-label="Artist"><span style="display:flex;align-items:center;gap:7px;"><span class="avatar" data-slot="${a.slot}" style="width:22px;height:22px;font-size:9px;">${a.initials}</span>${esc(a.name)}</span></td>`:''}
           <td data-label="Client">${e.clientName? esc(e.clientName) : '—'}${e.needsReview? ` <span class="pill pill-warn" title="Imported from calendar -- not yet confirmed">Needs Review</span>` : ''}</td><td data-label="Type">${esc(e.type)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
-          <td data-label="Location">${esc(e.venue)||'—'}</td><td data-label="Price" class="u-mono">${e.unpaid? '—' : money(e.price)}</td>
+          <td data-label="Location">${esc(e.venue)||'—'}</td><td data-label="${opts.asArtist?'Your Fee':'Price'}" class="u-mono">${amountCell}</td>
           <td data-label="Status"><span class="pill ${sm.cls}">${sm.label}</span></td>
         </tr>`;
       }).join('')}
@@ -13531,11 +13539,11 @@ function renderArtistFinancials(artistId){
 
   <div class="section-head"><h2>My Jobs (${booked.length})</h2></div>
   <div class="card u-scroll-x table-cards"><table>
-    <thead><tr><th>Client</th><th>Date</th><th>Price</th><th>Payout</th><th>Status</th></tr></thead>
+    <thead><tr><th>Client</th><th>Date</th><th>Your Fee</th><th>Status</th></tr></thead>
     <tbody>${booked.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const sm=statusMeta(e);
       return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
         <td data-label="Client">${esc(e.clientName)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
-        <td data-label="Price" class="u-mono">${money(e.price)}</td><td data-label="Payout" class="u-mono">${money(zelleBalance(e))}</td>
+        <td data-label="Your Fee" class="u-mono">${money(zelleBalance(e))}</td>
         <td data-label="Status"><span class="pill ${sm.cls}">${sm.label}</span></td></tr>`;}).join('')}
     </tbody></table></div>
   `;
@@ -13546,9 +13554,9 @@ function renderArtistGigs(artistId){
   const past = evs.filter(e=>isPast(e.date));
   return `
     <div class="section-head"><h2>Upcoming</h2></div>
-    ${renderEventTable(upcoming, {})}
+    ${renderEventTable(upcoming, {asArtist:true})}
     <div class="section-head" style="margin-top:26px;"><h2>Past</h2></div>
-    ${renderEventTable(past, {})}
+    ${renderEventTable(past, {asArtist:true})}
   `;
 }
 
@@ -14078,10 +14086,10 @@ function renderLedger(ev, isAdmin, opts={}){
       ${isAdmin? `<button class="btn btn-sm btn-ghost" data-action="toggle-add-charge" data-id="${ev.id}" style="padding:2px 6px;">${S.showAddCharge?'Cancel':'+ Add Charge'}</button>`:''}
     </div>
     <div class="ledger" style="${compact?'font-size:11.5px;':''}">
-      <div class="ledger-row"><span>Performance Fee</span><span class="amt">${money(ev.price)}</span></div>
+      ${isAdmin? `<div class="ledger-row"><span>Performance Fee</span><span class="amt">${money(ev.price)}</span></div>` : ''}
       ${extras.map(c=>`<div class="ledger-row"><span>${esc(c.label)}${c.addedAfterSigning?` <span class="pill pill-warn" style="padding:1px 6px;font-size:9px;vertical-align:1px;">notify client</span>`:''}${isAdmin?` <a href="#" data-action="remove-charge" data-id="${ev.id}" data-chargeid="${c.id}" style="color:var(--crit);text-decoration:none;margin-left:4px;">×</a>`:''}</span><span class="amt">${money(c.amount)}</span></div>`).join('')}
       ${S.showAddCharge? renderAddChargeRow(ev) : ''}
-      <div class="ledger-row"><span>Total charged to client</span><span class="amt">${money(total)}</span></div>
+      ${isAdmin? `<div class="ledger-row"><span>Total charged to client</span><span class="amt">${money(total)}</span></div>` : ''}
       <div class="ledger-row"><span>ASP booking fee ${ev.depositReceived?'· received':`· due via ${esc(paymentMethodLabel(ev))}`}</span><span class="amt">${money(ev.commission)}</span></div>
       <div class="ledger-row total"><span>${isAdmin?'Artist payout (85% + charges, via Zelle)':'You walk away with'}</span><span class="amt">${money(artistTotal)}</span></div>
       <div class="ledger-row"><span>Balance status</span><span class="amt">${ev.balanceReceived? `Received ${fmtDateShort(ev.balanceReceivedDate)}` : (ev.depositReceived? (isStandardPayment(ev)?'Pending — reminders active':'Pending — follow up directly'):'—')}</span></div>
