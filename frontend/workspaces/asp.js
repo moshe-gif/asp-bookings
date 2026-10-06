@@ -11163,6 +11163,12 @@ let S = {
   showSendContractConfirm:false,
   sendContractForm:{},
   sendContractBusy:false,
+  // Durable booking record architecture (PR 6): the audited alternative to the blind one-click
+  // "Mark Booking Fee Received" -- requires a real note on how the deposit was verified before the
+  // booking is confirmed, alongside (not replacing) the existing button.
+  showVerifyDeposit:false,
+  verifyDepositEventId:null,
+  verifyDepositForm:{},
   qboStatus:null, // null = unknown/not yet checked, else {connected, realmId, connectedAt}
   gcalStatus:null, // null = unknown/not yet checked, else {connected, email, connectedAt}
   calendarMappings:null, // null until checked, else array of integration_connections rows (type='google_calendar')
@@ -11656,6 +11662,7 @@ function closeAllOverlays(){
   S.showTemplatePicker=false; S.templatePickerLeadId=null;
   S.showPayeeProfileForm=false; S.payeeProfileForm={}; S.editingPayeeProfileId=null;
   S.showSendContractConfirm=false; S.sendContractForm={}; S.sendContractBusy=false;
+  S.showVerifyDeposit=false; S.verifyDepositEventId=null; S.verifyDepositForm={};
   S.showTravelRequestDetail=false; S.travelRequestDetailId=null;
 }
 let pendingViewTransition = false;
@@ -14161,6 +14168,7 @@ function renderAdminActions(ev){
   }
   if(ev.status==='contract_sent'){
     buttons.push(`<button class="btn btn-primary btn-block" data-action="mark-deposit" data-id="${ev.id}">${ICO.check} Mark Booking Fee Received — Lock In Booking</button>`);
+    buttons.push(`<button class="btn btn-sm btn-ghost btn-block" data-action="open-verify-deposit" data-id="${ev.id}">${ICO.check} Verify Deposit &amp; Confirm (audited)</button>`);
   }
   if(ev.status==='booked' && !ev.balanceReceived){
     const standard = isStandardPayment(ev);
@@ -14792,6 +14800,36 @@ function renderSendContractConfirmModal(){
           <div class="field"><label>Description</label><input data-field="qboDescription" value="${esc(f.qboDescription||'')}" ${busy?'disabled':''}/></div>
         </div>` : ''}` : ''}
         <button class="btn btn-primary btn-block" data-action="confirm-send-contract" ${busy?'disabled':''}>${busy?'Sending…':'Send'}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// Durable booking record architecture (PR 6): "a signed agreement, payer's screenshot, pending
+// wire, or promise is not a verified receipt" -- this modal is the audited alternative to the
+// existing blind "Mark Booking Fee Received" click. No automated payment-matching is wired to a
+// local booking record yet (no event has a real Supabase row to match a payments row against), so
+// unlike a future version of this modal, there's only one honest path today: the admin records how
+// they verified the deposit, not a silent checkbox.
+function renderVerifyDepositModal(){
+  const ev = getEvent(S.verifyDepositEventId); if(!ev) return '';
+  const f = S.verifyDepositForm||{};
+  return `<div class="overlay center" data-action="verifydeposit-overlay-close">
+    <div class="modal" data-stop data-form="verifydeposit" style="width:420px;">
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Verify Deposit &amp; Confirm Booking</h2><button class="icon-btn" data-action="close-verify-deposit">${ICO.x}</button></div>
+      <div class="sheet-body" style="display:flex;flex-direction:column;gap:10px;">
+        <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Automated payment matching isn't connected to this booking yet — record what you actually verified, so there's a real, queryable audit trail instead of a one-click guess.</p>
+        <div class="field"><label>How was the deposit verified?</label>
+          <select data-field="method">
+            <option value="zelle" ${f.method==='zelle'?'selected':''}>Zelle — confirmed in Gmail/bank</option>
+            <option value="wire" ${f.method==='wire'?'selected':''}>Wire — confirmed by bank statement</option>
+            <option value="check" ${f.method==='check'?'selected':''}>Check — deposited/cleared</option>
+            <option value="quickbooks" ${f.method==='quickbooks'?'selected':''}>QuickBooks — payment recorded</option>
+            <option value="other" ${f.method==='other'?'selected':''}>Other</option>
+          </select>
+        </div>
+        <div class="field"><label>Evidence / note (required)</label><textarea data-field="note" rows="3" placeholder="e.g. Zelle received 10/6 for $2,500, confirmed against bank statement.">${esc(f.note||'')}</textarea></div>
+        <button class="btn btn-primary btn-block" data-action="confirm-verify-deposit" data-id="${ev.id}">Verify &amp; Confirm Booking</button>
       </div>
     </div>
   </div>`;
@@ -15718,6 +15756,56 @@ function doMarkDeposit(id){
   if(ev.clientEmail) doSendBookingConfirmationEmail(id);
   else toast('Booking locked in — no client email on file, confirmation not sent.', 'system');
 }
+/* ---- Durable booking record architecture (PR 6): audited deposit verification + confirm ----
+   Alongside (not replacing) doMarkDeposit above. The state machine's own rule is "hold_awaiting_
+   deposit -> deposit_verified" on a matched payment OR a logged exception, then "-> confirmed"
+   automatically once that gate passes -- no live payment-matching exists yet (no local event has a
+   real Supabase row for a payments row to match against), so today every verification is honestly
+   the logged-exception path, never a silently-assumed match. */
+function doMarkDepositVerified(id){
+  const ev = getEvent(id); if(!ev) return;
+  const note = (S.verifyDepositForm.note||'').trim();
+  if(!note){ toast('Add a short note on how you verified this before confirming.', 'system'); return; }
+  const method = S.verifyDepositForm.method||'other';
+  S.showVerifyDeposit = false; S.verifyDepositForm = {};
+  doConfirmBooking(id, { method, note });
+}
+function doConfirmBooking(id, {method, note} = {}){
+  const ev = getEvent(id); if(!ev) return;
+  const fromStatus = ev.bookingStatus || ev.status;
+  ev.depositVerification = { method: method||null, note: note||null, loggedBy: S.user, loggedAt: new Date().toISOString() };
+  // Runs the real, existing lock-in effects (status->booked, depositReceived, activity log, client
+  // confirmation email) -- the verification gate above adds rigor in front of this, it doesn't
+  // reinvent what "booked" already correctly does.
+  doMarkDeposit(id);
+  ev.bookingStatus = 'confirmed'; // new, additive column (migration 0020) -- ev.status above is untouched
+  ev.updatedAt = new Date().toISOString();
+  saveEvents();
+  logEvent(ev, 'system', `Deposit verified (${method||'manual'}): ${note||'—'}. Booking status: confirmed.`);
+  // Best-effort structured audit trail (booking_exceptions/booking_status_history, migration 0021)
+  // -- only possible once this event has a real Supabase row, which no local event does yet (no
+  // event migration path exists). Never blocks the real, local confirmation above if this fails.
+  if(supabaseClient && ev._supabaseId){
+    (async()=>{
+      try{
+        const adminRow = adminById(S.user);
+        const loggedBy = adminRow ? adminRow.dbId : null;
+        let exceptionId = null;
+        if(note && loggedBy){
+          const { data } = await supabaseClient.from('booking_exceptions').insert({
+            event_id: ev._supabaseId, exception_type: 'payment_verification_waived',
+            reason: `${method||'manual'}: ${note}`, logged_by: loggedBy,
+          }).select('id').single();
+          exceptionId = data ? data.id : null;
+        }
+        await supabaseClient.from('booking_status_history').insert({
+          event_id: ev._supabaseId, from_status: fromStatus||null, to_status: 'confirmed',
+          trigger_type: 'manual', exception_id: exceptionId, note: note||null,
+        });
+      } catch(err){ console.error('booking confirmation audit sync failed', ev.id, err); }
+    })();
+  }
+}
 function doToggleFlight(id){
   const ev = getEvent(id); ev.flightNeeded=true;
   logEvent(ev,'email','Flight needed — emailed to the booking secretary with gig details.');
@@ -16486,6 +16574,14 @@ function bindGlobal(){
     holder.innerHTML = renderSendContractConfirmModal();
     document.body.appendChild(holder);
   }
+  const staleVerifyDeposit = document.getElementById('verifyDepositOverlayHost');
+  if(staleVerifyDeposit) staleVerifyDeposit.remove();
+  if(S.showVerifyDeposit){
+    const holder = document.createElement('div');
+    holder.id = 'verifyDepositOverlayHost';
+    holder.innerHTML = renderVerifyDepositModal();
+    document.body.appendChild(holder);
+  }
   const staleGigInfoForm = document.getElementById('gigInfoOverlayHost');
   if(staleGigInfoForm) staleGigInfoForm.remove();
   if(S.showGigInfoForm){
@@ -16547,7 +16643,7 @@ function bindGlobal(){
       const form = el.closest('[data-form]')?.getAttribute('data-form');
       if(form==='task'){ S.newTaskText = el.value; return; }
       if(form==='comment'){ S.newCommentText = el.value; return; }
-      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm, payeeprofile:S.payeeProfileForm, sendcontract:S.sendContractForm, orgsettings:ORG_SETTINGS, gmailmailbox:S.newGmailMailboxForm };
+      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm, payeeprofile:S.payeeProfileForm, sendcontract:S.sendContractForm, verifydeposit:S.verifyDepositForm, orgsettings:ORG_SETTINGS, gmailmailbox:S.newGmailMailboxForm };
       const target = formTargets[form] || S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
       if(form==='orgsettings') saveOrgSettings();
@@ -16842,6 +16938,10 @@ function bindGlobal(){
       case 'sendcontract-overlay-close': if(e.target===t && !S.sendContractBusy){ S.showSendContractConfirm=false; S.sendContractForm={}; render(); } break;
       case 'confirm-send-contract': doSendContractEmail(); break;
       case 'toggle-send-contract-invoice': S.sendContractInvoice = !S.sendContractInvoice; render(); break;
+      case 'open-verify-deposit': S.verifyDepositEventId=id; S.showVerifyDeposit=true; S.verifyDepositForm={method:'zelle', note:''}; render(); break;
+      case 'close-verify-deposit': S.showVerifyDeposit=false; S.verifyDepositForm={}; render(); break;
+      case 'verifydeposit-overlay-close': if(e.target===t){ S.showVerifyDeposit=false; S.verifyDepositForm={}; render(); } break;
+      case 'confirm-verify-deposit': doMarkDepositVerified(id); break;
       case 'view-itinerary': S.itineraryEventId=id; S.showItinerary=true; render(); break;
       case 'close-itinerary': S.showItinerary=false; S.itineraryEventId=null; render(); break;
       case 'itinerary-overlay-close': if(e.target===t) { S.showItinerary=false; S.itineraryEventId=null; render(); } break;
