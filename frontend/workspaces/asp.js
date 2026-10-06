@@ -109,17 +109,20 @@ function buildDefaultBoardCards(){
 }
 let PROJID = 1;
 function makeProject(artist, type, title, stageIdx, doneUpTo, dueDate, opts={}){
+  // Durable booking record / data-layer refactor (PR 14): artist is optional -- non-gig/general
+  // work (production, outside-act coordination, office projects) doesn't need a fake roster pick
+  // just to satisfy this shape, matching the DB-level relaxation already done in migration 0020.
   const stages = getProjectType(type).stages;
   const tasks = buildProjectTasks(type);
   tasks.forEach(t=>{ if(stages.indexOf(t.stage) < doneUpTo) t.done = true; });
   return {
-    id:'PR-'+(PROJID++), artistId:artist.id, type, title, subtitle: opts.subtitle||'', stage:stages[stageIdx], tasks, comments:[], dueDate: dueDate||null, images:[], links:[],
+    id:'PR-'+(PROJID++), artistId: artist? artist.id : null, type, title, subtitle: opts.subtitle||'', stage:stages[stageIdx], tasks, comments:[], dueDate: dueDate||null, images:[], links:[],
     coverImage: null, boardCards: buildDefaultBoardCards(),
     people: opts.people || [],
     financials: { income:[], expenses:[] },
     recordingEventId: opts.recordingEventId || null,
     createdAt: fmtISO(addDays(new Date(), -randInt(10,120))),
-    log:[{ts:new Date().toISOString(), type:'system', text:`Project "${title}" created for ${artist.name}.`}],
+    log:[{ts:new Date().toISOString(), type:'system', text: artist? `Project "${title}" created for ${artist.name}.` : `Project "${title}" created.`}],
   };
 }
 function seedProjects(){
@@ -1432,13 +1435,11 @@ async function doSendBookingConfirmationEmail(id){
   const result = await sendClientNoticeEmail(ev, subject, html);
   S.bookingConfirmationBusy = false;
   if(result.ok){
-    ev.bookingConfirmationSentAt = new Date().toISOString();
     logEvent(ev,'email',`Booking confirmation emailed to ${ev.clientEmail} (balance ${money(balance)}).`);
-    saveEvents();
-    toast('Booking confirmation sent.', 'success');
+    if(reportEventSave(updateEvent(id, { bookingConfirmationSentAt: new Date().toISOString() }), 'sending the booking confirmation')) toast('Booking confirmation sent.', 'success');
   } else {
     logEvent(ev,'system',`Booking confirmation email failed: ${result.error}`);
-    saveEvents();
+    reportEventSave(updateEvent(id, {}), 'sending the booking confirmation');
     toast('Could not send booking confirmation: ' + result.error, 'system');
   }
   render();
@@ -1455,13 +1456,11 @@ async function doSendReminderEmail(id){
   const result = await sendClientNoticeEmail(ev, subject, html);
   S.reminderBusy = false;
   if(result.ok){
-    ev.lastReminderSent = fmtISO(new Date());
     logEvent(ev,'email',`Balance reminder emailed to ${ev.clientEmail}.`);
-    saveEvents();
-    toast('Reminder sent.', 'success');
+    if(reportEventSave(updateEvent(id, { lastReminderSent: fmtISO(new Date()) }), 'sending the reminder')) toast('Reminder sent.', 'success');
   } else {
     logEvent(ev,'system',`Balance reminder email failed: ${result.error}`);
-    saveEvents();
+    reportEventSave(updateEvent(id, {}), 'sending the reminder');
     toast('Could not send reminder: ' + result.error, 'system');
   }
   render();
@@ -1484,8 +1483,7 @@ async function doSendTravelRequest(id){
     const data = await resp.json().catch(()=>({ok:false, error:'Unexpected response from the server.'}));
     if(!resp.ok || data.ok===false){ toast(data.error || 'Could not send the travel request.', 'system'); return; }
     tr.status='sent'; tr.sentAt=new Date().toISOString(); saveTravelRequests();
-    if(ev) logEvent(ev, 'system', `Travel request sent to Rivky (${ORG_SETTINGS.rivkyEmail}).`);
-    saveEvents();
+    if(ev){ logEvent(ev, 'system', `Travel request sent to Rivky (${ORG_SETTINGS.rivkyEmail}).`); reportEventSave(updateEvent(ev.id, {}), 'sending the travel request'); }
     toast(`Travel request sent to ${ORG_SETTINGS.rivkyEmail}.`, 'success');
   } catch(err){
     toast('Could not send the travel request: ' + String(err), 'system');
@@ -1497,7 +1495,7 @@ function doSetTravelRequestStatus(id, status){
   const tr = getTravelRequest(id); if(!tr) return;
   tr.status = status; saveTravelRequests();
   const ev = getEvent(tr.eventId);
-  if(ev){ logEvent(ev, 'system', `Travel request marked ${travelRequestStatusLabel(status)}.`); saveEvents(); }
+  if(ev){ logEvent(ev, 'system', `Travel request marked ${travelRequestStatusLabel(status)}.`); reportEventSave(updateEvent(ev.id, {}), 'updating the travel request status'); }
   render();
 }
 function doDeleteTravelRequest(id){
@@ -11578,6 +11576,14 @@ function updateEvent(id, patch, opts={}){
   if(!saved.ok) return { ok:false, error:'save_failed' };
   return { ok:true, event: ev };
 }
+// Shared toast for the many updateEvent() call sites migrated in PR 14 -- one consistent message
+// shape instead of hand-writing the same conflict/failure text at each of them. Returns true on
+// success (nothing shown) so callers can write `if(!reportEventSave(result, '...')) return;`.
+function reportEventSave(result, actionLabel){
+  if(result.ok) return true;
+  toast(result.error==='conflict' ? `This gig changed elsewhere since you loaded it — reload before ${actionLabel}.` : 'Could not save.', 'system');
+  return false;
+}
 function fmtDate(iso){ const d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{weekday:'short', month:'short', day:'numeric', year:'numeric'}); }
 function fmtDateShort(iso){ const d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short', day:'numeric'}); }
 function fmtDateWeekday(iso){ const d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{weekday:'short', month:'short', day:'numeric'}); }
@@ -13116,10 +13122,12 @@ function renderContractsPage(){
 
 /* ============ PROJECTS ============ */
 function renderProjectFolderCard(p, opts={}){
+  // artistById(p.artistId) is legitimately undefined for a general/non-gig project (PR 14 --
+  // projects no longer require a fake artist pick), so every a.* read below has to tolerate that.
   const a = artistById(p.artistId);
   const isAdmin = isAdminUser(S.user);
   const overdue = p.dueDate && isPast(p.dueDate);
-  const coverStyle = p.coverImage? `background-image:url('${p.coverImage}');` : `background:var(--cat-${a.slot||1});`;
+  const coverStyle = p.coverImage? `background-image:url('${p.coverImage}');` : `background:var(--cat-${a?.slot||1});`;
   return `<div class="project-folder" data-action="open-project" data-id="${p.id}">
     <div class="project-folder-cover" style="${coverStyle}">
       ${!p.coverImage? `<span class="project-folder-cover-fallback">${esc((p.title||'?').trim().slice(0,1).toUpperCase())}</span>`:''}
@@ -13130,7 +13138,7 @@ function renderProjectFolderCard(p, opts={}){
       ${p.coverImage && isAdmin? `<button class="icon-btn project-folder-cover-remove" data-action="remove-project-cover" data-id="${p.id}" title="Remove cover" style="width:24px;height:24px;">${ICO.x}</button>`:''}
     </div>
     <div class="project-folder-body">
-      ${opts.showArtist? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;"><span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${a.initials}</span><span style="font-size:11px;color:var(--ink-2);">${esc(a.name)}</span></div>`:''}
+      ${opts.showArtist? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;"><span class="avatar" data-slot="${a?a.slot:0}" style="width:18px;height:18px;font-size:8px;">${a?a.initials:'—'}</span><span style="font-size:11px;color:var(--ink-2);">${a?esc(a.name):'General'}</span></div>`:''}
       <strong style="font-family:var(--font-display);font-size:14px;display:block;">${esc(p.title)}</strong>
       ${p.subtitle? `<div style="font-size:11.5px;color:var(--ink-2);margin-top:2px;">${esc(p.subtitle)}</div>`:''}
       ${p.dueDate? `<div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;">
@@ -13239,18 +13247,19 @@ function renderProjectDetail(){
   return `
     <button class="icon-btn" data-action="nav" data-view="${backView}" title="Back to Projects" style="margin-bottom:14px;">${ICO.chev('l')}</button>
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-      <span class="avatar" data-slot="${a.slot}" style="width:44px;height:44px;flex:none;">${a.initials}</span>
+      <span class="avatar" data-slot="${a?a.slot:0}" style="width:44px;height:44px;flex:none;">${a?a.initials:'—'}</span>
       <div style="min-width:0;flex:1;">
       ${isAdmin? `<input class="blend-input" data-action="set-project-title" data-id="${p.id}" value="${esc(p.title)}" placeholder="Project name…" style="font-family:var(--font-display);font-size:1.3rem;font-weight:600;padding:0;"/>`
         : `<strong style="font-family:var(--font-display);font-size:1.3rem;display:block;">${esc(p.title)}</strong>`}
-      <span class="pill pill-accent">${esc(a.name)}</span></div>
+      <span class="pill pill-accent">${a?esc(a.name):'General'}</span></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:18px;">
         <div class="card card-pad">
           <div class="u-label" style="margin-bottom:10px;">Project Info</div>
           <div style="display:flex;flex-direction:column;gap:10px;font-size:12.5px;">
             <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Artist</span>
-              <span style="display:flex;align-items:center;gap:6px;font-weight:600;${isAdmin?'cursor:pointer;':''}" ${isAdmin?`data-action="open-artist" data-id="${a.id}"`:''}><span class="avatar" data-slot="${a.slot}" style="width:20px;height:20px;font-size:8px;">${a.initials}</span>${esc(a.name)}</span></div>
+              ${a? `<span style="display:flex;align-items:center;gap:6px;font-weight:600;${isAdmin?'cursor:pointer;':''}" ${isAdmin?`data-action="open-artist" data-id="${a.id}"`:''}><span class="avatar" data-slot="${a.slot}" style="width:20px;height:20px;font-size:8px;">${a.initials}</span>${esc(a.name)}</span>`
+                : `<span style="color:var(--ink-3);">None — general project</span>`}</div>
             <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Who it's for</span>
               ${isAdmin? `<input data-action="set-project-subtitle" data-id="${p.id}" value="${esc(p.subtitle||'')}" placeholder="e.g. client / label" style="padding:5px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;text-align:right;max-width:160px;"/>`
                 : (p.subtitle? `<span>${esc(p.subtitle)}</span>` : `<span style="color:var(--ink-3);">Not set</span>`)}
@@ -13439,9 +13448,11 @@ function renderNewProjectModal(){
     <div class="modal" data-stop data-form="newproject">
       <div class="sheet-head"><h2 style="font-size:1.3rem;">${isBatch? 'New Recording Day' : 'New Project'}</h2><button class="icon-btn" data-action="close-new-project">${ICO.x}</button></div>
       <div class="sheet-body">
-        <div class="field"><label>Artist</label>
+        <div class="field"><label>Artist${isBatch?'':' (optional — leave unset for a general, non-gig project)'}</label>
           <div class="artist-pick">${ARTISTS.map(a=>`<div class="artist-opt ${f.artistId===a.id?'sel':''}" data-action="pick-project-artist" data-id="${a.id}">
-            <span class="avatar" data-slot="${a.slot}" style="width:34px;height:34px;font-size:12px;">${a.initials}</span><span>${a.name}</span></div>`).join('')}</div>
+            <span class="avatar" data-slot="${a.slot}" style="width:34px;height:34px;font-size:12px;">${a.initials}</span><span>${a.name}</span></div>`).join('')}
+          ${!isBatch? `<div class="artist-opt ${!f.artistId?'sel':''}" data-action="pick-project-artist" data-id="">
+            <span class="avatar" style="width:34px;height:34px;font-size:12px;background:var(--surface-2);color:var(--ink-3);">—</span><span>None</span></div>` : ''}</div>
         </div>
         ${isBatch ? `
         <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 14px;">Book the shared studio day once, then track each guest's episode as its own project with its own release date. <a href="#" data-action="new-project-mode" data-mode="simple" style="color:var(--accent);">Back to a plain project →</a></p>
@@ -15864,18 +15875,20 @@ function doConfirmBooking(id, {method, note} = {}){
   }
 }
 function doToggleFlight(id){
-  const ev = getEvent(id); ev.flightNeeded=true;
+  const ev = getEvent(id); if(!ev) return;
   logEvent(ev,'email','Flight needed — emailed to the booking secretary with gig details.');
-  toast('Booking secretary notified: flight needed.', 'email'); saveEvents(); openEvent(id);
+  if(reportEventSave(updateEvent(id, { flightNeeded:true }), 'marking flight needed')) toast('Booking secretary notified: flight needed.', 'email');
+  openEvent(id);
 }
 function doSaveFlight(id){
-  const ev = getEvent(id); const f=S.flightForm;
+  const ev = getEvent(id); if(!ev) return; const f=S.flightForm;
   const depart = f.departDate? `${f.departDate} ${f.departTime||'00:00'}` : '—';
   const arrive = f.arriveDate? `${f.arriveDate} ${f.arriveTime||'00:00'}` : '—';
-  ev.flight = {airline:f.airline||'—', flightNumber:(f.flightNumber||'').trim(), confirmation:f.confirmation||'—', depart, arrive, trackingIdx:-1, trackingStatus:null, trackingStatusAt:null};
-  ev.flightBooked = true;
+  const flight = {airline:f.airline||'—', flightNumber:(f.flightNumber||'').trim(), confirmation:f.confirmation||'—', depart, arrive, trackingIdx:-1, trackingStatus:null, trackingStatusAt:null};
   logEvent(ev,'email',`Flight booked & added to itinerary — Moshe and ${artistById(ev.artistId).name} notified.`);
-  toast('Flight saved — Moshe & artist notified.', 'success'); S.showFlightForm=false; saveEvents(); openEvent(id);
+  S.showFlightForm=false;
+  if(reportEventSave(updateEvent(id, { flight, flightBooked:true }), 'saving the flight')) toast('Flight saved — Moshe & artist notified.', 'success');
+  openEvent(id);
 }
 const FLIGHT_STATUS_SEQUENCE = ['On time', 'Gate assigned', 'Boarding', 'Departed on time', 'In flight', 'Landed on time'];
 function doCheckFlightStatus(id){
@@ -15884,63 +15897,65 @@ function doCheckFlightStatus(id){
   setTimeout(()=>{
     const ev = getEvent(id);
     if(ev && ev.flight){
-      ev.flight.trackingIdx = Math.min((ev.flight.trackingIdx??-1)+1, FLIGHT_STATUS_SEQUENCE.length-1);
-      ev.flight.trackingStatus = FLIGHT_STATUS_SEQUENCE[ev.flight.trackingIdx];
-      ev.flight.trackingStatusAt = new Date().toISOString();
-      logEvent(ev,'email',`Flight status update for ${artistById(ev.artistId).name} — ${ev.flight.trackingStatus} — emailed via ASP-branded update.`);
-      saveEvents();
-      toast(`Flight status: ${ev.flight.trackingStatus} — artist notified.`, 'email');
+      const trackingIdx = Math.min((ev.flight.trackingIdx??-1)+1, FLIGHT_STATUS_SEQUENCE.length-1);
+      const trackingStatus = FLIGHT_STATUS_SEQUENCE[trackingIdx];
+      logEvent(ev,'email',`Flight status update for ${artistById(ev.artistId).name} — ${trackingStatus} — emailed via ASP-branded update.`);
+      if(reportEventSave(updateEvent(id, { flight: {...ev.flight, trackingIdx, trackingStatus, trackingStatusAt:new Date().toISOString()} }), 'checking flight status')) toast(`Flight status: ${trackingStatus} — artist notified.`, 'email');
     }
     S.checkingFlightId = null;
     render();
   }, 650);
 }
 function doToggleGroundTransport(id){
-  const ev = getEvent(id); ev.groundTransportNeeded=true;
+  const ev = getEvent(id); if(!ev) return;
   logEvent(ev,'email','Ground transport needed — emailed to the booking secretary with gig details.');
-  toast('Booking secretary notified: ground transport needed.', 'email'); saveEvents(); openEvent(id);
+  if(reportEventSave(updateEvent(id, { groundTransportNeeded:true }), 'marking ground transport needed')) toast('Booking secretary notified: ground transport needed.', 'email');
+  openEvent(id);
 }
 function doSaveGroundTransport(id){
-  const ev = getEvent(id); const f=S.transportForm;
+  const ev = getEvent(id); if(!ev) return; const f=S.transportForm;
   const pickupTime = f.pickupDate? `${f.pickupDate} ${f.pickupTime||'00:00'}` : '—';
   const dropoffTime = f.dropoffDate? `${f.dropoffDate} ${f.dropoffTime||'00:00'}` : '—';
-  ev.groundTransport = {driverName:f.driverName||'—', driverPhone:f.driverPhone||'—', pickupTime, pickupLocation:f.pickupLocation||'—', dropoffTime, dropoffLocation:f.dropoffLocation||'—', notes:f.notes||''};
-  ev.groundTransportBooked = true;
+  const groundTransport = {driverName:f.driverName||'—', driverPhone:f.driverPhone||'—', pickupTime, pickupLocation:f.pickupLocation||'—', dropoffTime, dropoffLocation:f.dropoffLocation||'—', notes:f.notes||''};
   logEvent(ev,'email',`Driver booked & added to itinerary — Moshe and ${artistById(ev.artistId).name} notified.`);
-  toast('Driver saved — Moshe & artist notified.', 'success'); S.showTransportForm=false; saveEvents(); openEvent(id);
+  S.showTransportForm=false;
+  if(reportEventSave(updateEvent(id, { groundTransport, groundTransportBooked:true }), 'saving ground transport')) toast('Driver saved — Moshe & artist notified.', 'success');
+  openEvent(id);
 }
 function doSaveDressCode(id){
-  const ev = getEvent(id); const f = S.dressCodeForm;
-  ev.dressCode = (f.dressCode||'').trim();
-  logEvent(ev, 'system', ev.dressCode? `Dress code set: ${ev.dressCode} — ${artistById(ev.artistId).name} notified.` : 'Dress code cleared.');
-  toast(ev.dressCode? 'Dress code saved — artist notified.' : 'Dress code cleared.', 'success');
-  S.showDressCodeForm=false; saveEvents(); openEvent(id);
+  const ev = getEvent(id); if(!ev) return; const f = S.dressCodeForm;
+  const dressCode = (f.dressCode||'').trim();
+  logEvent(ev, 'system', dressCode? `Dress code set: ${dressCode} — ${artistById(ev.artistId).name} notified.` : 'Dress code cleared.');
+  if(reportEventSave(updateEvent(id, { dressCode }), 'saving the dress code')) toast(dressCode? 'Dress code saved — artist notified.' : 'Dress code cleared.', 'success');
+  S.showDressCodeForm=false; openEvent(id);
 }
 function doAddGigContact(id){
   const ev = getEvent(id); if(!ev) return;
   const f = S.newGigContactForm;
   const name = (f.name||'').trim();
   if(!name){ toast('Enter a name for the contact.', 'system'); return; }
-  const sheet = ev.gigInfoSheet || (ev.gigInfoSheet = {text:'', contacts:[], updatedAt:null});
+  const sheet = ev.gigInfoSheet || {text:'', contacts:[], updatedAt:null};
   sheet.contacts = sheet.contacts || [];
   sheet.contacts.push({ id:'GC-'+Math.random().toString(36).slice(2,9), name, role:(f.role||'').trim(), phone:(f.phone||'').trim(), email:(f.email||'').trim() });
   S.newGigContactForm = {};
-  saveEvents(); render();
+  reportEventSave(updateEvent(id, { gigInfoSheet: sheet }), 'adding the gig contact');
+  render();
 }
 function doRemoveGigContact(id, contactId){
   const ev = getEvent(id); if(!ev || !ev.gigInfoSheet) return;
-  ev.gigInfoSheet.contacts = (ev.gigInfoSheet.contacts||[]).filter(c=>c.id!==contactId);
-  saveEvents(); render();
+  const gigInfoSheet = { ...ev.gigInfoSheet, contacts: (ev.gigInfoSheet.contacts||[]).filter(c=>c.id!==contactId) };
+  reportEventSave(updateEvent(id, { gigInfoSheet }), 'removing the gig contact');
+  render();
 }
 function doSaveGigInfo(id){
   const ev = getEvent(id); if(!ev) return;
   const f = S.gigInfoForm;
-  const sheet = ev.gigInfoSheet || (ev.gigInfoSheet = {text:'', contacts:[], updatedAt:null});
-  sheet.text = (f.text!==undefined? f.text : sheet.text).trim();
-  sheet.updatedAt = fmtISO(new Date());
+  const prevSheet = ev.gigInfoSheet || {text:'', contacts:[], updatedAt:null};
+  const gigInfoSheet = { ...prevSheet, text: (f.text!==undefined? f.text : prevSheet.text).trim(), updatedAt: fmtISO(new Date()) };
   logEvent(ev, 'email', `Gig info sheet updated — ${artistById(ev.artistId).name} notified.`);
-  toast('Gig info sheet saved — artist notified.', 'success');
-  S.showGigInfoForm=false; S.gigInfoForm={}; S.newGigContactForm={}; saveEvents(); openEvent(id);
+  S.showGigInfoForm=false; S.gigInfoForm={}; S.newGigContactForm={};
+  if(reportEventSave(updateEvent(id, { gigInfoSheet }), 'saving the gig info sheet')) toast('Gig info sheet saved — artist notified.', 'success');
+  openEvent(id);
 }
 function doCopyText(value){
   if(!value) return;
@@ -15989,8 +16004,9 @@ function doSaveEditEvent(id){
   }
   if(!ev.unpaid && f.paymentMethodNote!==undefined) ev.paymentMethodNote = f.paymentMethodNote.trim();
   logEvent(ev, 'system', notes.length? `Details updated by office — ${notes.join('; ')}.` : 'Details updated by office.');
-  toast('Changes saved.', 'success');
-  S.showEditEvent=false; S.editEventForm={}; saveEvents(); openEvent(id);
+  S.showEditEvent=false; S.editEventForm={};
+  if(reportEventSave(updateEvent(id, {}), 'saving these changes')) toast('Changes saved.', 'success');
+  openEvent(id);
 }
 function doSubmitInvoice(){
   const f = S.newInvoiceForm;
@@ -16106,31 +16122,31 @@ function doOpenOutsideBookingDoc(bookingId){
   render();
 }
 function doEmailItinerary(id){
-  const ev = getEvent(id);
+  const ev = getEvent(id); if(!ev) return;
   logEvent(ev,'email',`Travel itinerary emailed to ${artistById(ev.artistId).name}.`);
-  toast('Itinerary emailed to artist.', 'email'); saveEvents(); openEvent(id);
+  if(reportEventSave(updateEvent(id, {}), 'emailing the itinerary')) toast('Itinerary emailed to artist.', 'email');
+  openEvent(id);
 }
 function doSendReminder(id){
   const ev = getEvent(id); if(!ev) return;
   // SMS stays mocked -- no SMS provider is wired into this app. The email half is real now.
   const via = isStandardPayment(ev) ? ' (Zelle link included)' : ` (payment method: ${paymentMethodLabel(ev)})`;
   logEvent(ev,'sms',`Balance reminder texted to ${ev.clientPhone}${via}.`);
-  saveEvents();
+  reportEventSave(updateEvent(id, {}), 'sending the reminder');
   if(ev.clientEmail) doSendReminderEmail(id);
   else toast('No client email on file — reminder not sent.', 'system');
 }
 function doMarkBalance(id){
-  const ev = getEvent(id); ev.balanceReceived=true; ev.balanceReceivedDate=fmtISO(new Date()); ev.status='paid';
+  const ev = getEvent(id); if(!ev) return;
   logEvent(ev,'success',`Bookkeeping marked balance received (${paymentMethodLabel(ev)}) — reminders stopped.`);
-  toast('Balance marked received. Reminders stopped.', 'success'); saveEvents(); openEvent(id);
+  if(reportEventSave(updateEvent(id, { balanceReceived:true, balanceReceivedDate:fmtISO(new Date()), status:'paid' }), 'marking the balance received')) toast('Balance marked received. Reminders stopped.', 'success');
+  openEvent(id);
 }
 function doToggleArtistPaidOut(id){
-  const ev = getEvent(id);
-  ev.artistPaidOut = !ev.artistPaidOut;
-  ev.artistPaidOutDate = ev.artistPaidOut ? fmtISO(new Date()) : null;
-  logEvent(ev, ev.artistPaidOut?'success':'system', ev.artistPaidOut? `Marked paid out to ${artistById(ev.artistId).name} (${money(zelleBalance(ev))}).` : 'Payout unmarked.');
-  saveEvents();
-  toast(ev.artistPaidOut? 'Marked paid out.' : 'Payout unmarked.', 'success');
+  const ev = getEvent(id); if(!ev) return;
+  const artistPaidOut = !ev.artistPaidOut;
+  logEvent(ev, artistPaidOut?'success':'system', artistPaidOut? `Marked paid out to ${artistById(ev.artistId).name} (${money(zelleBalance(ev))}).` : 'Payout unmarked.');
+  if(reportEventSave(updateEvent(id, { artistPaidOut, artistPaidOutDate: artistPaidOut? fmtISO(new Date()) : null }), 'updating payout status')) toast(artistPaidOut? 'Marked paid out.' : 'Payout unmarked.', 'success');
   render();
 }
 function doAddCharge(id){
@@ -16139,43 +16155,44 @@ function doAddCharge(id){
   const label = preset==='Other' ? (f.customLabel||'').trim() : preset;
   const amount = Number(f.amount);
   if(!label || !amount || amount<=0){ toast('Enter a charge type and an amount.', 'system'); return; }
-  const ev = getEvent(id);
+  const ev = getEvent(id); if(!ev) return;
   const postSigning = ev.depositReceived;
-  ev.charges = ev.charges || [];
-  ev.charges.push({id:'CH-'+Date.now(), label, amount, addedAfterSigning: postSigning});
+  const charges = ev.charges || [];
+  charges.push({id:'CH-'+Date.now(), label, amount, addedAfterSigning: postSigning});
   logEvent(ev,'system',`Charge added: ${label} (${money(amount)}).`);
   if(postSigning){
-    const newTotal = ev.price + chargesTotal(ev);
+    const newTotal = ev.price + chargesTotal({...ev, charges});
     logEvent(ev,'warning',`Added after signing — client's total changed. New total: ${money(newTotal)}.`);
     logEvent(ev,'email',`Updated total emailed to client: ${money(newTotal)} (was ${money(newTotal-amount)}).`);
   }
-  saveEvents(); S.showAddCharge=false; S.addChargeForm={};
-  toast(postSigning? 'Charge added — client notified of the updated total.' : 'Charge added to contract.', 'system');
+  S.showAddCharge=false; S.addChargeForm={};
+  if(reportEventSave(updateEvent(id, { charges }), 'adding the charge')) toast(postSigning? 'Charge added — client notified of the updated total.' : 'Charge added to contract.', 'system');
   openEvent(id);
 }
 function doRemoveCharge(id, chargeId){
-  const ev = getEvent(id);
+  const ev = getEvent(id); if(!ev) return;
   const removed = (ev.charges||[]).find(c=>c.id===chargeId);
-  ev.charges = (ev.charges||[]).filter(c=>c.id!==chargeId);
+  const charges = (ev.charges||[]).filter(c=>c.id!==chargeId);
   if(removed) logEvent(ev,'system',`Charge removed: ${removed.label} (${money(removed.amount)}).`);
-  saveEvents(); openEvent(id);
+  reportEventSave(updateEvent(id, { charges }), 'removing the charge');
+  openEvent(id);
 }
 function doUploadPrep(id, files){
-  const ev = getEvent(id);
-  ev.prepSheets = ev.prepSheets || [];
+  const ev = getEvent(id); if(!ev) return;
+  const prepSheets = ev.prepSheets || [];
   let remaining = files.length, succeeded = 0;
   Array.from(files).forEach(file=>{
     const reader = new FileReader();
     const finish = ()=>{
       remaining--;
       if(remaining===0){
-        saveEvents();
-        if(succeeded){ logEvent(ev,'system', `Prep sheet${succeeded===1?'':'s'} uploaded.`); toast('Prep sheet uploaded — artist notified.', 'success'); }
+        if(succeeded) logEvent(ev,'system', `Prep sheet${succeeded===1?'':'s'} uploaded.`);
+        if(reportEventSave(updateEvent(id, { prepSheets }), 'uploading the prep sheet') && succeeded) toast('Prep sheet uploaded — artist notified.', 'success');
         openEvent(id);
       }
     };
     reader.onload = ()=>{
-      ev.prepSheets.push({id:'PS-'+Date.now()+Math.random().toString(36).slice(2,6), name:file.name, dataUrl:reader.result, uploadedAt:fmtISO(new Date())});
+      prepSheets.push({id:'PS-'+Date.now()+Math.random().toString(36).slice(2,6), name:file.name, dataUrl:reader.result, uploadedAt:fmtISO(new Date())});
       succeeded++;
       finish();
     };
@@ -16184,9 +16201,10 @@ function doUploadPrep(id, files){
   });
 }
 function doRemovePrep(id, prepId){
-  const ev = getEvent(id);
-  ev.prepSheets = (ev.prepSheets||[]).filter(f=>f.id!==prepId);
-  saveEvents(); openEvent(id);
+  const ev = getEvent(id); if(!ev) return;
+  const prepSheets = (ev.prepSheets||[]).filter(f=>f.id!==prepId);
+  reportEventSave(updateEvent(id, { prepSheets }), 'removing the prep sheet');
+  openEvent(id);
 }
 function doShareEvent(id){
   S.showEventMenu = false;
@@ -16246,8 +16264,11 @@ function doAddProject(){
   const f = S.newProjectForm;
   const isBatch = f.mode==='recordingday';
   const type = 'General';
-  if(!f.artistId){ toast('Pick an artist.', 'system'); return; }
-  const artist = artistById(f.artistId);
+  // Only the Recording Day batch flow genuinely needs an artist (it's booking that artist's
+  // studio day) -- a plain project is legitimately artist-less non-gig/general work, matching the
+  // DB-level relaxation of projects.artist_id already done in migration 0020. See renderNewProjectModal.
+  if(isBatch && !f.artistId){ toast('Pick an artist.', 'system'); return; }
+  const artist = f.artistId ? artistById(f.artistId) : null;
 
   if(isBatch){
     if(!f.recordingDate){ toast('Pick a recording date.', 'system'); return; }
@@ -16291,8 +16312,8 @@ function doAddProject(){
   const proj = makeProject(artist, type, f.title.trim(), 0, 0, f.dueDate||null, {subtitle:(f.whoFor||'').trim()});
   PROJECTS.unshift(proj); saveProjects();
   S.newProjectForm={};
-  toast(`Project created for ${artist.name}.`, 'success');
-  S.projectArtistFilter = artist.id;
+  toast(artist? `Project created for ${artist.name}.` : 'Project created.', 'success');
+  S.projectArtistFilter = artist ? artist.id : 'all';
   navigate('project_detail', {projectId: proj.id});
 }
 function doAddPerson(id){
@@ -17108,7 +17129,7 @@ function bindGlobal(){
       case 'open-new-project': { const presetArtist = S.projectArtistFilter!=='all'? S.projectArtistFilter : null; closeAllOverlays(); S.newProjectForm={artistId: presetArtist}; S.showNewProject=true; render(); break; }
       case 'close-new-project': S.showNewProject=false; render(); break;
       case 'overlay-close-newproject': if(e.target===t){ S.showNewProject=false; render(); } break;
-      case 'pick-project-artist': S.newProjectForm.artistId = id; render(); break;
+      case 'pick-project-artist': S.newProjectForm.artistId = id||null; render(); break;
       case 'new-project-mode': S.newProjectForm.mode = t.getAttribute('data-mode'); render(); break;
       case 'pick-episode-count': S.newProjectForm.episodeCount = Number(t.getAttribute('data-count')); render(); break;
       case 'confirm-add-project': doAddProject(); break;
@@ -17135,7 +17156,7 @@ function bindGlobal(){
     }
   };
   document.querySelectorAll('[data-action="set-reminder-interval"]').forEach(sel=>{
-    sel.addEventListener('change', ()=>{ const ev=getEvent(sel.getAttribute('data-id')); ev.reminderIntervalDays=Number(sel.value); saveEvents(); toast('Reminder interval updated.', 'system'); });
+    sel.addEventListener('change', ()=>{ const id=sel.getAttribute('data-id'); if(reportEventSave(updateEvent(id, { reminderIntervalDays:Number(sel.value) }), 'updating the reminder interval')) toast('Reminder interval updated.', 'system'); });
   });
   document.querySelectorAll('[data-charge-preset]').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.addChargeForm.preset = sel.value; render(); });
