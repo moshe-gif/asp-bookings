@@ -38,21 +38,20 @@ def test_document_on_behalf_of_artist(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
 
-    # Shmili Landau only exists once real projects/roster are loaded (not in the base ARTISTS
-    # array) -- same one-tap action used elsewhere in the app/tests for real data.
-    page.get_by_text("Load real projects").click()
-
     goto_nav(page, "documents", mobile=False)
     page.locator('[data-action="open-new-document"]').click()
 
-    # "One of Our Artists" is the default subject type -- just pick Shmili from the dropdown.
-    page.locator('.document-subject-select').select_option(label="Shmili Landau")
+    # "One of Our Artists" is the default subject type -- just pick Baruch from the dropdown
+    # (base ARTISTS array, no extra loading needed -- "Load real projects" was a prototype
+    # localStorage-migration button, removed from production nav, see navigation/data-layer
+    # refactor PR 18's follow-up cleanup).
+    page.locator('.document-subject-select').select_option(label="Baruch Levine")
     page.locator('[data-action="save-document"]').click()
     assert not errors, f"console errors while saving artist document: {errors}"
 
     sign_lines = page.locator("#documentPrintHost .doc-sign-line")
     assert sign_lines.count() == 2
-    assert "On behalf of Shmili Landau" in sign_lines.nth(1).inner_text(), (
+    assert "On behalf of Baruch Levine" in sign_lines.nth(1).inner_text(), (
         "expected ASP-branded artist document to attribute to the artist, not just 'ASP Artist Management'"
     )
     # Letterhead stays ASP's own even though the document is "for" Shmili -- only the sender

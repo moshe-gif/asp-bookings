@@ -8,6 +8,7 @@
 
 /* ============ ICONS (tiny inline svg) ============ */
 const ICO = {
+  pencil:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
   dash:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
   cal:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
   leads:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V6a2 2 0 0 1 2-2h9l5 5v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><path d="M14 4v5h5"/></svg>',
@@ -11090,6 +11091,8 @@ let S = {
   realRosterBusy: false,
   showAddRealUser: false,
   addRealUserForm: {},
+  showEditRealUser: false,
+  editRealUserForm: {},
   showNewLead:false,
   showFlightForm:false,
   checkingFlightId:null,
@@ -11217,53 +11220,6 @@ function saveEvents(){
 }
 S.events = loadEvents();
 EVID = S.events.reduce((max,e)=>{ const n=parseInt(String(e.id).split('-')[1],10); return isNaN(n)? max : Math.max(max,n+1); }, EVID);
-
-function resetDemo(){ localStorage.removeItem(LS_KEY); S.events = seedAll(); saveEvents(); toast('Demo data reset.', 'system'); navigate('dashboard'); }
-// One-tap migration helper: this app has no shared backend yet, so every distinct
-// browser/installed-PWA has its own separate localStorage. This lets Moshe pull the
-// real projects (from the Excel import, 2026-08-27) onto any device/install that only
-// has the original seeded demo data -- safe to run more than once, it skips anything
-// that already matches by title+artist.
-const OLD_SEED_PROJECT_TITLES = ['Unreleased','Fall Tour','Lead Single','Charity Gala','Episode — Rabbi Dovid Orlofsky','Episode — Yossi Green'];
-function doLoadRealProjects(){
-  if(!ARTISTS.some(a=>a.id==='shmili')){
-    ARTISTS.push({id:'shmili', name:'Shmili Landau', slot:5, initials:'SL', email:'shmili@aspmanagement.com', role:'DJ'});
-    saveArtists();
-  }
-  const before = PROJECTS.length;
-  PROJECTS = PROJECTS.filter(p=>!OLD_SEED_PROJECT_TITLES.includes(p.title));
-  const removed = before - PROJECTS.length;
-
-  function addIfMissing(artistId, title, cards){
-    if(PROJECTS.some(p=>p.title===title && p.artistId===artistId)) return false;
-    const artist = artistById(artistId);
-    const proj = makeProject(artist, 'General', title, 0, 0, null, {});
-    proj.boardCards = cards.map(c=>({
-      id:'BC-'+Math.random().toString(36).slice(2,9), header:c.header,
-      items:c.items.map(text=>({id:'BI-'+Math.random().toString(36).slice(2,9), text, done:false})),
-    }));
-    PROJECTS.unshift(proj);
-    return true;
-  }
-  let added = 0;
-  const add = (...args)=>{ if(addIfMissing(...args)) added++; };
-  add('benny', 'Bennys Podcast', [{header:'Notes', items:['Tishrei Guest — Swekey??','Tuesday','Eitan','Pulse','Sruly Green','Follow up with Yerachmiel in 2027','Binyomin Miller — Purim guest']}]);
-  add('benny', 'Benny Game', [{header:'Notes', items:['Concept and rules created']}]);
-  add('benny', 'Benny Merch', [{header:'Notes', items:['Reached out to LNS']}]);
-  add('eli', '30 Piece Videos', [{header:'Notes', items:['Gershon has music','Shulem Heiman has video']}]);
-  add('eli', 'Job with Panski', []);
-  add('eli', 'DC Project', [{header:'Notes', items:['Yitzy Schwartz has the music','Shalom Kirstein has the video']}]);
-  add('yaakov', "Yaakov's Album", [
-    {header:'To Do', items:['Cover Photo Shoot']},
-    {header:'Song List', items:['Mayim Rabim (slow)','All I need is you','Becoming','Bridge','Adon','Abba','Kol Zman','Ani Maamin','Heart is on fire']},
-  ]);
-  add('shmili', 'Shmueli Landau Concert', [{header:'Notes', items:['Harass Ilan about date','Spoke to Eli — need to find out if this should be a money maker','Shmili is interested right after Succos']}]);
-  add('eli', 'Galei', [{header:'Notes', items:['Harass Schlisselfeld for track']}]);
-  add('baruch', 'Galei', [{header:'Notes', items:['Harass Schlisselfeld for track']}]);
-  saveProjects();
-  toast(`Loaded ${added} real project${added===1?'':'s'}${removed?`, removed ${removed} old demo project${removed===1?'':'s'}`:''}.`, 'success');
-  navigate('projects');
-}
 
 /* ============ REAL AUTH (Supabase) ============ */
 // Separate from Demo Mode entirely: a real session never touches ARTISTS/ADMIN_USERS
@@ -11393,7 +11349,7 @@ async function doRemoveRealPasskey(id){
 // "admin manages roster"/"admin manages office list" in supabase/migrations/0001). That person
 // can then sign in for real; linkRealSessionToRoster()'s existing email-match trigger links
 // their auth.users row to this one automatically the first time they do.
-const ADMIN_ROLE_LABELS = { admin_bookings:'Bookings', admin_bookkeeping:'Bookkeeping', admin_ceo:'CEO' };
+const ADMIN_ROLE_LABELS = { admin_bookings:'Bookings', admin_bookkeeping:'Bookkeeping', admin_ceo:'CEO', admin_coo:'COO' };
 async function loadRealRoster(){
   S.realRosterBusy = true;
   const [{data: admins, error: e1}, {data: artists, error: e2}] = await Promise.all([
@@ -11421,6 +11377,24 @@ function doAddRealUser(){
     if(error){ toast('Could not add that person: ' + error.message, 'system'); return; }
     toast(`${name} added. They can sign in at ${email} once they have a passkey or magic link set up.`, 'success');
     S.showAddRealUser = false; S.addRealUserForm = {};
+    loadRealRoster();
+  });
+}
+function doEditRealUser(){
+  const f = S.editRealUserForm;
+  const name = (f.name||'').trim();
+  const email = (f.email||'').trim().toLowerCase();
+  if(!name || !email){ toast('Enter a name and email.', 'system'); return; }
+  const parts = name.split(/\s+/);
+  const initials = (parts[0][0] + (parts[1]? parts[1][0] : '')).toUpperCase();
+  const table = f.kind==='admin' ? 'admin_users' : 'artists';
+  const patch = f.kind==='admin'
+    ? { name, email, initials, role: f.adminRole }
+    : { name, email, initials, role: f.artistRole };
+  supabaseClient.from(table).update(patch).eq('id', f.id).then(({error})=>{
+    if(error){ toast('Could not save that account: ' + error.message, 'system'); return; }
+    toast(`${name} updated.`, 'success');
+    S.showEditRealUser = false; S.editRealUserForm = {};
     loadRealRoster();
   });
 }
@@ -11748,7 +11722,7 @@ function closeAllOverlays(){
   S.showOutsideBookingDetail=false; S.outsideBookingDetailId=null;
   S.showDocumentBuilder=false; S.documentId=null; S.showAiEditNotice=false;
   S.showAddCharge=false; S.showEventMenu=false; S.projectTab='tasks'; S.taskAssigneeFilter=null; S.showReminderPreview=false; S.showBookingConfirmation=false;
-  S.showMobileMenu=false; S.showAddRealUser=false;
+  S.showMobileMenu=false; S.showAddRealUser=false; S.showEditRealUser=false;
   S.showContractBuilder=false; S.contractBuilderId=null; S.showContractBuilderDoc=false;
   S.showTemplatePicker=false; S.templatePickerLeadId=null;
   S.showPayeeProfileForm=false; S.payeeProfileForm={}; S.editingPayeeProfileId=null;
@@ -11957,6 +11931,7 @@ function render(){
     ${S.showAddArtist ? renderAddArtistModal() : ''}
     ${S.newArtistWelcome ? renderWelcomeEmailPreview() : ''}
     ${S.showAddRealUser ? renderAddRealUserModal() : ''}
+    ${S.showEditRealUser ? renderEditRealUserModal() : ''}
     ${S.showPayeeProfileForm ? renderPayeeProfileFormModal() : ''}
     ${S.dayListDate ? renderDayList() : ''}
     ${S.showNewProject ? renderNewProjectModal() : ''}
@@ -12108,8 +12083,6 @@ function renderRail(){
       <a href="#" class="rail-link ${isNavActive('settings')?'active':''}" data-action="nav" data-view="settings">${ICO.settings}Settings</a>
     </div>
     <div class="rail-foot">
-      <button class="btn btn-ghost btn-block" data-action="load-real-projects" style="justify-content:flex-start;font-weight:600;color:var(--ink-3);">Load real projects</button>
-      <button class="btn btn-ghost btn-block" data-action="reset-demo" style="justify-content:flex-start;font-weight:600;color:var(--ink-3);">Reset demo data</button>
       <div style="padding:10px 10px 0;font-size:11px;color:var(--ink-3);">${APP_VERSION}</div>
     </div>
   </div>`;
@@ -12151,7 +12124,6 @@ function renderMobileMenu(isAdmin){
           <span class="avatar" data-slot="${isAdmin?'0':who.slot}" style="width:32px;height:32px;font-size:11px;${isAdmin?'background:var(--ink);color:var(--page);':''}">${who.initials}</span>
           <span style="font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(who.name)}</span>
         </div>
-        ${isAdmin? `<a href="#" class="rail-link" data-action="load-real-projects">${ICO.plus} Load real projects</a>`:''}
         <a href="#" class="rail-link" data-action="logout" style="color:var(--crit);">${ICO.logout} Log Out</a>
         <div style="padding:10px 10px 0;font-size:11px;color:var(--ink-3);">${APP_VERSION}</div>
       </div>
@@ -12229,12 +12201,18 @@ function renderUsersDashboardCard(){
     <div class="u-label" style="margin-bottom:6px;">Office</div>
     ${roster.admins.length? roster.admins.map(u=>`<div class="settings-row">
       <div><h4>${esc(u.name)} <span style="font-weight:400;color:var(--ink-3);">— ${esc(ADMIN_ROLE_LABELS[u.role]||u.role)}</span></h4><p>${esc(u.email)}</p></div>
-      <span class="pill ${u.user_id?'pill-good':''}">${u.user_id?'Active':'Invited'}</span>
+      <span style="display:flex;align-items:center;gap:8px;flex:none;">
+        <span class="pill ${u.user_id?'pill-good':''}">${u.user_id?'Active':'Invited'}</span>
+        <button class="icon-btn" data-action="open-edit-real-user" data-kind="admin" data-id="${u.id}" title="Edit">${ICO.pencil}</button>
+      </span>
     </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0 0 12px;">No office accounts yet.</p>`}
     <div class="u-label" style="margin:14px 0 6px;">Artists</div>
     ${roster.artists.length? roster.artists.map(a=>`<div class="settings-row">
       <div><h4>${esc(a.name)} <span style="font-weight:400;color:var(--ink-3);">— ${esc(a.role)}</span></h4><p>${esc(a.email)}</p></div>
-      <span class="pill ${a.user_id?'pill-good':''}">${a.user_id?'Active':'Invited'}</span>
+      <span style="display:flex;align-items:center;gap:8px;flex:none;">
+        <span class="pill ${a.user_id?'pill-good':''}">${a.user_id?'Active':'Invited'}</span>
+        <button class="icon-btn" data-action="open-edit-real-user" data-kind="artist" data-id="${a.id}" title="Edit">${ICO.pencil}</button>
+      </span>
     </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0;">No real artist accounts yet.</p>`}
     `}
   </div>`;
@@ -12261,6 +12239,32 @@ function renderAddRealUserModal(){
         </div>`}
         <p style="font-size:11px;color:var(--ink-3);margin:0;">This creates a real account. They sign in themselves at this email — nothing is emailed automatically yet.</p>
         <button class="btn btn-primary btn-block" data-action="confirm-add-real-user">Add Person</button>
+      </div>
+    </div>
+  </div>`;
+}
+// His ask (2026-10-06): real admin/artist accounts had no edit path at all -- only Add Person
+// existed, so a typo'd name/email or a role picked wrong (e.g. the admin_ceo placeholder used
+// to bootstrap Moshe's real account) had no fix short of a direct SQL update. Same field set as
+// Add Person, minus the kind toggle (you're editing an existing row, not choosing what to create).
+function renderEditRealUserModal(){
+  const f = S.editRealUserForm;
+  const kind = f.kind;
+  const adminRole = f.adminRole || 'admin_bookings';
+  const artistRole = f.artistRole || 'Singer';
+  return `<div class="overlay center" data-action="overlay-close-editrealuser">
+    <div class="modal" data-stop data-form="edituser" style="width:420px;">
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">Edit ${kind==='admin'?'Office':'Artist'} Account</h2><button class="icon-btn" data-action="close-edit-real-user">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <div class="field"><label>Full Name</label><input data-field="name" value="${esc(f.name||'')}" placeholder="Full name" autofocus/></div>
+        <div class="field"><label>Real Email</label><input type="email" data-field="email" value="${esc(f.email||'')}" placeholder="them@realdomain.com"/></div>
+        ${kind==='artist' ? `<div class="field"><label>Role</label>
+          <div class="chip-row">${ARTIST_ROLES.map(r=>`<button class="filter-chip ${artistRole===r?'sel':''}" data-action="pick-edit-artist-role" data-role="${r}">${r}</button>`).join('')}</div>
+        </div>` : `<div class="field"><label>Desk</label>
+          <div class="chip-row">${Object.entries(ADMIN_ROLE_LABELS).map(([k,l])=>`<button class="filter-chip ${adminRole===k?'sel':''}" data-action="pick-edit-admin-role" data-role="${k}">${l}</button>`).join('')}</div>
+        </div>`}
+        ${f.email!==f.originalEmail? `<p style="font-size:11px;color:var(--ink-3);margin:0;">Changing the email does not move their existing sign-in -- they'll still sign in with the old address until this one is updated to match a real account.</p>` : ''}
+        <button class="btn btn-primary btn-block" data-action="confirm-edit-real-user">Save Changes</button>
       </div>
     </div>
   </div>`;
@@ -12414,7 +12418,7 @@ function renderMgmtDashboard(){
   const isCEO = S.user==='admin_ceo';
   if(isCEO){
     return `
-    ${renderWelcomeHeader(adminById(S.user).displayName)}
+    ${renderWelcomeHeader((adminById(S.user).name||'').split(' ')[0])}
     ${renderUpcomingGigsCard(S.events, {days:7, showArtist:true})}
     ${renderOpenLeadsCard(S.events)}
     `;
@@ -12429,7 +12433,7 @@ function renderMgmtDashboard(){
   const todayGigs = S.events.filter(e=>e.date===fmtISO(new Date()) && ['booked','paid'].includes(e.status));
 
   return `
-  ${renderWelcomeHeader(adminById(S.user).displayName)}
+  ${renderWelcomeHeader((adminById(S.user).name||'').split(' ')[0])}
   <div class="grid stat-row" style="margin-bottom:20px;">
     <div class="card stat-tile" style="cursor:pointer;" data-action="nav-today-gigs"><span class="u-label">Gigs Today</span><span class="val">${todayGigs.length}</span><span class="sub">${fmtDateShort(fmtISO(new Date()))}</span></div>
     <div class="card stat-tile" style="cursor:pointer;" data-action="nav" data-view="calendar"><span class="u-label">Upcoming Gigs · 30 days</span><span class="val">${upcoming30.length}</span><span class="sub">Booked or paid, next 30 days</span></div>
@@ -13963,8 +13967,7 @@ function renderEventSheet(ev){
           <button class="btn" style="flex:1;justify-content:flex-start;" data-action="view-itinerary" data-id="${ev.id}">${ICO.suitcase} View Itinerary</button>
           ${isAdmin? `<button class="btn btn-sm" data-action="email-itinerary" data-id="${ev.id}">${ICO.mail} Email to Artist</button>` : ''}
         </div>` : ''}
-        ${renderPrepSheets(ev, isAdmin)}
-        ${renderGigInfoCard(ev, isAdmin)}
+        ${renderPrepAndGigInfoCard(ev, isAdmin)}
         ${!isAdmin ? `<div>
             <div style="display:flex;gap:8px;">
               <button class="btn btn-primary btn-block" data-action="gcal" data-id="${ev.id}">${ICO.cal} Add to Google Calendar</button>
@@ -14123,8 +14126,7 @@ function renderAddChargeRow(ev){
 
 function renderPrepSheets(ev, isAdmin){
   const files = ev.prepSheets||[];
-  return `<div class="card card-pad">
-    <div class="u-label" style="margin-bottom:8px;">Prep Sheets</div>
+  return `<div class="u-label" style="margin-bottom:8px;">Prep Sheets</div>
     ${files.length? `<div class="log" style="margin-bottom:${isAdmin?'10px':'0'};">${files.map(f=>`
       <div class="log-item" style="align-items:center;">
         <span class="log-ico">${ICO.leads}</span>
@@ -14132,9 +14134,7 @@ function renderPrepSheets(ev, isAdmin){
         <a href="${f.dataUrl}" target="_blank" rel="noopener" class="btn btn-sm">View</a>
         ${isAdmin?`<button class="icon-btn" data-action="remove-prep" data-id="${ev.id}" data-prepid="${f.id}" title="Remove">${ICO.x}</button>`:''}
       </div>`).join('')}</div>` : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 ${isAdmin?'10px':'0'};">No prep sheets uploaded yet.</p>`}
-    ${isAdmin? `<label class="btn btn-sm" style="cursor:pointer;display:inline-flex;">Upload File<input type="file" data-action="upload-prep" data-id="${ev.id}" multiple style="display:none;"/></label>
-      <p style="font-size:10.5px;color:var(--ink-3);margin:8px 0 0;">Stored in this demo session only — swapped for real cloud storage once ASP is online.</p>` : ''}
-  </div>`;
+    ${isAdmin? `<label class="btn btn-sm" style="cursor:pointer;display:inline-flex;">Upload File<input type="file" data-action="upload-prep" data-id="${ev.id}" multiple style="display:none;"/></label>` : ''}`;
 }
 
 /* ============ GIG INFO SHEET ============ */
@@ -14155,8 +14155,7 @@ function renderGigInfoCard(ev, isAdmin){
   if(ev.unpaid) return '';
   const sheet = gigInfoSheetOf(ev);
   const hasContent = sheet.text || (sheet.contacts||[]).length;
-  return `<div class="card card-pad">
-    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;">
+  return `<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;">
       <div class="u-label">Gig Info Sheet</div>
       ${isAdmin? `<button class="btn btn-sm btn-ghost" data-action="open-giginfo-form" data-id="${ev.id}" style="padding:2px 6px;">${hasContent?'Edit':'+ Add'}</button>`:''}
     </div>
@@ -14165,7 +14164,19 @@ function renderGigInfoCard(ev, isAdmin){
       ${(sheet.contacts||[]).length? `<div style="margin-bottom:10px;">${sheet.contacts.map(c=>renderContactCopyRow(c, ev)).join('')}</div>` : ''}
       <button class="btn btn-sm" data-action="view-giginfo" data-id="${ev.id}">${ICO.leads} View / Print</button>
       ${sheet.updatedAt? `<span style="font-size:10.5px;color:var(--ink-3);margin-left:8px;">Updated ${fmtDateShort(sheet.updatedAt)}</span>`:''}
-    `}
+    `}`;
+}
+// His ask (2026-10-06): Prep Sheets (file uploads) and Gig Info Sheet (text notes + contacts)
+// used to be two separate cards stacked on top of each other -- same "everything the artist needs
+// for this gig" purpose, just two different content types, so merged into one card with a divider
+// between the two sub-sections. Data model unchanged (ev.prepSheets[] / ev.gigInfoSheet stay
+// separate fields -- different shapes, no reason to force them into one).
+function renderPrepAndGigInfoCard(ev, isAdmin){
+  const giginfo = renderGigInfoCard(ev, isAdmin);
+  return `<div class="card card-pad">
+    ${renderPrepSheets(ev, isAdmin)}
+    ${giginfo? `<div style="height:1px;background:var(--border);margin:14px 0;"></div>${giginfo}` : ''}
+    ${isAdmin? `<p style="font-size:10.5px;color:var(--ink-3);margin:10px 0 0;">Files are stored directly on the event record, not in a dedicated file-storage service.</p>` : ''}
   </div>`;
 }
 function renderGigInfoFormOverlay(){
@@ -14935,7 +14946,7 @@ function renderContractBuilderModal(){
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--surface-2);">
           ${c.approvedAt
-            ? `<span class="pill pill-good">Approved for sending — ${adminById(c.approvedBy)?adminById(c.approvedBy).displayName:'admin'}, ${fmtDateShort(c.approvedAt.slice(0,10))}</span>
+            ? `<span class="pill pill-good">Approved for sending — ${adminById(c.approvedBy)?adminById(c.approvedBy).name:'admin'}, ${fmtDateShort(c.approvedAt.slice(0,10))}</span>
                <button class="btn btn-sm btn-ghost" data-action="revoke-contract-approval" data-id="${c.id}">Revoke</button>`
             : `<span class="pill pill-neutral">Not yet approved — money/terms must be approved before this contract can be sent</span>
                <button class="btn btn-sm" data-action="approve-contract-for-sending" data-id="${c.id}">Approve for Sending</button>`}
@@ -16742,7 +16753,7 @@ function bindGlobal(){
       const form = el.closest('[data-form]')?.getAttribute('data-form');
       if(form==='task'){ S.newTaskText = el.value; return; }
       if(form==='comment'){ S.newCommentText = el.value; return; }
-      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm, payeeprofile:S.payeeProfileForm, sendcontract:S.sendContractForm, verifydeposit:S.verifyDepositForm, orgsettings:ORG_SETTINGS, gmailmailbox:S.newGmailMailboxForm };
+      const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, edituser:S.editRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm, payeeprofile:S.payeeProfileForm, sendcontract:S.sendContractForm, verifydeposit:S.verifyDepositForm, orgsettings:ORG_SETTINGS, gmailmailbox:S.newGmailMailboxForm };
       const target = formTargets[form] || S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
       if(form==='orgsettings') saveOrgSettings();
@@ -17111,8 +17122,6 @@ function bindGlobal(){
         toast(result.ok ? 'Dismissed.' : (result.error==='conflict' ? 'This gig changed elsewhere since you loaded it — reload before dismissing.' : 'Could not save.'), result.ok?'system':'system');
         render(); break;
       }
-      case 'reset-demo': if(confirm('Reset all demo data back to the seeded example set?')) resetDemo(); break;
-      case 'load-real-projects': S.showMobileMenu=false; doLoadRealProjects(); break;
       case 'set-theme': setThemePref(t.getAttribute('data-theme-pref')); break;
       case 'toggle-notif': { const st=getUserSettings(S.user); const key=t.getAttribute('data-key'); const channel=t.getAttribute('data-channel')||'inApp'; st.notify[key][channel]=!st.notify[key][channel]; saveAllSettings(); render(); break; }
       case 'add-passkey': { const st=getUserSettings(S.user); const n=st.passkeys.length+1; st.passkeys.push({id:'pk-'+randInt(1,999999), label:`Passkey ${n}`, addedAt: fmtISO(new Date())}); saveAllSettings(); toast('Passkey added.', 'success'); render(); break; }
@@ -17164,6 +17173,19 @@ function bindGlobal(){
       case 'pick-real-artist-role': S.addRealUserForm.artistRole = t.getAttribute('data-role'); render(); break;
       case 'pick-real-admin-role': S.addRealUserForm.adminRole = t.getAttribute('data-role'); render(); break;
       case 'confirm-add-real-user': doAddRealUser(); break;
+      case 'open-edit-real-user': {
+        closeAllOverlays();
+        const kind = t.getAttribute('data-kind');
+        const row = (kind==='admin'? S.realRoster.admins : S.realRoster.artists).find(r=>r.id===id);
+        if(!row) break;
+        S.editRealUserForm = { kind, id: row.id, name: row.name, email: row.email, originalEmail: row.email, adminRole: row.role, artistRole: row.role };
+        S.showEditRealUser = true; render(); break;
+      }
+      case 'close-edit-real-user': S.showEditRealUser=false; render(); break;
+      case 'overlay-close-editrealuser': if(e.target===t){ S.showEditRealUser=false; render(); } break;
+      case 'pick-edit-artist-role': S.editRealUserForm.artistRole = t.getAttribute('data-role'); render(); break;
+      case 'pick-edit-admin-role': S.editRealUserForm.adminRole = t.getAttribute('data-role'); render(); break;
+      case 'confirm-edit-real-user': doEditRealUser(); break;
       case 'toggle-event-menu': S.showEventMenu = !S.showEventMenu; render(); break;
       case 'share-event': doShareEvent(id); break;
       case 'copy-daily-digest': doCopyDailyDigest(); break;
