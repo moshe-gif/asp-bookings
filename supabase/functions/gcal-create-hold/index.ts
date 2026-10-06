@@ -13,8 +13,17 @@
 // GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET (to refresh the stored access token).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// Called directly via fetch() from the browser -- without these headers the browser's CORS
+// preflight (an automatic OPTIONS request before any cross-origin POST carrying custom headers
+// like apikey/Content-Type) fails with no server-visible error; the app just sees "Failed to
+// fetch". Same fix as send-contract-email/index.ts.
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
 function json(obj: unknown, status = 200) {
-  return new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json" } });
+  return new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", ...corsHeaders } });
 }
 
 function serviceClient() {
@@ -54,6 +63,7 @@ async function getValidAccessToken(): Promise<string> {
 type Target = { role: "asp_main" | "artist"; artistId: string | null; label: string };
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ ok: false, error: "method not allowed" }, 405);
 
   const authHeader = req.headers.get("Authorization") || "";

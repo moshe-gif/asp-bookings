@@ -116,15 +116,20 @@ async function handlePaymentEntity(sb: ReturnType<typeof serviceClient>, qboPaym
       qbo_invoice_id: null, amount: totalAmt, kind: "deposit", source: "quickbooks",
       source_ref: payment.Id, status: "unmatched", received_at: payment.TxnDate || new Date().toISOString(),
       notes: `No matching qbo_invoices row for QuickBooks invoice ${qboInvoiceId || "(none linked)"}.`,
+      allocation_status: "needs_review", expected_amount: null,
     });
     return;
   }
 
   const kind = totalAmt > invoiceRow.amount ? "overpayment" : totalAmt < invoiceRow.amount ? "partial" : "deposit";
+  // "Never auto-allocate a mismatched payment by amount alone" -- only an exact match against the
+  // invoice's own amount is allocated automatically; partial/overpayment always goes to
+  // needs_review for a human to resolve, even though `kind` already classifies which case it is.
   await upsertPayment(sb, {
     qbo_invoice_id: invoiceRow.id, amount: totalAmt, kind, source: "quickbooks",
     source_ref: payment.Id, status: "received", received_at: payment.TxnDate || new Date().toISOString(),
-    notes: "",
+    notes: "", expected_amount: invoiceRow.amount,
+    allocation_status: totalAmt === invoiceRow.amount ? "allocated" : "needs_review",
   });
 
   const qbStatus = kind === "partial" ? "partially_paid" : "paid";

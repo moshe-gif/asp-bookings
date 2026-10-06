@@ -14,16 +14,28 @@
 // SUPABASE_URL / SUPABASE_ANON_KEY are already available to every Edge Function automatically.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// Called directly via fetch() from the browser (frontend/workspaces/asp.js), a different origin
+// than this function -- without these headers the browser's CORS preflight (an OPTIONS request
+// sent automatically before any cross-origin POST carrying custom headers like apikey/
+// Content-Type) fails with no server-visible error at all; the app just sees "Failed to fetch".
+// This was a real, silent bug: every "real" send built this session was never actually reachable
+// from the browser until this was added, regardless of deployment or auth being correct.
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
 function json(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...corsHeaders },
   });
 }
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ ok: false, error: "method not allowed" }, 405);
 
   const authHeader = req.headers.get("Authorization") || "";

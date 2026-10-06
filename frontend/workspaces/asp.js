@@ -549,6 +549,13 @@ function migrateContract(c){
   if(c.qboInvoiceId===undefined){ c.qboInvoiceId = null; migrated = true; }
   if(c.qboInvoiceDocNumber===undefined){ c.qboInvoiceDocNumber = null; migrated = true; }
   if(c.calendarHoldsStatus===undefined){ c.calendarHoldsStatus = null; migrated = true; }
+  // Durable booking record architecture (PR 5): an explicit admin approval gate before a contract
+  // can be sent -- "money/term changes need approval before outbound comms" -- plus a local mirror
+  // of Supabase's contract_versions (0010), written on every real send so there's an immutable
+  // record of what was actually emailed, even for contracts never migrated to a real Supabase row.
+  if(c.approvedBy===undefined){ c.approvedBy = null; migrated = true; }
+  if(c.approvedAt===undefined){ c.approvedAt = null; migrated = true; }
+  if(!c.versions){ c.versions = []; migrated = true; }
   // ---- v3 additions (office-drive audit against real contracts) ----
   if(c.snapshot.clientPhone===undefined){ c.snapshot.clientPhone = ''; migrated = true; }
   if(c.snapshot.eventName===undefined){ c.snapshot.eventName = ''; migrated = true; }
@@ -1045,9 +1052,40 @@ async function doMigrateContractsToSupabase(){
   render();
 }
 
+/* ---- Contract approval gate (durable booking record architecture, PR 5): "money/term changes
+   need approval before outbound comms" -- doSendContractEmail() below refuses to send until
+   c.approvedAt is set. Local-first like the rest of this app's contract state: the approval always
+   lands on the local record immediately; syncing approved_by/approved_at onto a real Supabase
+   contracts row (migration 0021) is best-effort and only possible once that contract has been
+   migrated (c._supabaseId) and the current admin has a real Supabase admin_users row (adminRow.dbId,
+   set at real sign-in) -- neither is guaranteed yet for most contracts/admins, so a sync failure
+   here must never block the local approval itself. ---- */
+async function doApproveContractForSending(id){
+  const c = getContract(id); if(!c) return;
+  c.approvedBy = S.user; c.approvedAt = new Date().toISOString(); c.updatedAt = c.approvedAt;
+  saveContracts(); render();
+  if(supabaseClient && c._supabaseId){
+    const dbId = adminById(S.user) ? adminById(S.user).dbId : null;
+    if(dbId){
+      try{ await supabaseClient.from('contracts').update({ approved_by: dbId, approved_at: c.approvedAt }).eq('id', c._supabaseId); }
+      catch(err){ console.error('contract approval sync failed', c.id, err); }
+    }
+  }
+}
+function doRevokeContractApproval(id){
+  const c = getContract(id); if(!c) return;
+  c.approvedBy = null; c.approvedAt = null; c.updatedAt = new Date().toISOString();
+  saveContracts(); render();
+  if(supabaseClient && c._supabaseId){
+    supabaseClient.from('contracts').update({ approved_by:null, approved_at:null }).eq('id', c._supabaseId)
+      .then(({error})=>{ if(error) console.error('contract approval revoke sync failed', c.id, error); });
+  }
+}
+
 /* ---- Send Contract (real email, via the send-contract-email Supabase Edge Function) ---- */
 async function doSendContractEmail(){
   const c = getContract(S.contractBuilderId); if(!c) return;
+  if(!c.approvedAt){ toast('Approve this contract for sending first — money/terms must be approved before it can go out.', 'system'); return; }
   // Capture every form value up front and use only these locals from here on -- S.sendContractForm
   // gets cleared as soon as the email step succeeds (so the confirm modal doesn't reopen stale),
   // and the QuickBooks step runs after that point. Reading S.sendContractForm.qboAmount there was
@@ -1082,6 +1120,22 @@ async function doSendContractEmail(){
       return;
     }
     if(c.status==='draft'){ c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); }
+    // Immutable snapshot of exactly what was sent (contract_versions, migration 0010) -- a contract
+    // can be edited after sending; this is what proves what the client actually received on a given
+    // date. Local mirror (c.versions) is always written so there's an audit trail even for contracts
+    // never migrated to a real Supabase row; the real Supabase insert is best-effort and only
+    // possible once c._supabaseId exists -- never blocks the send itself if it fails.
+    c.versions = c.versions || [];
+    const versionNumber = c.versions.length + 1;
+    c.versions.push({ versionNumber, snapshot: JSON.parse(JSON.stringify(c)), renderedHtml: html, sentTo: to, sentAt: new Date().toISOString() });
+    saveContracts();
+    if(supabaseClient && c._supabaseId && session){
+      try{
+        await supabaseClient.from('contract_versions').insert({
+          contract_id: c._supabaseId, version_number: versionNumber, snapshot: c, rendered_html: html, sent_to: to, created_by: session.user.id,
+        });
+      } catch(err){ console.error('contract_versions sync failed', c.id, err); }
+    }
     toast(`Contract sent to ${to}.`, 'success');
     S.showSendContractConfirm=false; S.sendContractForm={};
 
@@ -14763,6 +14817,13 @@ function renderContractBuilderModal(){
         <div class="field"><label>Status</label>
           <div class="chip-row">${['draft','sent','signed','void'].map(s=>`<button class="filter-chip ${c.status===s?'sel':''}" data-action="set-contract-status" data-status="${s}">${contractStatusLabel(s)}</button>`).join('')}</div>
         </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--surface-2);">
+          ${c.approvedAt
+            ? `<span class="pill pill-good">Approved for sending — ${adminById(c.approvedBy)?adminById(c.approvedBy).displayName:'admin'}, ${fmtDateShort(c.approvedAt.slice(0,10))}</span>
+               <button class="btn btn-sm btn-ghost" data-action="revoke-contract-approval" data-id="${c.id}">Revoke</button>`
+            : `<span class="pill pill-neutral">Not yet approved — money/terms must be approved before this contract can be sent</span>
+               <button class="btn btn-sm" data-action="approve-contract-for-sending" data-id="${c.id}">Approve for Sending</button>`}
+        </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
           <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Autofilled from the lead — editing here does not change the lead.</p>
           <button class="btn btn-sm btn-ghost" style="flex:none;" data-action="contract-refresh-from-lead" data-id="${c.id}">Refresh from Lead</button>
@@ -16737,6 +16798,8 @@ function bindGlobal(){
       case 'contract-refresh-from-lead': doRefreshContractFromLead(S.contractBuilderId); break;
       case 'delete-contract': doDeleteContract(S.contractBuilderId); break;
       case 'set-contract-status': { const c=getContract(S.contractBuilderId); if(c){ c.status=t.getAttribute('data-status'); if(c.status==='signed' && !c.signedAt) c.signedAt=new Date().toISOString(); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
+      case 'approve-contract-for-sending': doApproveContractForSending(id); break;
+      case 'revoke-contract-approval': doRevokeContractApproval(id); break;
       case 'pick-contract-overtime-interval': { const c=getContract(S.contractBuilderId); if(c){ c.overtime.interval=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'pick-cancellation-type': { const c=getContract(S.contractBuilderId); if(c){ c.cancellationPolicy.type=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'pick-balance-due-timing': { const c=getContract(S.contractBuilderId); if(c){ c.balanceDueTiming=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }

@@ -9,11 +9,21 @@
 //
 // Function Secret needed: FLIGHTAWARE_API_KEY. Never exposed to the client -- if it's unset, this
 // returns a clear "not configured" error rather than a confusing upstream failure.
+// Called directly via fetch() from the browser -- without these headers the browser's CORS
+// preflight (an automatic OPTIONS request before any cross-origin POST carrying custom headers
+// like apikey/Content-Type) fails with no server-visible error; the app just sees "Failed to
+// fetch". Same fix as send-contract-email/index.ts.
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
 function json(obj: unknown, status = 200) {
-  return new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json" } });
+  return new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", ...corsHeaders } });
 }
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ ok: false, error: "method not allowed" }, 405);
 
   const authHeader = req.headers.get("Authorization") || "";
