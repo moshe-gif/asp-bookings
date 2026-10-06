@@ -11,6 +11,28 @@ import os
 ADMIN_IDS = ["admin_bookings", "admin_bookkeeping", "admin_ceo"]
 ARTIST_IDS = ["baruch", "benny", "moshe", "yaakov", "eli", "dovie"]
 
+# Navigation/data-layer refactor, PR 18: Demo Mode is gone, so each of the 9 personas above is now
+# a real seeded Supabase account (see README.md "Real-auth test account setup"). The
+# admin_bookings account predates this batch and keeps its own password var; the other 8 share one
+# password generated for this batch -- both live in test-harness/.env (gitignored), never here.
+ROLE_EMAILS = {
+    "admin_bookings": "test-harness@aspmgmt.com",
+    "admin_bookkeeping": "test-bookkeeping@aspmgmt.com",
+    "admin_ceo": "test-ceo@aspmgmt.com",
+    "baruch": "test-baruch@aspmgmt.com",
+    "benny": "test-benny@aspmgmt.com",
+    "moshe": "test-moshetischler@aspmgmt.com",
+    "yaakov": "test-yaakov@aspmgmt.com",
+    "eli": "test-eli@aspmgmt.com",
+    "dovie": "test-dovie@aspmgmt.com",
+}
+
+
+def _password_for(user_id):
+    if user_id == "admin_bookings":
+        return os.environ.get("ASP_TEST_HARNESS_PASSWORD")
+    return os.environ.get("ASP_TEST_BATCH2_PASSWORD")
+
 # Nav items actually visible in the mobile bottom-nav pill today (some are demoted to the
 # hamburger-menu-only per earlier UI work) — see frontend/index.html's `.bn-item[data-view=...]
 # {display:none}` rules for the current hide-list. Keep this in sync if that changes.
@@ -44,24 +66,6 @@ def dismiss_opener(page):
         except Exception:
             pass
         opener.wait_for(state='detached', timeout=8000)
-
-
-def login_as(page, user_id):
-    """
-    Drives the real login UI: click "Sign In (Demo Mode)", then the matching account row.
-    Not a JS/state shortcut — this is what a real user actually clicks through, every time
-    (demo-mode login isn't persisted to localStorage, confirmed against the app's own code).
-    Lands on that role's dashboard.
-    """
-    dismiss_opener(page)
-    page.get_by_text("Sign In (Demo Mode)").click()
-    page.locator(f'.chooser-row[data-user="{user_id}"]').click()
-    # Not ".topbar, .artist-top-tabs": artist views render a SECOND, nested .topbar inside
-    # .artist-top-tabs (hidden on mobile via display:none), and a multi-match CSS selector waits
-    # on whichever element it resolves first in DOM order -- which can be the hidden one,
-    # timing out forever on mobile viewports. <h1> is unique (exactly one in the whole app) and
-    # always populated the instant a real page renders, for either role, any viewport.
-    page.wait_for_selector("h1")
 
 
 def is_admin(user_id):
@@ -100,10 +104,23 @@ def login_as_real(page, email=None, password=None):
     )
     if error_message:
         raise RuntimeError(f"Real sign-in failed: {error_message}")
-    # Mirrors login_as()'s own wait -- linkRealSessionToRoster() (asp.js) runs a Supabase query
-    # before S.user is set and the real page renders, so this takes a beat longer than the
-    # synchronous Demo Mode click-through.
+    # linkRealSessionToRoster() (asp.js) runs a Supabase query before S.user is set and the real
+    # page renders, so this takes a beat longer than Demo Mode's old synchronous click-through did.
     page.wait_for_selector("h1", timeout=15000)
+
+
+def login_as(page, user_id):
+    """
+    Signs in as one of the 9 real seeded test accounts via real Supabase auth (email/password
+    looked up from ROLE_EMAILS + test-harness/.env). Replaces the old Demo Mode click-through --
+    Demo Mode was removed from the app in PR 18 (navigation/data-layer refactor); this keeps the
+    exact same (page, user_id) call signature so none of the ~45 existing call sites needed to
+    change. See README.md "Real-auth test account setup".
+    """
+    email = ROLE_EMAILS.get(user_id)
+    if not email:
+        raise ValueError(f"no real-auth test account configured for user_id={user_id!r}")
+    login_as_real(page, email=email, password=_password_for(user_id))
 
 
 def goto_nav(page, view_key, mobile=False):

@@ -1,0 +1,13 @@
+-- Navigation/data-layer refactor, PR 18 (real-auth test migration): closes a gap found while
+-- wiring real Supabase accounts for the Playwright suite's 6 artist roles. artists.id is a real
+-- uuid (migration 0001), but every event in the local seed/import data (S.events, the 215 real
+-- imported gigs, and every demo fixture) keys event.artistId to the ORIGINAL short string id
+-- ('baruch', 'benny', ...) the app has always used -- not a Postgres uuid. Without a bridge, a
+-- real artist's first sign-in sets S.user to their brand-new random uuid, which matches zero
+-- existing events: My Gigs/Calendar/Financials would render empty for every real artist, even
+-- though their historic gig data already exists locally. Same shape of problem the admin branch
+-- of linkRealSessionToRoster already solved (S.user = adminRow.role, not the row's own uuid, so
+-- existing role-string checks keep working) -- same fix, applied to artists, via an explicit
+-- mapping column rather than reusing the uuid as a fake slug. Mirrors the legacy_id precedent
+-- already established on contracts/payee_profiles/external_events (migration 0016).
+alter table artists add column if not exists legacy_id text unique;

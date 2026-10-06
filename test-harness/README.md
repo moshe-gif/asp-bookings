@@ -47,31 +47,57 @@ enough to diagnose a failure without re-running anything interactively.
 
 ## Real-auth test account setup
 
-`login_as_real()` (navigation/data-layer refactor PR 16) needs one dedicated Supabase account,
-created once, outside this repo:
+Navigation/data-layer refactor, PR 18: Demo Mode is gone from the app entirely (flip-the-switch
+removal — no kill flag left behind). `login_as(page, user_id)` now signs in via real Supabase auth
+for all 9 roles (`admin_bookings`, `admin_bookkeeping`, `admin_ceo`, `baruch`, `benny`, `moshe`,
+`yaakov`, `eli`, `dovie`) — it's a thin wrapper around `login_as_real()` that looks the account's
+email up in `helpers.py`'s `ROLE_EMAILS` and its password up in `test-harness/.env`. Each needs a
+dedicated Supabase account, created once, outside this repo:
 
 1. In the Supabase Dashboard → Authentication → Users → **Add user** → **Create new user**, use a
-   test-only email (e.g. `test-harness@aspmgmt.com`) and a strong generated password, with
-   **Auto confirm user** checked. Note the UID it creates.
+   test-only email (e.g. `test-baruch@aspmgmt.com` — never a real artist's/admin's real email) and
+   a strong generated password, with **Auto confirm user** checked. Note the UID it creates.
 2. Insert the matching roster row **with that UID already set** — the roster-link DB trigger
    (`link_new_user_to_roster()`, migration `0002_auth_linking.sql`) only fires on a *new*
    `auth.users` insert, so a roster row created afterward needs its `user_id` set directly, not
    left for the trigger to backfill:
    ```sql
+   -- admins:
    insert into admin_users (name, email, role, initials, user_id)
    values ('Test Harness', 'test-harness@aspmgmt.com', 'admin_bookings', 'TH', '<uid-from-step-1>')
    on conflict (email) do update set user_id = excluded.user_id;
+
+   -- artists: set legacy_id to the matching short id (see below for why) --
+   insert into artists (name, slot, initials, email, role, legacy_id, user_id)
+   values ('Baruch Levine', 1, 'BL', 'test-baruch@aspmgmt.com', 'Singer', 'baruch', '<uid>')
+   on conflict (email) do update set user_id = excluded.user_id, legacy_id = excluded.legacy_id;
    ```
-3. Create `test-harness/.env` (gitignored — never commit this file) with:
+3. Add the password to `test-harness/.env` (gitignored — never commit this file). The original
+   `admin_bookings` account keeps its own var; every account added since shares one:
    ```
    ASP_TEST_HARNESS_EMAIL=test-harness@aspmgmt.com
-   ASP_TEST_HARNESS_PASSWORD=<the password from step 1>
+   ASP_TEST_HARNESS_PASSWORD=<password for test-harness@aspmgmt.com>
+   ASP_TEST_BATCH2_PASSWORD=<shared password for every other test-* account>
    ```
+4. Add the email to `ROLE_EMAILS` in `helpers.py` if it's a new `user_id` (the 9 above are already
+   wired up).
 
-`login_as_real()` then signs in with `supabaseClient.auth.signInWithPassword()` using only the
+**Why `artists.legacy_id` (migration `0029_artists_legacy_id.sql`):** `artists.id` is a real
+Postgres uuid, but every seeded/imported gig (`event.artistId`, all 215 real imported events, all
+demo fixtures) keys to the app's original short string ids (`'baruch'`, `'benny'`, ...). A freshly
+created real artist's uuid matches zero existing events — without a bridge, My Gigs/Calendar/
+Financials would render completely empty for every real artist, test or production.
+`artists.legacy_id` maps a real artist row back to the matching legacy string id;
+`linkRealSessionToRoster()` (`asp.js`) uses it to set `S.user` to the legacy id instead of the raw
+uuid when one exists — same trick the admin branch already used (`S.user = adminRow.role`, not the
+admin's own uuid) for the identical reason. A brand-new real artist with no `legacy_id` falls back
+to their own uuid, same as before this fix.
+
+`login_as_real()` signs in with `supabaseClient.auth.signInWithPassword()` using only the
 publishable/anon key already shipped in the frontend — no service-role key is ever used by this
-harness. Tests that need it (`test_real_auth.py`) skip cleanly if `.env` isn't present, rather than
-failing the whole suite in an environment where this hasn't been set up.
+harness. `test_real_auth.py` skips cleanly if `.env` isn't present, rather than failing the whole
+suite in an environment where this hasn't been set up (every other spec now requires it, since
+Demo Mode no longer exists to fall back on).
 
 **Found while setting this up (now fixed, migration `0028_grant_authenticated_table_access.sql`):**
 every table in `public` was missing its base Postgres `GRANT ... TO authenticated` — a real signed-in
@@ -93,12 +119,13 @@ than grepping the source to check.
 | `live_server` | `conftest.py` | Session-scoped fixture. Serves `frontend/` over real `http://localhost:8791`. Auto-starts/stops. |
 | `page` | pytest-playwright (built-in) | Fresh browser page per test, standard fixture, not ours. |
 | `dismiss_opener(page)` | `helpers.py` | Clicks through the splash screen instead of waiting on its auto-dismiss timer (which can slip under this harness's back-to-back browser load). Called automatically by `login_as` — most callers never need this directly. |
-| `login_as(page, user_id)` | `helpers.py` | Drives the real login UI (dismisses the splash screen, clicks "Sign In (Demo Mode)" → the matching account row). Not a state shortcut. |
-| `login_as_real(page, email=None, password=None)` | `helpers.py` | Navigation/data-layer refactor PR 16. Signs in via the REAL Supabase auth path (`signInWithPassword`, publishable key only — no service-role key) instead of Demo Mode. Reads `ASP_TEST_HARNESS_EMAIL`/`ASP_TEST_HARNESS_PASSWORD` from `test-harness/.env` (gitignored) if not passed explicitly. See "Real-auth test account setup" below. |
+| `login_as(page, user_id)` | `helpers.py` | Navigation/data-layer refactor PR 18. Signs in as one of the 9 real seeded test accounts (`ROLE_EMAILS`) via real Supabase auth — a thin wrapper around `login_as_real()`. Demo Mode is gone from the app; this keeps the exact same `(page, user_id)` signature the ~45 existing call sites already used. |
+| `login_as_real(page, email=None, password=None)` | `helpers.py` | Navigation/data-layer refactor PR 16. Signs in via the REAL Supabase auth path (`signInWithPassword`, publishable key only — no service-role key). Reads `ASP_TEST_HARNESS_EMAIL`/`ASP_TEST_HARNESS_PASSWORD` from `test-harness/.env` (gitignored) if `email`/`password` aren't passed explicitly — `login_as()` always passes them explicitly, looked up per-role. See "Real-auth test account setup" below. |
 | `goto_nav(page, view_key, mobile=False)` | `helpers.py` | Clicks the real nav control for a view — desktop rail/top-tabs, or the mobile bottom-nav pill if `mobile=True`. |
 | `collect_console_errors(page)` | `helpers.py` | Call right after page creation; returns a list that fills up with any console errors/page errors as you drive the page. |
 | `has_no_horizontal_overflow(page)` | `helpers.py` | Real check for the app's "no sideways scrolling, ever" rule (`scrollWidth <= innerWidth`). Returns bool, not an assertion, so callers can report actual values on failure. |
-| `ADMIN_IDS`, `ARTIST_IDS` | `helpers.py` | The demo-mode account roster. Mirrors `frontend/index.html`'s `ADMIN_USERS`/`ARTISTS` — **update here if the roster changes**, there's no way to derive it without running the app. |
+| `ADMIN_IDS`, `ARTIST_IDS` | `helpers.py` | The 9 real test-account roles. Mirrors `frontend/workspaces/asp.js`'s `ADMIN_USERS`/`ARTISTS` role set — **update here (and `ROLE_EMAILS`, and create the matching Supabase account) if the roster changes**, there's no way to derive it without running the app. |
+| `ROLE_EMAILS` | `helpers.py` | Maps each `user_id` to its real test account's email. See "Real-auth test account setup" above. |
 | `MGMT_NAV_ITEMS`, `ARTIST_NAV_ITEMS` | `helpers.py` | All nav views per role (desktop). Mirrors `index.html`'s same-named arrays. |
 | `MOBILE_ADMIN_NAV`, `MOBILE_ARTIST_NAV` | `helpers.py` | Only the views actually visible in the mobile bottom-nav pill today (some are hamburger-menu-only) — keep in sync with `index.html`'s `.bn-item[data-view=...]{display:none}` rules. |
 
@@ -140,5 +167,6 @@ than grepping the source to check.
   measure before assuming it's a real regression.
 - **Known deliberate gaps** (see the plan this harness was built from, and ask before expanding
   scope into these): no CI integration yet (runs locally only); no visual regression/screenshot
-  diffing; the real (non-demo) Supabase magic-link/passkey auth path isn't covered — Demo Mode
-  accounts are the only sensible target for an automated "act like a real user" loop.
+  diffing; every spec signs in via real password auth (`signInWithPassword`) — the magic-link and
+  passkey sign-in paths real users actually use are covered only by `test_signup_gate.py`'s
+  unknown-email check, not end-to-end for a real account.

@@ -1231,11 +1231,15 @@ async function doCreateCalendarHoldsForContract(c){
   }
 }
 
-const ADMIN_USERS = [
-  {id:'admin_bookings', name:'ASP Office — Bookings', displayName:'Bookings', email:'bookings@aspmanagement.com', initials:'AB'},
-  {id:'admin_bookkeeping', name:'ASP Office — Bookkeeping', displayName:'Bookkeeping', email:'bookkeeping@aspmanagement.com', initials:'AK'},
-  {id:'admin_ceo', name:'ASP Office — CEO', displayName:'Ilan', email:'ilan@aspmanagement.com', initials:'CEO'},
-];
+// Navigation/data-layer refactor (PR 18): used to ship pre-seeded with 3 fake Demo Mode entries
+// whose `id` was the literal role string ('admin_ceo' etc.) -- the exact same id a REAL admin
+// session uses (linkRealSessionToRoster sets S.user = adminRow.role). Since the push-if-missing
+// check there keys on that same id, a real admin's session was silently shadowed by the demo
+// entry's name/email instead of showing the real signed-in person (confirmed live: a real test
+// account with role admin_bookings displayed as "ASP Office — Bookings" / bookings@aspmanagement.com,
+// not its own real name). Starts empty now -- every real admin's entry is populated the first
+// time they actually sign in, which is the only path left now that Demo Mode is gone.
+const ADMIN_USERS = [];
 const isAdminUser = (id)=>ADMIN_USERS.some(u=>u.id===id);
 const adminById = (id)=>ADMIN_USERS.find(u=>u.id===id);
 
@@ -11124,7 +11128,6 @@ let S = {
   showContract:false,
   showAddCharge:false,
   addChargeForm:{},
-  showChooser:false,
   dayListDate:null,
   showInstallBanner:false,
   showEventMenu:false,
@@ -11284,14 +11287,39 @@ async function linkRealSessionToRoster(session){
     // throughout (isCEO, CEO_HIDDEN_NAV_VIEWS) -- use the DB row's role as the in-memory id so
     // those checks work unchanged for a real login, same as they already do in Demo Mode. The
     // row's own uuid (its real Postgres identity) is kept as dbId for anything that needs it.
-    if(!ADMIN_USERS.some(u=>u.id===adminRow.role)) ADMIN_USERS.push({id:adminRow.role, name:adminRow.name, email:adminRow.email, initials:adminRow.initials, dbId:adminRow.id});
+    //
+    // Navigation/data-layer refactor (PR 18): ADMIN_USERS now starts empty (no more hardcoded
+    // Demo Mode entries shadowing real ones by role-id collision -- see its own declaration
+    // comment). That means an office-wide picker like the project assignee dropdown would show
+    // NOBODY until every admin has personally signed in at least once, which is a real, awkward
+    // gap -- so pull the full office roster here (same shape loadRealRoster() already uses for
+    // the Users Dashboard), not just this one signed-in person's row.
+    const { data: allAdmins } = await supabaseClient.from('admin_users').select('*').order('created_at');
+    (allAdmins||[adminRow]).forEach(row=>{
+      const existing = ADMIN_USERS.find(u=>u.id===row.role);
+      if(existing) Object.assign(existing, {name:row.name, email:row.email, initials:row.initials, dbId:row.id});
+      else ADMIN_USERS.push({id:row.role, name:row.name, email:row.email, initials:row.initials, dbId:row.id});
+    });
     S.user = adminRow.role;
   } else {
-    if(!ARTISTS.some(a=>a.id===artistRow.id)) ARTISTS.push({id:artistRow.id, name:artistRow.name, slot:artistRow.slot, initials:artistRow.initials, email:artistRow.email, role:artistRow.role});
-    S.user = artistRow.id;
+    // Mirrors the admin branch's own trick above: artists.id is a real uuid, but every seeded/
+    // imported gig (event.artistId, S.events) keys to the ORIGINAL short string id ('baruch'
+    // etc.) the app has always used -- a fresh uuid would match zero existing gigs. artists.
+    // legacy_id (migration 0029) bridges a real artist back to their pre-existing legacy entry
+    // when one exists; a brand-new real artist with no legacy data falls back to their own uuid,
+    // same as before.
+    const legacyId = artistRow.legacy_id;
+    const existing = legacyId && ARTISTS.find(a=>a.id===legacyId);
+    if(existing){
+      Object.assign(existing, {name:artistRow.name, email:artistRow.email, initials:artistRow.initials, dbId:artistRow.id});
+      S.user = legacyId;
+    } else {
+      if(!ARTISTS.some(a=>a.id===artistRow.id)) ARTISTS.push({id:artistRow.id, name:artistRow.name, slot:artistRow.slot, initials:artistRow.initials, email:artistRow.email, role:artistRow.role});
+      S.user = artistRow.id;
+    }
   }
   S.view = adminRow ? 'dashboard' : 'a_dashboard';
-  S.showChooser = false; S.showRealSignIn = false; S.realSignInSent = false; S.realSignInNotFound = false;
+  S.showRealSignIn = false; S.realSignInSent = false; S.realSignInNotFound = false;
   S.realPasskeys = null;
   pendingViewTransition = true;
   pendingViewDirection = 'right';
@@ -12338,20 +12366,15 @@ function loginWordmark(){
   return `<div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(name)}<small>${esc(tagline)}</small></div>`;
 }
 function renderLogin(){
-  if(S.showChooser) return renderAccountChooser();
   if(S.showRealSignIn) return renderRealSignIn();
   if(S.realSignInNotFound) return renderRealSignInNotFound();
   return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
     ${loginWordmark()}
     <p style="color:var(--ink-2);font-size:13.5px;margin:16px 0 26px;">Sign in to view your schedule and bookings.</p>
-    ${window.ASP_DISABLE_DEMO_MODE ? '' : `<button class="btn btn-primary btn-block" data-action="show-chooser">Sign In (Demo Mode)</button>`}
     ${supabaseClient ? `
-    <div style="display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--ink-3);font-size:11px;">
-      <div style="flex:1;height:1px;background:var(--border);"></div>or<div style="flex:1;height:1px;background:var(--border);"></div>
-    </div>
-    <button class="btn btn-block" data-action="real-signin-passkey">${ICO.key} Sign in with Passkey</button>
+    <button class="btn btn-primary btn-block" data-action="real-signin-passkey">${ICO.key} Sign in with Passkey</button>
     <button class="btn btn-block btn-ghost" style="margin-top:8px;" data-action="open-real-signin">Sign in with email</button>
-    ` : ''}
+    ` : `<p style="color:var(--crit);font-size:12.5px;">Sign-in is unavailable right now — the app could not reach its backend. Try reloading.</p>`}
   </div></div>`;
 }
 function renderRealSignIn(){
@@ -12380,27 +12403,6 @@ function renderRealSignInNotFound(){
     <button class="btn btn-block btn-ghost" data-action="real-signout">Sign Out</button>
   </div></div>`;
 }
-function renderAccountChooser(){
-  return `<div class="login-wrap"><div class="login-card chooser">
-    <button class="icon-btn chooser-back" data-action="hide-chooser">${ICO.chev('l')}</button>
-    <h2 style="font-size:1.15rem;text-align:center;">Choose an account</h2>
-    <p style="text-align:center;color:var(--ink-2);font-size:12.5px;margin:4px 0 6px;">to continue to ASP Bookings</p>
-    <div class="chooser-list">
-      <div class="chooser-divider">ASP Office</div>
-      ${ADMIN_USERS.map(u=>`<button class="chooser-row" data-action="login" data-user="${u.id}">
-        <span class="avatar" data-slot="0" style="width:32px;height:32px;font-size:11px;background:var(--ink);color:var(--page);">${u.initials}</span>
-        <span><strong>${esc(u.name)}</strong><span class="chooser-email">${esc(u.email)}</span></span>
-      </button>`).join('')}
-      <div class="chooser-divider">Artists</div>
-      ${ARTISTS.map(a=>`<button class="chooser-row" data-action="login" data-user="${a.id}">
-        <span class="avatar" data-slot="${a.slot}" style="width:32px;height:32px;font-size:11px;">${a.initials}</span>
-        <span><strong>${esc(a.name)}</strong><span class="chooser-email">${esc(a.email)}</span></span>
-      </button>`).join('')}
-    </div>
-    <p style="text-align:center;color:var(--ink-3);font-size:10.5px;margin-top:16px;">Demo mode — pick any account to preview that person's view. In production, each person only ever sees their own account.</p>
-  </div></div>`;
-}
-
 /* ============ MGMT DASHBOARD ============ */
 function renderWelcomeHeader(name){
   return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
@@ -16854,10 +16856,7 @@ function bindGlobal(){
     if(action==='overlay-close' && e.target===t){ closeSheet(); return; }
     if(action==='overlay-close') return;
     switch(action){
-      case 'login': S.user = t.getAttribute('data-user'); S.view = isAdminUser(S.user)?'dashboard':'a_dashboard'; S.showChooser=false; S.showMobileMenu=false; pendingViewTransition=true; pendingViewDirection='right'; syncURL(); render(); break;
-      case 'logout': if(S.realSession && supabaseClient) supabaseClient.auth.signOut(); S.user=null; S.realSession=null; S.realPasskeys=null; S.eventId=null; S.showNewLead=false; S.showChooser=false; S.showMobileMenu=false; history.pushState(null,'',location.pathname+location.search); render(); break;
-      case 'show-chooser': S.showChooser=true; render(); break;
-      case 'hide-chooser': S.showChooser=false; render(); break;
+      case 'logout': if(S.realSession && supabaseClient) supabaseClient.auth.signOut(); S.user=null; S.realSession=null; S.realPasskeys=null; S.eventId=null; S.showNewLead=false; S.showMobileMenu=false; history.pushState(null,'',location.pathname+location.search); render(); break;
       case 'open-real-signin': S.showRealSignIn=true; S.realSignInSent=false; render(); break;
       case 'close-real-signin': S.showRealSignIn=false; S.realSignInSent=false; S.realSignInEmail=''; render(); break;
       case 'submit-magic-link': doSubmitMagicLink(); break;
