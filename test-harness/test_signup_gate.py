@@ -1,5 +1,5 @@
 """
-Navigation/data-layer refactor, PR 17: closes a real open-signup hole. doSubmitMagicLink() used
+Navigation/data-layer refactor, PR 17: closes a real open-signup hole. doSendSignInCode() (then doSubmitMagicLink()) used
 to call signInWithOtp() without shouldCreateUser:false -- Supabase would happily mint a brand-new
 auth.users row for any email a stranger typed in, even though app access is separately gated on a
 pre-seeded admin_users/artists roster row (so the account was ultimately useless, but still a real
@@ -17,7 +17,7 @@ def test_unknown_email_is_rejected_without_creating_an_account(live_server, page
     dismiss_opener(page)
     page.get_by_text("Sign in with email").click()
     page.locator('input[type="email"]').fill("definitely-not-on-roster-pytest@example.com")
-    page.get_by_text("Send Sign-In Link").click()
+    page.get_by_text("Send Sign-In Code").click()
 
     # The real Supabase call needs a moment -- wait for the toast rather than checking instantly.
     page.wait_for_selector("text=isn't set up yet", timeout=10000)

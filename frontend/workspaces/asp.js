@@ -11142,6 +11142,7 @@ let S = {
   showRealSignIn: false,
   realSignInEmail: '',
   realSignInSent: false,
+  realSignInCode: '', // the emailed one-time code, typed in once realSignInSent is true
   realSignInNotFound: false, // true if a real session resolved to no matching artists/admin_users row
   realPasskeys: null, // fetched async once a real session is active; null = not loaded yet
   realPasskeyBusy: false,
@@ -11340,7 +11341,7 @@ async function linkRealSessionToRoster(session){
   syncURL();
   render();
 }
-async function doSubmitMagicLink(){
+async function doSendSignInCode(){
   const email = (S.realSignInEmail||'').trim();
   if(!email){ toast('Enter your email.', 'system'); return; }
   // Navigation/data-layer refactor (PR 17): shouldCreateUser:false closes a real open-signup
@@ -11349,14 +11350,26 @@ async function doSubmitMagicLink(){
   // "Block open signups: only emails the office has added can get an account" (the brief). This
   // also fails fast with a clear message instead of sending an email that leads to "No account
   // set up yet" only after the person clicks through it.
+  // Sign-in is by emailed one-time code, not link: the email carries {{ .Token }} (Supabase
+  // Dashboard → Auth → Email Templates → Magic Link) and doVerifySignInCode() exchanges it for a
+  // session here in the same tab. emailRedirectTo is kept only so any link a template still
+  // includes lands back on this page.
   const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: window.location.href.split('#')[0] } });
   if(error){
     const notFound = /not.*found|signups.*not.*allowed|user.*not.*found/i.test(error.message||'');
-    toast(notFound ? 'That email isn\'t set up yet — contact the office to get added.' : 'Could not send sign-in link: ' + error.message, 'system');
+    toast(notFound ? 'That email isn\'t set up yet — contact the office to get added.' : 'Could not send sign-in code: ' + error.message, 'system');
     return;
   }
-  S.realSignInSent = true;
+  S.realSignInSent = true; S.realSignInCode = '';
   render();
+}
+async function doVerifySignInCode(){
+  const email = (S.realSignInEmail||'').trim();
+  const token = (S.realSignInCode||'').replace(/\s/g,'');
+  if(!/^\d{6,10}$/.test(token)){ toast('Enter the code from your email.', 'system'); return; }
+  const { error } = await supabaseClient.auth.verifyOtp({ email, token, type: 'email' });
+  if(error){ toast(/expired|invalid/i.test(error.message||'') ? 'That code is wrong or has expired — check it, or send a new one.' : 'Could not sign in: ' + error.message, 'system'); return; }
+  // On success, onAuthStateChange's SIGNED_IN handler takes over from here.
 }
 async function doRealSignInPasskey(){
   try{
@@ -11433,7 +11446,7 @@ function doAddRealUser(){
     : { name, email, initials, role: f.artistRole || 'Singer', slot: ((S.realRoster?.artists.length||0) % 6) + 1 };
   supabaseClient.from(table).insert(row).then(({error})=>{
     if(error){ toast('Could not add that person: ' + error.message, 'system'); return; }
-    toast(`${name} added. They can sign in at ${email} once they have a passkey or magic link set up.`, 'success');
+    toast(`${name} added. They can sign in at ${email} with a passkey or an emailed sign-in code.`, 'success');
     S.showAddRealUser = false; S.addRealUserForm = {};
     loadRealRoster();
   });
@@ -12255,7 +12268,7 @@ function renderUsersDashboardCard(){
       <button class="btn btn-sm btn-primary" data-action="open-add-real-user">${ICO.plus} Add Person</button>
     </div>
     ${!roster ? `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">Loading...</p>` : `
-    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 12px;">Real accounts for ASP Bookings. Add someone here, then they sign in themselves with a passkey or email link at that address.</p>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 12px;">Real accounts for ASP Bookings. Add someone here, then they sign in themselves with a passkey or an emailed sign-in code at that address.</p>
     <div class="u-label" style="margin-bottom:6px;">Office</div>
     ${roster.admins.length? roster.admins.map(u=>`<div class="settings-row">
       <div><h4>${esc(u.name)} <span style="font-weight:400;color:var(--ink-3);">— ${esc(ADMIN_ROLE_LABELS[u.role]||u.role)}</span></h4><p>${esc(u.email)}</p></div>
@@ -12417,8 +12430,8 @@ function renderSettingsPage(){
 
 /* ============ LOGIN ============ */
 // A host shell (e.g. Moshe's Desk) can set window.ASP_BRAND_OVERRIDE = {name, tagline} before
-// this script loads to relabel the login screen -- this file's own login flow is real (magic
-// link/passkey/roster lookup all happen here), so a host reusing it shouldn't have to fork the
+// this script loads to relabel the login screen -- this file's own login flow is real (emailed
+// code/passkey/roster lookup all happen here), so a host reusing it shouldn't have to fork the
 // whole login UI just to change two words. Unset here (undefined) on the plain ASP site --
 // zero behavior change there.
 function loginWordmark(){
@@ -12445,16 +12458,19 @@ function renderRealSignIn(){
     return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
       ${loginWordmark()}
       <h2 style="font-size:1.05rem;margin:16px 0 6px;">Check your email</h2>
-      <p style="color:var(--ink-2);font-size:13px;margin:0 0 22px;">We sent a sign-in link to <strong>${esc(f)}</strong>. Click it to continue.</p>
+      <p style="color:var(--ink-2);font-size:13px;margin:0 0 20px;">We sent a sign-in code to <strong>${esc(f)}</strong>. Enter it below.</p>
+      <div class="field" data-form="realsignin" style="text-align:left;"><input id="realSignInCodeInput" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" data-field="realSignInCode" value="${esc(S.realSignInCode)}" placeholder="Sign-in code" style="text-align:center;letter-spacing:.3em;font-size:1.1rem;"/></div>
+      <button class="btn btn-primary btn-block" style="margin-top:10px;" data-action="verify-signin-code">Sign In</button>
+      <button class="btn btn-block btn-ghost" style="margin-top:8px;" data-action="send-signin-code">Send a new code</button>
       <button class="btn btn-block btn-ghost" data-action="close-real-signin">Use a different email</button>
     </div></div>`;
   }
   return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
     <button class="icon-btn chooser-back" data-action="close-real-signin">${ICO.chev('l')}</button>
     ${loginWordmark()}
-    <p style="color:var(--ink-2);font-size:13.5px;margin:16px 0 20px;">Enter your email and we'll send you a sign-in link.</p>
+    <p style="color:var(--ink-2);font-size:13.5px;margin:16px 0 20px;">Enter your email and we'll send you a sign-in code.</p>
     <div class="field" data-form="realsignin" style="text-align:left;"><input id="realSignInEmailInput" type="email" data-field="realSignInEmail" value="${esc(f)}" placeholder="you@aspmanagement.com" autofocus/></div>
-    <button class="btn btn-primary btn-block" style="margin-top:10px;" data-action="submit-magic-link">Send Sign-In Link</button>
+    <button class="btn btn-primary btn-block" style="margin-top:10px;" data-action="send-signin-code">Send Sign-In Code</button>
   </div></div>`;
 }
 function renderRealSignInNotFound(){
@@ -16919,7 +16935,12 @@ function bindGlobal(){
     const v = contractSearchInput.value; contractSearchInput.value=''; contractSearchInput.value=v;
   }
   const realSignInEmailInput = document.getElementById('realSignInEmailInput');
-  if(realSignInEmailInput) realSignInEmailInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doSubmitMagicLink(); } });
+  if(realSignInEmailInput) realSignInEmailInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doSendSignInCode(); } });
+  const realSignInCodeInput = document.getElementById('realSignInCodeInput');
+  if(realSignInCodeInput){
+    realSignInCodeInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doVerifySignInCode(); } });
+    if(document.activeElement!==realSignInCodeInput) realSignInCodeInput.focus();
+  }
   document.body.onclick = (e)=>{
     const t = e.target.closest('[data-action]');
     if(S.showEventMenu && !e.target.closest('.kebab-menu-wrap')){
@@ -16935,8 +16956,9 @@ function bindGlobal(){
     switch(action){
       case 'logout': if(S.realSession && supabaseClient) supabaseClient.auth.signOut(); S.user=null; S.realSession=null; S.realPasskeys=null; S.eventId=null; S.showNewLead=false; S.showMobileMenu=false; history.pushState(null,'',location.pathname+location.search); render(); break;
       case 'open-real-signin': S.showRealSignIn=true; S.realSignInSent=false; render(); break;
-      case 'close-real-signin': S.showRealSignIn=false; S.realSignInSent=false; S.realSignInEmail=''; render(); break;
-      case 'submit-magic-link': doSubmitMagicLink(); break;
+      case 'close-real-signin': S.showRealSignIn=false; S.realSignInSent=false; S.realSignInEmail=''; S.realSignInCode=''; render(); break;
+      case 'send-signin-code': doSendSignInCode(); break;
+      case 'verify-signin-code': doVerifySignInCode(); break;
       case 'real-signin-passkey': doRealSignInPasskey(); break;
       case 'real-signout': doRealSignOut(); break;
       case 'open-mobile-menu': S.showMobileMenu=true; render(); break;

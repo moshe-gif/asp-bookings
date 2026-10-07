@@ -1,0 +1,54 @@
+<!--
+  ASP Bookings sign-in code email.
+  Paste into Supabase Dashboard → Authentication → Emails → Templates → "Magic Link"
+  (signInWithOtp uses that template). Subject: Your ASP Bookings sign-in code: {{ .Token }}
+  {{ .Token }} is the one-time code doVerifySignInCode() (frontend/workspaces/asp.js) checks.
+  There is deliberately no link — sign-in is code-only. Email-safe: tables + inline styles,
+  logo bars drawn as table cells (no images to be blocked). Colors match frontend/styles.css.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Your ASP Bookings sign-in code</title>
+</head>
+<body style="margin:0;padding:0;background:#F4F4F1;">
+<div style="display:none;max-height:0;overflow:hidden;">Your sign-in code is {{ .Token }}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F4F4F1;">
+  <tr><td align="center" style="padding:40px 16px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:440px;background:#FFFFFF;border:1px solid #E6E6E1;border-radius:12px;">
+      <tr><td align="center" style="padding:36px 32px 8px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td valign="bottom" style="padding-right:10px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" height="20"><tr>
+              <td valign="bottom" style="padding-right:2px;"><div style="width:3px;height:8px;background:#4C6FA5;border-radius:2px;font-size:0;line-height:0;">&nbsp;</div></td>
+              <td valign="bottom" style="padding-right:2px;"><div style="width:3px;height:20px;background:#4C6FA5;border-radius:2px;font-size:0;line-height:0;">&nbsp;</div></td>
+              <td valign="bottom" style="padding-right:2px;"><div style="width:3px;height:13px;background:#4C6FA5;border-radius:2px;font-size:0;line-height:0;">&nbsp;</div></td>
+              <td valign="bottom" style="padding-right:2px;"><div style="width:3px;height:17px;background:#4C6FA5;border-radius:2px;font-size:0;line-height:0;">&nbsp;</div></td>
+              <td valign="bottom"><div style="width:3px;height:10px;background:#4C6FA5;border-radius:2px;font-size:0;line-height:0;">&nbsp;</div></td>
+            </tr></table>
+          </td>
+          <td valign="middle" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Helvetica,Arial,sans-serif;">
+            <div style="font-size:22px;font-weight:700;color:#17171A;line-height:1;">ASP</div>
+            <div style="font-size:9px;font-weight:600;letter-spacing:.14em;color:#9A9AA1;text-transform:uppercase;margin-top:3px;">Bookings</div>
+          </td>
+        </tr></table>
+      </td></tr>
+      <tr><td align="center" style="padding:20px 32px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Helvetica,Arial,sans-serif;">
+        <h1 style="margin:0 0 8px;font-size:18px;font-weight:600;color:#17171A;">Your sign-in code</h1>
+        <p style="margin:0;font-size:14px;line-height:1.5;color:#67676D;">Enter this code in ASP Bookings to sign in.</p>
+      </td></tr>
+      <tr><td align="center" style="padding:24px 32px;">
+        <div style="display:inline-block;padding:14px 22px;background:#E4EAF3;border-radius:10px;font-family:'SF Mono',Menlo,Consolas,'Courier New',monospace;font-size:30px;font-weight:700;letter-spacing:8px;color:#33517A;">{{ .Token }}</div>
+      </td></tr>
+      <tr><td align="center" style="padding:0 32px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Helvetica,Arial,sans-serif;">
+        <p style="margin:0;font-size:12.5px;line-height:1.5;color:#9A9AA1;">This code expires soon and works once. If you didn't try to sign in as {{ .Email }}, you can ignore this email — nobody can sign in without the code.</p>
+      </td></tr>
+    </table>
+    <p style="margin:18px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Helvetica,Arial,sans-serif;font-size:11.5px;color:#9A9AA1;">ASP Management · <a href="https://app.aspmgmt.com" style="color:#9A9AA1;">app.aspmgmt.com</a></p>
+  </td></tr>
+</table>
+</body>
+</html>
