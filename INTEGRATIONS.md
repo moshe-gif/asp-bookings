@@ -59,6 +59,15 @@ machine that isn't port-blocked (e.g. a local Windows box).
 - Alternatives: magic email links (needs sending infra from §1); Firebase Auth (more providers,
   more surface); passkeys/WebAuthn (best UX+security, more implementation work). For internal
   tools, Google ID token + allowlist wins on effort-to-security ratio.
+- **✓ live in this app — Supabase Auth, passkey + emailed one-time code (2026-10-07).** Email
+  sign-in is code-only (`signInWithOtp` → user types the code → `verifyOtp`, see
+  `doSendSignInCode`/`doVerifySignInCode` in `workspaces/asp.js`); no link is emailed. The email
+  is the "Magic Link" template in Supabase Auth, whose source of truth is
+  `supabase/templates/signin-code.html` — edit that file, then re-paste it. Sent via custom SMTP
+  as **office@aspmgmt.com** ("ASP Management"): `smtp.gmail.com:465` with a Google **app
+  password** on that Workspace account (needs 2-Step Verification on). Supabase's built-in
+  sender is capped at 2 emails/hour for the whole project — custom SMTP is what makes real use
+  possible (limit raised to 30/hour). Codes are 8 digits, valid 1 hour.
 
 ## 5. Data & storage
 - **✓ proven — Firestore via REST** from the client with a public Web API key — security lives in
