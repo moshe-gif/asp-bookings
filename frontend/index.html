@@ -8,7 +8,8 @@
 <link rel="manifest" href="manifest.json" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <link rel="icon" type="image/png" href="icon-192.png" />
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<!-- supabase-js pinned to an exact version + SRI (2026-10-09 audit 1.10): the app uses its EXPERIMENTAL passkey API, so a floating @2 could break sign-in for everyone on any upstream release. Bump deliberately: update both the version and the integrity hash, then run test_passkey/test_real_auth/test_signup_gate. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js" integrity="sha384-BWcjm9OdFth9TbhCxZPdm+gAOUMAzQy9nmTs12ioXdCcbVnJaPMn+fMUoQCLt60R" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="styles.css" />
 
 <div id="opener" aria-hidden="true">

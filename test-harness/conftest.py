@@ -57,6 +57,9 @@ def live_server():
     # requests for one page load (HTML, icons, manifest.json, sw.js) -- a single-threaded server
     # serializes those, which gets slow enough under this harness's back-to-back load to risk a
     # bare page.goto() timing out entirely. Threading handles them in parallel, like a real host.
+    # allow_reuse_address: without it a run started right after the previous one fails with
+    # "Address already in use" while the old socket sits in TIME_WAIT (audit 7.2).
+    socketserver.ThreadingTCPServer.allow_reuse_address = True
     httpd = socketserver.ThreadingTCPServer(("localhost", PORT), _QuietHandler)
     httpd.daemon_threads = True
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)

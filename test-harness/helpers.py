@@ -173,3 +173,40 @@ def has_no_horizontal_overflow(page):
     return page.evaluate(
         "document.documentElement.scrollWidth <= window.innerWidth + 1"  # +1: sub-pixel rounding
     )
+
+
+# ---- Test-owned gig data -------------------------------------------------------------------
+# Real gigs never live in the code (the repo is public), so specs that need gigs seed their own
+# fictional ones into the test browser's localStorage before the app loads. The storage key is
+# read from asp.js itself so it can't drift.
+import json as _json
+import pathlib as _pathlib
+import re as _re
+
+_ASP_JS = (_pathlib.Path(__file__).parent.parent / "frontend" / "workspaces" / "asp.js").read_text()
+EVENTS_LS_KEY = _re.search(r"const LS_KEY='([^']+)'", _ASP_JS).group(1)
+
+
+def fake_gig(gig_id, artist_id, date, **overrides):
+    """A complete event record (same shape the app stores) with obviously fictional data."""
+    gig = {
+        "id": gig_id, "artistId": artist_id, "type": "Wedding", "unpaid": False,
+        "clientName": f"Test Client {gig_id}", "clientEmail": "", "clientPhone": "",
+        "date": date, "time": "19:00", "endTime": "", "venue": "Test Hall", "city": "Brooklyn", "state": "NY",
+        "price": 10000, "commission": 1500, "balance": 8500, "status": "booked",
+        "depositReceived": True, "depositReceivedDate": None, "balanceReceived": False, "balanceReceivedDate": None,
+        "reminderIntervalDays": 7, "lastReminderSent": None, "flightNeeded": False, "flightBooked": False, "flight": None,
+        "groundTransportNeeded": False, "groundTransportBooked": False, "groundTransport": None,
+        "charges": [], "dressCode": "", "prepSheets": [], "createdAt": date, "log": [],
+    }
+    gig.update(overrides)
+    return gig
+
+
+def seed_events(page, events):
+    """Seed gigs into this browser context before any page loads -- only if the browser has none
+    yet, so reloads and second tabs keep whatever the test changed. Call before page.goto()."""
+    page.context.add_init_script(
+        f"if(!localStorage.getItem({_json.dumps(EVENTS_LS_KEY)})) "
+        f"localStorage.setItem({_json.dumps(EVENTS_LS_KEY)}, {_json.dumps(_json.dumps(events))});"
+    )

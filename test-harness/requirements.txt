@@ -1,1 +1,4 @@
-pytest-playwright
+# Pinned (audit 7.2): bump deliberately, then run the full harness.
+pytest==8.4.2
+pytest-playwright==0.7.1
+playwright==1.60.0

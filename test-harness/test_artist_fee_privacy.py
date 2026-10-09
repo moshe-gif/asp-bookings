@@ -8,11 +8,14 @@ package price, only their own fee/net. Two real leaks fixed here:
 
 Runs as benny (artist).
 """
-from helpers import login_as, goto_nav, collect_console_errors
+from helpers import login_as, goto_nav, collect_console_errors, fake_gig, seed_events
+
+BENNY_GIGS = [fake_gig("EV-9001", "benny", "2027-03-14", price=12000, commission=1800)]
 
 
 def test_my_gigs_shows_your_fee_not_client_price(live_server, page):
     errors = collect_console_errors(page)
+    seed_events(page, BENNY_GIGS)
     page.goto(live_server)
     login_as(page, "benny")
     goto_nav(page, "a_gigs", mobile=False)
@@ -28,12 +31,13 @@ def test_my_gigs_shows_your_fee_not_client_price(live_server, page):
 
 def test_event_sheet_hides_client_price_from_artist(live_server, page):
     errors = collect_console_errors(page)
+    seed_events(page, BENNY_GIGS)
     page.goto(live_server)
     login_as(page, "benny")
     goto_nav(page, "a_gigs", mobile=False)
 
     row = page.locator('tr[data-action="open-event"]').first
-    assert row.count() > 0, "no seeded gigs for benny to open — check demo data"
+    assert row.count() > 0, "seeded gig for benny didn't show on My Gigs"
     row.click()
 
     sheet = page.locator(".sheet")

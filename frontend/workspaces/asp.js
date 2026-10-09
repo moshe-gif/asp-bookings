@@ -1392,21 +1392,30 @@ function setFlightSegmentFieldByPath(tr, segId, field, value){
   const seg = (tr.flightSegments||[]).find(s=>s.id===segId); if(!seg) return;
   seg[field] = value;
 }
-async function doCheckFlightStatus(trId, segId){
+// The one real flight-status lookup (FlightAware via the flightaware-status Edge Function). Both
+// the travel-request segment button and the event-sheet flight card use it. date (YYYY-MM-DD)
+// picks the right leg of a flight number that repeats daily. Requires a real session -- never
+// falls back to the publishable key as a bearer token.
+async function fetchFlightStatus(ident, date){
+  if(!supabaseClient) return { ok:false, error:'Sign in to check flight status.' };
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(!session) return { ok:false, error:'Sign in to check flight status.' };
+  const resp = await fetch(`${SUPABASE_URL}/functions/v1/flightaware-status`, {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
+    body: JSON.stringify({ ident, date: date || undefined }),
+  });
+  const data = await resp.json().catch(()=>({ok:false, error:'Unexpected response from the server.'}));
+  return (!resp.ok || data.ok===false) ? { ok:false, error: data.error || 'Could not check flight status.' } : data;
+}
+async function doCheckSegmentFlightStatus(trId, segId){
   const tr = getTravelRequest(trId); if(!tr) return;
   const seg = (tr.flightSegments||[]).find(s=>s.id===segId); if(!seg) return;
   if(!seg.airline || !seg.flightNumber){ toast('Enter the airline and flight number first.', 'system'); return; }
-  if(!supabaseClient){ toast('Sign in with your real ASP account to check flight status (not available in Demo Mode).', 'system'); return; }
   S.flightStatusBusy = segId; render();
   try{
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/flightaware-status`, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${session ? session.access_token : SUPABASE_PUBLISHABLE_KEY}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
-      body: JSON.stringify({ ident: `${seg.airline}${seg.flightNumber}` }),
-    });
-    const data = await resp.json().catch(()=>({ok:false, error:'Unexpected response from the server.'}));
-    if(!resp.ok || data.ok===false){ toast(data.error || 'Could not check flight status.', 'system'); return; }
+    const data = await fetchFlightStatus(`${seg.airline}${seg.flightNumber}`.replace(/\s+/g,''), (seg.departureAt||'').slice(0,10));
+    if(!data.ok){ toast(data.error, 'system'); return; }
     seg.lastStatus = data.status || (data.cancelled? 'Cancelled' : null);
     seg.lastStatusAt = new Date().toISOString();
     saveTravelRequests();
@@ -1539,7 +1548,7 @@ async function doSendReminderEmail(id){
   S.reminderBusy = false;
   if(result.ok){
     logEvent(ev,'email',`Balance reminder emailed to ${ev.clientEmail}.`);
-    if(reportEventSave(updateEvent(id, { lastReminderSent: fmtISO(new Date()) }), 'sending the reminder')) toast('Reminder sent.', 'success');
+    if(reportEventSave(updateEvent(id, { lastReminderSent: todayISO() }), 'sending the reminder')) toast('Reminder sent.', 'success');
   } else {
     logEvent(ev,'system',`Balance reminder email failed: ${result.error}`);
     reportEventSave(updateEvent(id, {}), 'sending the reminder');
@@ -1623,6 +1632,11 @@ const CHARGE_PRESETS = ['Travel','Flights','Hotel & Lodging','Sound & Production
 
 function addDays(base, days){ const d=new Date(base); d.setDate(d.getDate()+days); return d; }
 function fmtISO(d){ return d.toISOString().slice(0,10); }
+// fmtISO() is the UTC date -- after ~8pm US Eastern it is already tomorrow. Anything a person
+// would call "today" (gigs today, date stamps like "received on", reminders, last-seen) uses the
+// local calendar date instead (2026-10-09 audit 4.4).
+function localISO(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function todayISO(){ return localISO(new Date()); }
 function money(n){ return '$'+Math.round(n).toLocaleString('en-US'); }
 function chargesTotal(ev){ return (ev.charges||[]).reduce((s,c)=>s+c.amount,0); }
 // Navigation/data-layer refactor (PR 12): ev.balance used to be a stored field, set once at
@@ -2168,7 +2182,7 @@ let ALL_SETTINGS = loadAllSettings();
 function saveAllSettings(){ try{ localStorage.setItem(SETTINGS_LS_KEY, JSON.stringify(ALL_SETTINGS)); }catch(e){} }
 function defaultUserSettings(){
   return {
-    passkeys: [{id:'pk-'+randInt(1,999999), label:'This device', addedAt: fmtISO(new Date())}],
+    passkeys: [{id:'pk-'+randInt(1,999999), label:'This device', addedAt: todayISO()}],
     calendarConnected: false,
     calendarEmail: '',
     notify: {
@@ -2447,7 +2461,7 @@ function exportCSV(){
   });
   const blob = new Blob([lines.join('\r\n')], {type:'text/csv'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-  a.download = `asp-bookings-${S.finArtistFilter}-${fmtISO(new Date())}.csv`; a.click();
+  a.download = `asp-bookings-${S.finArtistFilter}-${todayISO()}.csv`; a.click();
   toast('CSV exported.', 'system');
 }
 
@@ -2675,9 +2689,9 @@ const LAST_SEEN_LS_KEY = 'asp_mock_lastseen_v1';
 function loadLastSeen(){ try{ const raw = localStorage.getItem(LAST_SEEN_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
 function saveLastSeen(){ try{ localStorage.setItem(LAST_SEEN_LS_KEY, JSON.stringify(LAST_SEEN)); }catch(e){} }
 let LAST_SEEN = loadLastSeen() || {};
-['leads','financials','messages'].forEach(k=>{ if(!LAST_SEEN[k]) LAST_SEEN[k] = fmtISO(new Date()); });
+['leads','financials','messages'].forEach(k=>{ if(!LAST_SEEN[k]) LAST_SEEN[k] = todayISO(); });
 saveLastSeen();
-function markSeen(key){ if(LAST_SEEN[key]===undefined) return; LAST_SEEN[key] = fmtISO(new Date()); saveLastSeen(); }
+function markSeen(key){ if(LAST_SEEN[key]===undefined) return; LAST_SEEN[key] = todayISO(); saveLastSeen(); }
 function newLeadsCount(){
   const since = LAST_SEEN.leads;
   return S.events.filter(e=>['lead','negotiating','contract_sent'].includes(e.status) && e.createdAt && e.createdAt>since).length;
@@ -3070,12 +3084,12 @@ function renderMgmtDashboard(){
   const conflictPairs = allConflictPairs().filter(([a,b])=>!isPast(a.date)||!isPast(b.date));
   const intlTrips = S.events.filter(e=>isInternational(e) && !e.intlOpportunityDismissed && !isPast(e.date) && ['booked','paid'].includes(e.status)).sort((a,b)=>a.date.localeCompare(b.date));
   const needsTravel = S.events.filter(e=>!isPast(e.date) && ((e.flightNeeded && !e.flightBooked) || (e.groundTransportNeeded && !e.groundTransportBooked)));
-  const todayGigs = S.events.filter(e=>e.date===fmtISO(new Date()) && ['booked','paid'].includes(e.status));
+  const todayGigs = S.events.filter(e=>e.date===todayISO() && ['booked','paid'].includes(e.status));
 
   return `
   ${renderWelcomeHeader((adminById(S.user).name||'').split(' ')[0])}
   <div class="grid stat-row" style="margin-bottom:20px;">
-    <div class="card stat-tile" style="cursor:pointer;" data-action="nav-today-gigs"><span class="u-label">Gigs Today</span><span class="val">${todayGigs.length}</span><span class="sub">${fmtDateShort(fmtISO(new Date()))}</span></div>
+    <div class="card stat-tile" style="cursor:pointer;" data-action="nav-today-gigs"><span class="u-label">Gigs Today</span><span class="val">${todayGigs.length}</span><span class="sub">${fmtDateShort(todayISO())}</span></div>
     <div class="card stat-tile" style="cursor:pointer;" data-action="nav" data-view="calendar"><span class="u-label">Upcoming Gigs · 30 days</span><span class="val">${upcoming30.length}</span><span class="sub">Booked or paid, next 30 days</span></div>
     <div class="card stat-tile" style="cursor:pointer;" data-action="nav" data-view="leads"><span class="u-label">Open Leads</span><span class="val">${open.length}</span><span class="sub">Awaiting contract / deposit</span></div>
     <div class="card stat-tile" style="cursor:pointer;" data-action="nav" data-view="leads"><span class="u-label">Awaiting Balance</span><span class="val">${awaitingBalance.length}</span><span class="sub">Booked, balance not yet in</span></div>
@@ -3230,7 +3244,7 @@ function renderCalendarPage(events, opts={}){
   const filtered = S.calArtistFilter.length ? events.filter(e=>S.calArtistFilter.includes(e.artistId)) : events;
   const isAdmin = isAdminUser(S.user);
   const mode = opts.miniEmbed ? 'month' : (S.calViewMode||'month');
-  const todayIso = fmtISO(new Date());
+  const todayIso = todayISO();
 
   const modeToggle = opts.miniEmbed ? '' : `<div class="chip-row" style="margin-left:auto;flex-wrap:nowrap;">
     ${['month','week','day'].map(mv=>`<button class="filter-chip ${mode===mv?'sel':''}" data-action="cal-view-mode" data-mode="${mv}">${mv[0].toUpperCase()+mv.slice(1)}</button>`).join('')}
@@ -3588,7 +3602,7 @@ function renderFinancialsPage(){
 }
 
 /* ============ OUTSIDE BOOKINGS PAGE (own nav tab — office/bookkeeping only, not CEO) ============ */
-function outsideBookingOpenReminders(b){ return (b.reminders||[]).filter(r=>!r.completedAt && (!r.snoozedUntil || r.snoozedUntil<=fmtISO(new Date()))); }
+function outsideBookingOpenReminders(b){ return (b.reminders||[]).filter(r=>!r.completedAt && (!r.snoozedUntil || r.snoozedUntil<=todayISO())); }
 function renderOutsideBookingsPage(){
   return `
   <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
@@ -4144,7 +4158,7 @@ function renderNewProjectModal(){
 function renderArtistDashboard(artistId){
   const a = artistById(artistId);
   const evs = eventsFor(artistId);
-  const todayGig = evs.find(e=>e.date===fmtISO(new Date()) && ['booked','paid'].includes(e.status));
+  const todayGig = evs.find(e=>e.date===todayISO() && ['booked','paid'].includes(e.status));
   return `
   ${renderWelcomeHeader(a.name.split(' ')[0])}
   ${todayGig? `<div class="card card-pad" style="margin-bottom:20px;border-color:var(--accent);background:var(--accent-wash);">
@@ -5448,7 +5462,7 @@ function renderFlightSegmentsSection(tr){
         </div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-        <button class="btn btn-sm" data-action="check-flight-status" data-id="${tr.id}" data-seg="${seg.id}" ${S.flightStatusBusy===seg.id?'disabled':''}>${S.flightStatusBusy===seg.id?'Checking…':'Check Status'}</button>
+        <button class="btn btn-sm" data-action="check-segment-flight-status" data-id="${tr.id}" data-seg="${seg.id}" ${S.flightStatusBusy===seg.id?'disabled':''}>${S.flightStatusBusy===seg.id?'Checking…':'Check Status'}</button>
         <button class="icon-btn" data-action="remove-flight-segment" data-id="${tr.id}" data-seg="${seg.id}" title="Remove">${ICO.x}</button>
       </div>
       ${seg.lastStatus? `<p style="font-size:11px;color:var(--ink-2);margin:0;">Last checked: <strong>${esc(seg.lastStatus)}</strong>${seg.lastStatusAt? ` (${fmtDateShort(seg.lastStatusAt.slice(0,10))})` : ''}</p>` : ''}
@@ -6491,7 +6505,7 @@ function doMarkDeposit(id){
   // it's not what the spec's item 5 requires be real (that's specifically the client-facing
   // confirmation, sent for real below).
   logEvent(ev,'email',`Booking-confirmed notification emailed to ${artistById(ev.artistId).name}, Ilan, and Moshe.`);
-  const result = updateEvent(id, { status:'booked', depositReceived:true, depositReceivedDate:fmtISO(new Date()) });
+  const result = updateEvent(id, { status:'booked', depositReceived:true, depositReceivedDate:todayISO() });
   if(!result.ok){
     toast(result.error==='conflict' ? 'This booking changed elsewhere since you loaded it — reload before marking the deposit received.' : 'Could not save.', 'system');
     return;
@@ -6566,27 +6580,32 @@ function doSaveFlight(id){
   const ev = getEvent(id); if(!ev) return; const f=S.flightForm;
   const depart = f.departDate? `${f.departDate} ${f.departTime||'00:00'}` : '—';
   const arrive = f.arriveDate? `${f.arriveDate} ${f.arriveTime||'00:00'}` : '—';
-  const flight = {airline:f.airline||'—', flightNumber:(f.flightNumber||'').trim(), confirmation:f.confirmation||'—', depart, arrive, trackingIdx:-1, trackingStatus:null, trackingStatusAt:null};
+  const flight = {airline:f.airline||'—', flightNumber:(f.flightNumber||'').trim(), confirmation:f.confirmation||'—', depart, arrive, trackingStatus:null, trackingStatusAt:null};
   logEvent(ev,'email',`Flight booked & added to itinerary — Moshe and ${artistById(ev.artistId).name} notified.`);
   S.showFlightForm=false;
   if(reportEventSave(updateEvent(id, { flight, flightBooked:true }), 'saving the flight')) toast('Flight saved — Moshe & artist notified.', 'success');
   openEvent(id);
 }
-const FLIGHT_STATUS_SEQUENCE = ['On time', 'Gate assigned', 'Boarding', 'Departed on time', 'In flight', 'Landed on time'];
-function doCheckFlightStatus(id){
-  S.checkingFlightId = id;
-  render();
-  setTimeout(()=>{
-    const ev = getEvent(id);
-    if(ev && ev.flight){
-      const trackingIdx = Math.min((ev.flight.trackingIdx??-1)+1, FLIGHT_STATUS_SEQUENCE.length-1);
-      const trackingStatus = FLIGHT_STATUS_SEQUENCE[trackingIdx];
-      logEvent(ev,'email',`Flight status update for ${artistById(ev.artistId).name} — ${trackingStatus} — emailed via ASP-branded update.`);
-      if(reportEventSave(updateEvent(id, { flight: {...ev.flight, trackingIdx, trackingStatus, trackingStatusAt:new Date().toISOString()} }), 'checking flight status')) toast(`Flight status: ${trackingStatus} — artist notified.`, 'email');
-    }
-    S.checkingFlightId = null;
-    render();
-  }, 650);
+// Event-sheet flight card. Used to be a mock that stepped through made-up statuses and logged an
+// "emailed" update that was never sent; it also shadowed the real segment check (same function
+// name). Now a real FlightAware lookup; nothing is emailed.
+async function doCheckFlightStatus(id){
+  const ev = getEvent(id); if(!ev || !ev.flight) return;
+  const ident = (ev.flight.flightNumber||'').replace(/\s+/g,'').toUpperCase();
+  if(!/^[A-Z0-9]{2,3}\d{1,4}[A-Z]?$/.test(ident)){ toast('Enter the flight number with its airline code (e.g. DL1234) to check its status.', 'system'); return; }
+  const date = /^\d{4}-\d{2}-\d{2}/.test(ev.flight.depart||'') ? ev.flight.depart.slice(0,10) : ev.date;
+  S.checkingFlightId = id; render();
+  try{
+    const data = await fetchFlightStatus(ident, date);
+    if(!data.ok){ toast(data.error, 'system'); return; }
+    const trackingStatus = data.status || (data.cancelled ? 'Cancelled' : 'Unknown');
+    logEvent(ev,'system',`Flight ${ident} status checked (FlightAware): ${trackingStatus}.`);
+    if(reportEventSave(updateEvent(id, { flight: {...ev.flight, trackingStatus, trackingStatusAt:new Date().toISOString()} }), 'checking flight status')) toast(`Flight status: ${trackingStatus}.`, 'success');
+  } catch(err){
+    toast('Could not check flight status: ' + String(err), 'system');
+  } finally {
+    S.checkingFlightId = null; render();
+  }
 }
 function doToggleGroundTransport(id){
   const ev = getEvent(id); if(!ev) return;
@@ -6633,7 +6652,7 @@ function doSaveGigInfo(id){
   const ev = getEvent(id); if(!ev) return;
   const f = S.gigInfoForm;
   const prevSheet = ev.gigInfoSheet || {text:'', contacts:[], updatedAt:null};
-  const gigInfoSheet = { ...prevSheet, text: (f.text!==undefined? f.text : prevSheet.text).trim(), updatedAt: fmtISO(new Date()) };
+  const gigInfoSheet = { ...prevSheet, text: (f.text!==undefined? f.text : prevSheet.text).trim(), updatedAt: todayISO() };
   logEvent(ev, 'email', `Gig info sheet updated — ${artistById(ev.artistId).name} notified.`);
   S.showGigInfoForm=false; S.gigInfoForm={}; S.newGigContactForm={};
   if(reportEventSave(updateEvent(id, { gigInfoSheet }), 'saving the gig info sheet')) toast('Gig info sheet saved — artist notified.', 'success');
@@ -6705,7 +6724,7 @@ function doSubmitInvoice(){
 }
 function doMarkInvoicePaid(id){
   const inv = getInvoice(id); if(!inv) return;
-  inv.status = 'paid'; inv.paidAt = fmtISO(new Date());
+  inv.status = 'paid'; inv.paidAt = todayISO();
   inv.log.push({ts:new Date().toISOString(), type:'success', text:'Marked paid.'});
   saveCustomInvoices();
   toast('Invoice marked paid.', 'success');
@@ -6779,7 +6798,7 @@ function doSaveDocument(){
   const subjectId = f.subjectId!==undefined? f.subjectId : (existing? existing.subjectId : null);
   if(subjectType!=='general' && !subjectId){ toast("Pick who this document is for.", 'system'); return; }
   const brand = f.brand || (existing && existing.brand) || 'asp';
-  const doc = existing || { id:'DOC-'+(DOCID++), createdAt: fmtISO(new Date()), signedAt: null };
+  const doc = existing || { id:'DOC-'+(DOCID++), createdAt: todayISO(), signedAt: null };
   doc.subjectType = subjectType;
   doc.subjectId = subjectId;
   doc.brand = brand;
@@ -6821,14 +6840,14 @@ function doSendReminder(id){
 function doMarkBalance(id){
   const ev = getEvent(id); if(!ev) return;
   logEvent(ev,'success',`Bookkeeping marked balance received (${paymentMethodLabel(ev)}) — reminders stopped.`);
-  if(reportEventSave(updateEvent(id, { balanceReceived:true, balanceReceivedDate:fmtISO(new Date()), status:'paid' }), 'marking the balance received')) toast('Balance marked received. Reminders stopped.', 'success');
+  if(reportEventSave(updateEvent(id, { balanceReceived:true, balanceReceivedDate:todayISO(), status:'paid' }), 'marking the balance received')) toast('Balance marked received. Reminders stopped.', 'success');
   openEvent(id);
 }
 function doToggleArtistPaidOut(id){
   const ev = getEvent(id); if(!ev) return;
   const artistPaidOut = !ev.artistPaidOut;
   logEvent(ev, artistPaidOut?'success':'system', artistPaidOut? `Marked paid out to ${artistById(ev.artistId).name} (${money(zelleBalance(ev))}).` : 'Payout unmarked.');
-  if(reportEventSave(updateEvent(id, { artistPaidOut, artistPaidOutDate: artistPaidOut? fmtISO(new Date()) : null }), 'updating payout status')) toast(artistPaidOut? 'Marked paid out.' : 'Payout unmarked.', 'success');
+  if(reportEventSave(updateEvent(id, { artistPaidOut, artistPaidOutDate: artistPaidOut? todayISO() : null }), 'updating payout status')) toast(artistPaidOut? 'Marked paid out.' : 'Payout unmarked.', 'success');
   render();
 }
 function doAddCharge(id){
@@ -6874,7 +6893,7 @@ function doUploadPrep(id, files){
       }
     };
     reader.onload = ()=>{
-      prepSheets.push({id:'PS-'+Date.now()+Math.random().toString(36).slice(2,6), name:file.name, dataUrl:reader.result, uploadedAt:fmtISO(new Date())});
+      prepSheets.push({id:'PS-'+Date.now()+Math.random().toString(36).slice(2,6), name:file.name, dataUrl:reader.result, uploadedAt:todayISO()});
       succeeded++;
       finish();
     };
@@ -6964,7 +6983,7 @@ function doAddProject(){
       balanceReceived:false, balanceReceivedDate:null, reminderIntervalDays: defaultReminderCadence(f.recordingDate), lastReminderSent:null,
       flightNeeded:false, flightBooked:false, flight:null,
       groundTransportNeeded:false, groundTransportBooked:false, groundTransport:null,
-      charges:[], dressCode:'', prepSheets:[], createdAt: fmtISO(new Date()),
+      charges:[], dressCode:'', prepSheets:[], createdAt: todayISO(),
       log:[{ts:new Date().toISOString(), type:'system', text:`Recording Day scheduled for ${artist.name} — ${count} episode project${count===1?'':'s'}.`}],
     };
     if(findConflicts(ev).length) toast(`⚠ Scheduling conflict — ${artist.name} already has something this date.`, 'system');
@@ -7177,7 +7196,7 @@ function doSubmitLead(){
     balanceReceived:false, balanceReceivedDate:null, reminderIntervalDays: defaultReminderCadence(f.date), lastReminderSent:null,
     flightNeeded: !!f.flightNeeded, flightBooked:false, flight:null,
     groundTransportNeeded: !!f.groundTransportNeeded, groundTransportBooked:false, groundTransport:null,
-    charges: isInternal? [] : (f.charges||[]), dressCode: isInternal? '' : (f.dressCode||''), prepSheets:[], createdAt: fmtISO(new Date()),
+    charges: isInternal? [] : (f.charges||[]), dressCode: isInternal? '' : (f.dressCode||''), prepSheets:[], createdAt: todayISO(),
     additionalArtists: isInternal? [] : (f.additionalArtists||[]).filter(x=>x.artistId).map(x=>{
       const fee = Number(x.feeAmount)||0; const cut = Math.round(fee*0.15);
       return { artistId:x.artistId, feeAmount:fee, aspCut:cut, netAmount:fee-cut };
@@ -7214,7 +7233,7 @@ function doSubmitBlockTime(){
       balanceReceived:false, balanceReceivedDate:null, reminderIntervalDays:5, lastReminderSent:null,
       flightNeeded:false, flightBooked:false, flight:null,
       groundTransportNeeded:false, groundTransportBooked:false, groundTransport:null,
-      charges:[], dressCode:'', prepSheets:[], createdAt: fmtISO(new Date()),
+      charges:[], dressCode:'', prepSheets:[], createdAt: todayISO(),
       log:[{ts:new Date().toISOString(), type:'system', text:`${artist.name} blocked ${allDay?'this date':`${fmtTime(f.startTime)}–${fmtTime(f.endTime)}`}${f.note?': '+f.note:''}.`}],
     };
     if(findConflicts(ev).length) hadConflict = true;
@@ -7745,7 +7764,7 @@ function bindGlobal(){
       case 'send-travel-request': doSendTravelRequest(id); break;
       case 'add-flight-segment': doAddFlightSegment(id); break;
       case 'remove-flight-segment': doRemoveFlightSegment(id, t.getAttribute('data-seg')); break;
-      case 'check-flight-status': doCheckFlightStatus(id, t.getAttribute('data-seg')); break;
+      case 'check-segment-flight-status': doCheckSegmentFlightStatus(id, t.getAttribute('data-seg')); break;
       case 'set-travel-request-status': doSetTravelRequestStatus(id, t.getAttribute('data-status')); break;
       case 'delete-travel-request': doDeleteTravelRequest(id); break;
       case 'add-outside-booking-reminder': doAddOutsideBookingReminder(S.outsideBookingDetailId); break;
@@ -7781,7 +7800,7 @@ function bindGlobal(){
       }
       case 'set-theme': setThemePref(t.getAttribute('data-theme-pref')); break;
       case 'toggle-notif': { const st=getUserSettings(S.user); const key=t.getAttribute('data-key'); const channel=t.getAttribute('data-channel')||'inApp'; st.notify[key][channel]=!st.notify[key][channel]; saveAllSettings(); render(); break; }
-      case 'add-passkey': { const st=getUserSettings(S.user); const n=st.passkeys.length+1; st.passkeys.push({id:'pk-'+randInt(1,999999), label:`Passkey ${n}`, addedAt: fmtISO(new Date())}); saveAllSettings(); toast('Passkey added.', 'success'); render(); break; }
+      case 'add-passkey': { const st=getUserSettings(S.user); const n=st.passkeys.length+1; st.passkeys.push({id:'pk-'+randInt(1,999999), label:`Passkey ${n}`, addedAt: todayISO()}); saveAllSettings(); toast('Passkey added.', 'success'); render(); break; }
       case 'remove-passkey': { const st=getUserSettings(S.user); if(st.passkeys.length>1){ st.passkeys = st.passkeys.filter(pk=>pk.id!==id); saveAllSettings(); toast('Passkey removed.', 'system'); render(); } break; }
       case 'add-real-passkey': doAddRealPasskey(); break;
       case 'remove-real-passkey': doRemoveRealPasskey(id); break;

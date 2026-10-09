@@ -58,8 +58,19 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: `FlightAware lookup failed (${resp.status})` }, 502);
   }
 
-  const flight = data.flights?.[0];
-  if (!flight) return json({ ok: false, error: `No current flight found for ${ident}` }, 404);
+  // A flight number repeats daily, so pick the leg on the requested date (YYYY-MM-DD, the segment's
+  // travel day) rather than whatever AeroAPI lists first. scheduled_out is UTC, so match the leg whose
+  // departure is closest to that day (within 36h of its noon UTC) to tolerate timezone shifts.
+  const flights: any[] = data.flights || [];
+  let flight = flights[0];
+  if (body.date && /^\d{4}-\d{2}-\d{2}$/.test(body.date)) {
+    const target = Date.parse(`${body.date}T12:00:00Z`);
+    const dist = (f: any) => Math.abs(Date.parse(f.scheduled_out || f.scheduled_off || "") - target);
+    flight = flights
+      .filter((f) => !Number.isNaN(dist(f)) && dist(f) <= 36 * 3600 * 1000)
+      .sort((a, b) => dist(a) - dist(b))[0];
+  }
+  if (!flight) return json({ ok: false, error: body.date ? `No ${ident} flight found on ${body.date}` : `No current flight found for ${ident}` }, 404);
 
   // Normalized shape -- what the app actually needs to show/log, not the full AeroAPI payload.
   return json({

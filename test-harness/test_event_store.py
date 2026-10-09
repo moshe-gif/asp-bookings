@@ -8,7 +8,9 @@ no lead creation needed).
 
 Runs as admin_bookings.
 """
-from helpers import login_as, collect_console_errors
+from helpers import login_as, collect_console_errors, fake_gig, seed_events
+
+REVIEW_GIGS = [fake_gig(f"EV-90{i}", a, f"2027-04-0{i}", needsReview=True, status="lead", importNotes="(test import note)") for i, a in enumerate(["benny", "yaakov", "eli"], start=1)]
 
 
 def _open_needs_review(page):
@@ -20,13 +22,14 @@ def _open_needs_review(page):
 
 def test_mark_reviewed_still_works(live_server, page):
     errors = collect_console_errors(page)
+    seed_events(page, REVIEW_GIGS)
     page.goto(live_server)
     login_as(page, "admin_bookings")
     _open_needs_review(page)
 
     rows = page.locator('[data-action="mark-event-reviewed"]')
     count_before = rows.count()
-    assert count_before > 0, "no seeded needs-review gigs to test against — check demo data"
+    assert count_before > 0, "seeded needs-review gigs didn't show"
 
     rows.first.click()
     assert rows.count() == count_before - 1, "Mark Reviewed didn't remove the gig from the queue"
@@ -41,6 +44,7 @@ def test_concurrent_mark_reviewed_surfaces_conflict_instead_of_silent_overwrite(
     updateEvent()'s revision check, not silently re-save tab A's stale view over tab B's write.
     """
     errors_a = collect_console_errors(page)
+    seed_events(page, REVIEW_GIGS)
     page.goto(live_server)
     login_as(page, "admin_bookings")
     _open_needs_review(page)
