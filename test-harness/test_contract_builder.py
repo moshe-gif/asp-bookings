@@ -350,3 +350,87 @@ def test_v2_contract_migrates_split_boilerplate_without_data_loss(live_server, p
     assert not errors, f"console errors migrating a v2 contract: {errors}"
 
     assert not errors, f"console errors during reload persistence check: {errors}"
+
+
+def test_approval_is_voided_by_a_later_money_edit(live_server, page):
+    # Audit 2.1: approval used to survive edits, so approved-then-changed numbers could be emailed.
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    create_lead(page, "Approval Gate Client", "2027-09-01", artist_id="benny")
+    builder = create_contract_from_lead(page, "standard")
+    fee_input = builder.locator('input[data-contract-field="fee.amount"]')
+    fee_input.fill("12000"); fee_input.blur()
+
+    builder.locator('[data-action="approve-contract-for-sending"]').click()
+    assert page.locator('#contractBuilderOverlayHost', has_text="Approved for sending").count() == 1
+
+    fee_input = page.locator('#contractBuilderOverlayHost input[data-contract-field="fee.amount"]')
+    fee_input.fill("9000"); fee_input.blur()
+    host = page.locator('#contractBuilderOverlayHost')
+    assert "changed since approval" in host.inner_text()
+    assert host.locator('[data-action="approve-contract-for-sending"]').count() == 1, "re-approve button missing"
+    assert not errors, f"console errors: {errors}"
+
+
+def test_deposit_percent_zero_uses_flat_amount(live_server, page):
+    # Audit 2.2: "0" (string) was truthy, so the deposit computed to $0 instead of the $ amount.
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    create_lead(page, "Flat Deposit Client", "2027-10-01", artist_id="benny")
+    builder = create_contract_from_lead(page, "standard")
+    for field, value in (("fee.amount", "10000"), ("deposit.percent", "0"), ("deposit.amount", "3000")):
+        el = page.locator(f'#contractBuilderOverlayHost input[data-contract-field="{field}"]')
+        el.fill(value); el.blur()
+    ledger_text = page.locator('#contractBuilderOverlayHost .ledger').first.inner_text()
+    assert "$3,000" in ledger_text, ledger_text
+    assert "$7,000" in ledger_text, ledger_text
+    assert "(0%)" not in ledger_text, ledger_text
+    assert not errors, f"console errors: {errors}"
+
+
+def test_multiline_total_includes_additional_artists(live_server, page):
+    # Audit 2.3: a package contract's total used to be only the primary artist's price.
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    create_lead(page, "Package Client", "2027-11-01", artist_id="benny")
+    # Setup shortcut: give the lead a second artist the way the multi-artist New Lead flow stores it.
+    page.evaluate("""() => { const ev = window.S.events.find(e => e.clientName === 'Package Client');
+                             ev.price = 12000; ev.additionalArtists = [{ artistId: 'yaakov', feeAmount: 5000 }]; }""")
+    create_contract_from_lead(page, "multiline")
+    ledger_text = page.locator('#contractBuilderOverlayHost .ledger').first.inner_text()
+    assert "$17,000" in ledger_text, ledger_text
+    assert not errors, f"console errors: {errors}"
+
+
+def test_refresh_from_lead_keeps_profile_default_fee(live_server, page):
+    # Audit 2.7: "Refresh from Lead" set the fee to ev.price||0, zeroing a profile-prefilled fee.
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    create_lead(page, "Refresh Fee Client", "2027-12-15", artist_id="benny")
+    builder = create_contract_from_lead(page, "standard")
+    before = builder.locator('input[data-contract-field="fee.amount"]').input_value()
+    page.locator('#contractBuilderOverlayHost [data-action="contract-refresh-from-lead"]').click()
+    after = page.locator('#contractBuilderOverlayHost input[data-contract-field="fee.amount"]').input_value()
+    assert after == before, f"refresh changed the fee from {before!r} to {after!r}"
+    assert not errors, f"console errors: {errors}"
+
+
+def test_approval_is_voided_by_refresh_from_lead_date_change(live_server, page):
+    # Review follow-up: the event date (and client/venue) reach the client document, so changing
+    # them via "Refresh from Lead" must void an approval too.
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    create_lead(page, "Date Change Client", "2027-09-10", artist_id="benny")
+    builder = create_contract_from_lead(page, "standard")
+    builder.locator('[data-action="approve-contract-for-sending"]').click()
+    host = page.locator('#contractBuilderOverlayHost')
+    assert "Approved for sending" in host.inner_text()
+    page.evaluate("""() => { const ev = window.S.events.find(e => e.clientName === 'Date Change Client'); ev.date = '2027-09-17'; }""")
+    host.locator('[data-action="contract-refresh-from-lead"]').click()
+    assert "changed since approval" in page.locator('#contractBuilderOverlayHost').inner_text()
+    assert not errors, f"console errors: {errors}"

@@ -684,7 +684,8 @@ function contractLineItemsTotal(c){ return (c.lineItems||[]).reduce((sum,li)=>su
 function contractPaymentFigures(c){
   const total = Number(c.fee.amount)||0;
   let deposit = Number(c.deposit.amount)||0;
-  if(c.deposit.percent){ deposit = Math.round(total * (Number(c.deposit.percent)||0) / 100); }
+  // Number(): the builder stores input values as strings, and "0" is truthy -- it means "use the $ amount".
+  if(Number(c.deposit.percent) > 0){ deposit = Math.round(total * Number(c.deposit.percent) / 100); }
   const balance = Math.max(0, total - deposit);
   return { total, deposit, balance };
 }
@@ -838,12 +839,13 @@ function doCreateContractFromLead(eventId, template){
     // (primary + additional) instead of leaving the editor empty, since the data already exists.
     if((ev.additionalArtists||[]).length){
       contract.lineItems = [
-        { id:'LI-'+Math.random().toString(36).slice(2,7), label: performerArtist?performerArtist.name:'', performerArtistId, fee: ev.price||0, date:'', overtimeRate:'', notes:'', travelClause: blankTravelClause() },
+        { id:'LI-'+Math.random().toString(36).slice(2,7), label: performerArtist?performerArtist.name:'', performerArtistId, fee: ev.price || (payeeProfile && payeeProfile.defaultFee) || 0, date:'', overtimeRate:'', notes:'', travelClause: blankTravelClause() },
         ...ev.additionalArtists.map(x=>{
           const a = artistById(x.artistId);
           return { id:'LI-'+Math.random().toString(36).slice(2,7), label: a?a.name:x.artistId, performerArtistId: x.artistId, fee: x.feeAmount||0, date:'', overtimeRate:'', notes:'', travelClause: blankTravelClause() };
         }),
       ];
+      contract.fee.amount = contractLineItemsTotal(contract);
     }
   }
   CONTRACTS.unshift(contract); saveContracts();
@@ -854,7 +856,8 @@ function doRefreshContractFromLead(id){
   const c = getContract(id); if(!c) return;
   const ev = getEvent(c.leadId); if(!ev){ toast('The original lead no longer exists.', 'system'); return; }
   c.snapshot = { clientName: ev.clientName||'', clientEmail: ev.clientEmail||'', clientPhone: ev.clientPhone||'', eventName: c.snapshot.eventName||'', eventDate: ev.date||'', venue: ev.venue||'', city: ev.city||'', state: ev.state||'', occasion: c.snapshot.occasion || ev.type||'' };
-  if(c.template!=='multiline') c.fee.amount = ev.price||0;
+  // The lead's negotiated price wins; otherwise keep the fee already on the contract (typed or prefilled); the profile default only fills a blank.
+  if(c.template!=='multiline'){ const profile = getPayeeProfile(c.payeeProfileId); c.fee.amount = ev.price || Number(c.fee.amount) || (profile && profile.defaultFee) || 0; }
   c.updatedAt = new Date().toISOString();
   saveContracts();
   toast('Refreshed from lead.', 'success');
@@ -1122,9 +1125,25 @@ async function doMigrateContractsToSupabase(){
    migrated (c._supabaseId) and the current admin has a real Supabase admin_users row (adminRow.dbId,
    set at real sign-in) -- neither is guaranteed yet for most contracts/admins, so a sync failure
    here must never block the local approval itself. ---- */
+// An approval covers exactly what was approved: any later change to anything the client sees --
+// through any edit path (field binder, pickers, line items, performer, refresh-from-lead) -- voids
+// it, because the fingerprint no longer matches. Deny-list, not allow-list: every contract field
+// counts except bookkeeping that never reaches the client document. Canonical form (sorted keys,
+// numeric strings as numbers) so retyping the same value doesn't void it. Approvals saved before
+// this existed have no fingerprint and need one re-approval (the safe direction to fail in).
+const CONTRACT_FINGERPRINT_IGNORED = ['id','leadId','status','createdAt','updatedAt','approvedBy','approvedAt','approvedTermsFingerprint','versions','signedAt','qboInvoiceId','qboInvoiceDocNumber','calendarHoldsStatus','_supabaseId','_migratedAt','notes','schemaVersion'];
+function contractTermsFingerprint(c){
+  const canon = v => Array.isArray(v) ? v.map(canon)
+    : (v && typeof v==='object') ? Object.keys(v).sort().reduce((o,k)=>{ o[k]=canon(v[k]); return o; }, {})
+    : (typeof v==='string' && v.trim()!=='' && !isNaN(Number(v))) ? Number(v) : v;
+  const terms = {}; Object.keys(c).filter(k=>!CONTRACT_FINGERPRINT_IGNORED.includes(k)).forEach(k=>{ terms[k] = c[k]; });
+  return JSON.stringify(canon(terms));
+}
+function isContractApproved(c){ return !!c.approvedAt && c.approvedTermsFingerprint === contractTermsFingerprint(c); }
 async function doApproveContractForSending(id){
   const c = getContract(id); if(!c) return;
   c.approvedBy = S.user; c.approvedAt = new Date().toISOString(); c.updatedAt = c.approvedAt;
+  c.approvedTermsFingerprint = contractTermsFingerprint(c);
   saveContracts(); render();
   if(supabaseClient && c._supabaseId){
     const dbId = adminById(S.user) ? adminById(S.user).dbId : null;
@@ -1136,7 +1155,7 @@ async function doApproveContractForSending(id){
 }
 function doRevokeContractApproval(id){
   const c = getContract(id); if(!c) return;
-  c.approvedBy = null; c.approvedAt = null; c.updatedAt = new Date().toISOString();
+  c.approvedBy = null; c.approvedAt = null; c.approvedTermsFingerprint = null; c.updatedAt = new Date().toISOString();
   saveContracts(); render();
   if(supabaseClient && c._supabaseId){
     supabaseClient.from('contracts').update({ approved_by:null, approved_at:null }).eq('id', c._supabaseId)
@@ -1147,7 +1166,7 @@ function doRevokeContractApproval(id){
 /* ---- Send Contract (real email, via the send-contract-email Supabase Edge Function) ---- */
 async function doSendContractEmail(){
   const c = getContract(S.contractBuilderId); if(!c) return;
-  if(!c.approvedAt){ toast('Approve this contract for sending first — money/terms must be approved before it can go out.', 'system'); return; }
+  if(!isContractApproved(c)){ toast(c.approvedAt ? 'Money/terms changed since this contract was approved — re-approve it before sending.' : 'Approve this contract for sending first — money/terms must be approved before it can go out.', 'system'); return; }
   // Capture every form value up front and use only these locals from here on -- S.sendContractForm
   // gets cleared as soon as the email step succeeds (so the confirm modal doesn't reopen stale),
   // and the QuickBooks step runs after that point. Reading S.sendContractForm.qboAmount there was
@@ -5566,9 +5585,12 @@ function renderContractBuilderModal(){
           <div class="chip-row">${['draft','sent','signed','void'].map(s=>`<button class="filter-chip ${c.status===s?'sel':''}" data-action="set-contract-status" data-status="${s}">${contractStatusLabel(s)}</button>`).join('')}</div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--surface-2);">
-          ${c.approvedAt
+          ${isContractApproved(c)
             ? `<span class="pill pill-good">Approved for sending — ${adminById(c.approvedBy)?adminById(c.approvedBy).name:'admin'}, ${fmtDateShort(c.approvedAt.slice(0,10))}</span>
                <button class="btn btn-sm btn-ghost" data-action="revoke-contract-approval" data-id="${c.id}">Revoke</button>`
+            : c.approvedAt
+            ? `<span class="pill pill-warn">Money/terms changed since approval — re-approve before sending</span>
+               <button class="btn btn-sm" data-action="approve-contract-for-sending" data-id="${c.id}">Re-approve</button>`
             : `<span class="pill pill-neutral">Not yet approved — money/terms must be approved before this contract can be sent</span>
                <button class="btn btn-sm" data-action="approve-contract-for-sending" data-id="${c.id}">Approve for Sending</button>`}
         </div>
@@ -5712,7 +5734,7 @@ function renderContractFeeSection(c){
     </div>` : ''}
     <div class="ledger" style="margin-top:4px;">
       <div class="ledger-row"><span>Total</span><span class="amt">${money(figures.total)}</span></div>
-      <div class="ledger-row"><span>Deposit${c.deposit.percent?` (${c.deposit.percent}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
+      <div class="ledger-row"><span>Deposit${Number(c.deposit.percent)>0?` (${esc(String(c.deposit.percent))}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
       <div class="ledger-row total"><span>Balance</span><span class="amt">${money(figures.balance)}</span></div>
     </div>
   </div>`;
@@ -5928,7 +5950,7 @@ function standardDocContent(c){
     <div class="doc-section"><h3>Payment Terms</h3>
       <div class="ledger" style="margin-bottom:8px;">
         <div class="ledger-row"><span>Total Payment</span><span class="amt">${contractFeeDisplayHtml(c, figures)}</span></div>
-        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${c.deposit.percent?` (${c.deposit.percent}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
+        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${Number(c.deposit.percent)>0?` (${esc(String(c.deposit.percent))}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
         <div class="ledger-row total"><span>Balance Due</span><span class="amt">${money(figures.balance)}</span></div>
       </div>
       <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
@@ -5976,7 +5998,7 @@ function comedianDocContent(c){
     <div class="doc-section"><h3>1. Compensation</h3>
       <div class="ledger" style="margin-bottom:8px;">
         <div class="ledger-row"><span>Total Fee${c.fee.note?` (${esc(c.fee.note)})`:''}</span><span class="amt">${contractFeeDisplayHtml(c, figures)}${travelSentence?` ${esc(travelSentence)}`:''}</span></div>
-        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${c.deposit.percent?` (${c.deposit.percent}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
+        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${Number(c.deposit.percent)>0?` (${esc(String(c.deposit.percent))}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
         <div class="ledger-row total"><span>Balance Due</span><span class="amt">${money(figures.balance)}</span></div>
       </div>
       <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
@@ -6035,7 +6057,7 @@ function multilineDocContent(c){
     <div class="doc-section"><h3>Payment Terms</h3>
       <div class="ledger" style="margin-bottom:8px;">
         <div class="ledger-row"><span>Total Payment</span><span class="amt">${contractFeeDisplayHtml(c, figures)}</span></div>
-        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${c.deposit.percent?` (${c.deposit.percent}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
+        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${Number(c.deposit.percent)>0?` (${esc(String(c.deposit.percent))}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
         <div class="ledger-row total"><span>Balance Due</span><span class="amt">${money(figures.balance)}</span></div>
       </div>
       <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
@@ -6081,7 +6103,7 @@ function creativeDocContent(c){
     <div class="doc-section"><h3>Payment Terms</h3>
       <div class="ledger" style="margin-bottom:8px;">
         <div class="ledger-row"><span>Total Fee</span><span class="amt">${contractFeeDisplayHtml(c, figures)}</span></div>
-        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${c.deposit.percent?` (${c.deposit.percent}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
+        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${Number(c.deposit.percent)>0?` (${esc(String(c.deposit.percent))}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
         <div class="ledger-row total"><span>Balance Due</span><span class="amt">${money(figures.balance)}</span></div>
       </div>
       <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
