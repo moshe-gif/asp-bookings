@@ -39,14 +39,17 @@ def _password_for(user_id):
 MOBILE_ADMIN_NAV = ["dashboard", "calendar", "leads", "projects", "financials"]
 MOBILE_ARTIST_NAV = ["a_calendar", "a_gigs", "a_dashboard", "a_travel", "a_financials"]
 
-MGMT_NAV_ITEMS = ["dashboard", "calendar", "leads", "artists", "travel", "projects", "pricing", "financials", "outside_bookings", "documents", "contracts", "contract_builder", "messages"]
+MGMT_NAV_ITEMS = ["dashboard", "calendar", "leads", "artists", "travel", "projects", "pricing", "financials", "contracts", "contract_builder", "messages"]
 ARTIST_NAV_ITEMS = ["a_dashboard", "a_calendar", "a_gigs", "a_travel", "a_financials", "a_projects"]
 
-CEO_HIDDEN_NAV_VIEWS = ("outside_bookings", "documents", "contract_builder")
+CEO_HIDDEN_NAV_VIEWS = ("contract_builder",)
+
+# Pages that still exist but were removed from the menu (2026-10-09) -- reachable only by URL.
+URL_ONLY_VIEWS = ("outside_bookings", "documents")
 
 
 def mgmt_nav_items_for(user_id):
-    """Mirrors index.html's mgmtNavItemsFor() -- Outside Bookings/Documents hidden from admin_ceo."""
+    """Mirrors index.html's mgmtNavItemsFor() -- Contract Builder hidden from admin_ceo."""
     return [v for v in MGMT_NAV_ITEMS if not (v in CEO_HIDDEN_NAV_VIEWS and user_id == "admin_ceo")]
 
 
@@ -126,9 +129,14 @@ def login_as(page, user_id):
 def goto_nav(page, view_key, mobile=False):
     """
     Clicks the real nav control for `view_key` — the desktop rail/top-tabs, or the mobile
-    bottom-nav pill if `mobile=True`. Does not touch location.hash directly.
+    bottom-nav pill if `mobile=True`. Views in URL_ONLY_VIEWS (removed from the menu) are opened
+    by URL hash instead, since there is no menu control left to click.
     """
-    if mobile:
+    if view_key in URL_ONLY_VIEWS:
+        # No menu entry exists for these any more -- open them the way a real user now would,
+        # by URL. Setting location.hash fires the app's popstate router without a reload.
+        page.evaluate("v => { location.hash = '#/' + v; }", view_key)
+    elif mobile:
         page.locator(f'.bn-item[data-action="nav"][data-view="{view_key}"]').click()
     else:
         # Admin: sidebar rail. Artist: top tab bar. Both use the same data-action/data-view

@@ -8,7 +8,7 @@ ad hoc smoke-test JS snippets that used to get hand-written fresh each session.
 import pytest
 from helpers import (
     ADMIN_IDS, ARTIST_IDS, ARTIST_NAV_ITEMS,
-    login_as, goto_nav, collect_console_errors, mgmt_nav_items_for,
+    login_as, goto_nav, collect_console_errors, mgmt_nav_items_for, dismiss_opener,
 )
 
 
@@ -42,37 +42,30 @@ def test_artist_nav_sweep(live_server, page, user_id):
     assert not errors, f"[{user_id}] console errors during nav sweep: {errors}"
 
 
-def test_outside_bookings_hidden_from_ceo(live_server, page):
-    # Scoped to .rail-link specifically: the mobile bottom-nav's own outside_bookings button
-    # exists in the DOM but display:none for EVERY admin role (same as artists/travel/pricing/
-    # messages already are) -- that's an existing, unrelated pattern, not a visibility leak.
-    # The desktop rail and the hamburger menu's rail-nav are the two reachable places a nav item
-    # actually shows up; CEO must not see it in either.
-    page.goto(live_server)
-    login_as(page, "admin_ceo")
-    assert page.locator('.rail-link[data-action="nav"][data-view="outside_bookings"]').count() == 0, (
-        "CEO login should not see Outside Bookings in the sidebar"
-    )
-    assert page.locator('.rail-link[data-action="nav"][data-view="documents"]').count() == 0, (
-        "CEO login should not see Documents in the sidebar"
-    )
-    page.set_viewport_size({"width": 390, "height": 844})  # hamburger button is mobile-only
-    page.locator('.hamburger-btn').click()
-    assert page.locator('.mobile-menu-panel .rail-link[data-view="outside_bookings"]').count() == 0, (
-        "CEO login should not see Outside Bookings in the hamburger menu"
-    )
-    assert page.locator('.mobile-menu-panel .rail-link[data-view="documents"]').count() == 0, (
-        "CEO login should not see Documents in the hamburger menu"
-    )
-
-
-def test_outside_bookings_visible_for_office_logins(live_server, page):
-    for user_id in ("admin_bookings", "admin_bookkeeping"):
+def test_external_events_and_documents_not_in_menu(live_server, page):
+    # Removed from the menu for every login (2026-10-09). Checks both reachable menus: the desktop
+    # sidebar rail and the mobile hamburger menu.
+    for user_id in ADMIN_IDS:
+        page.set_viewport_size({"width": 1280, "height": 800})
         page.goto(live_server)
         login_as(page, user_id)
-        assert page.locator('.rail-link[data-action="nav"][data-view="outside_bookings"]').count() == 1, (
-            f"[{user_id}] should see the Outside Bookings nav item"
-        )
-        assert page.locator('.rail-link[data-action="nav"][data-view="documents"]').count() == 1, (
-            f"[{user_id}] should see the Documents nav item"
-        )
+        for view in ("outside_bookings", "documents"):
+            assert page.locator(f'.rail-link[data-action="nav"][data-view="{view}"]').count() == 0, (
+                f"[{user_id}] '{view}' should no longer be in the sidebar"
+            )
+        page.set_viewport_size({"width": 390, "height": 844})  # hamburger button is mobile-only
+        page.locator('.hamburger-btn').click()
+        for view in ("outside_bookings", "documents"):
+            assert page.locator(f'.mobile-menu-panel .rail-link[data-view="{view}"]').count() == 0, (
+                f"[{user_id}] '{view}' should no longer be in the hamburger menu"
+            )
+
+
+def test_passkey_button_hidden_without_webauthn(live_server, page):
+    # A browser with no WebAuthn (e.g. an in-app browser) can't use passkeys -- supabase-js would
+    # only answer "Browser does not support WebAuthn". The login screen should offer email only.
+    page.add_init_script("delete window.PublicKeyCredential;")
+    page.goto(live_server)
+    dismiss_opener(page)
+    assert page.locator('[data-action="real-signin-passkey"]').count() == 0, "passkey button shown without WebAuthn"
+    assert page.locator('.btn-primary[data-action="open-real-signin"]').count() == 1, "email sign-in isn't the primary button"

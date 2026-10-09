@@ -1908,6 +1908,12 @@ async function doVerifySignInCode(){
   if(error){ toast(/expired|invalid/i.test(error.message||'') ? 'That code is wrong or has expired — check it, or send a new one.' : 'Could not sign in: ' + error.message, 'system'); return; }
   // On success, onAuthStateChange's SIGNED_IN handler takes over from here.
 }
+// Same check supabase-js runs before any passkey call (it fails with "Browser does not support
+// WebAuthn" otherwise) -- used to hide passkey buttons in browsers that can't use them, e.g.
+// in-app/embedded browsers, rather than offering a button that can only error.
+function browserSupportsPasskeys(){
+  return !!(window.PublicKeyCredential && navigator.credentials && typeof navigator.credentials.get==='function' && typeof navigator.credentials.create==='function');
+}
 async function doRealSignInPasskey(){
   try{
     const { error } = await supabaseClient.auth.signInWithPasskey();
@@ -2630,15 +2636,15 @@ function renderUserChip(){
 const MGMT_NAV_ITEMS = [
   ['dashboard','Dashboard',ICO.dash], ['calendar','Calendar',ICO.cal], ['leads','Leads',ICO.leads],
   ['artists','Artists',ICO.artists], ['travel','Travel',ICO.suitcase], ['projects','Projects',ICO.kanban], ['pricing','Pricing',ICO.tag], ['financials','Financials',ICO.money],
-  ['outside_bookings','External Events',ICO.leads],
-  ['documents','Documents',ICO.leads],
   ['contracts','Contracts',ICO.leads],
   ['contract_builder','Contract Builder',ICO.edit],
   ['messages','Messages',ICO.sms],
 ];
-// Outside Bookings, Documents, and Contract Builder are office/bookkeeping work, not something
-// Ilan (CEO) needs on his simplified view — hide those nav items for that login only.
-const CEO_HIDDEN_NAV_VIEWS = ['outside_bookings','documents','contract_builder'];
+// External Events (outside_bookings) and Documents were removed from the menu for everyone
+// (2026-10-09, Moshe's call) -- their pages still exist and open by URL (#/outside_bookings,
+// #/documents). Contract Builder is office/bookkeeping work Ilan (CEO) doesn't need on his
+// simplified view — hidden for that login only.
+const CEO_HIDDEN_NAV_VIEWS = ['contract_builder'];
 function mgmtNavItemsFor(userId){
   return MGMT_NAV_ITEMS.filter(([v])=> !(CEO_HIDDEN_NAV_VIEWS.includes(v) && userId==='admin_ceo'));
 }
@@ -2794,7 +2800,7 @@ function renderRealPasskeySection(){
       <div style="flex:1;min-width:0;"><strong style="font-size:13px;">${esc(pk.label)}</strong><br/><span style="font-size:11.5px;color:var(--ink-3);">${pk.addedAt?'Added '+fmtDateShort(pk.addedAt):''}</span></div>
       <button class="icon-btn" data-action="remove-real-passkey" data-id="${esc(pk.id)}" title="Remove">${ICO.x}</button>
     </div>`).join('')}
-    <button class="btn btn-sm" style="margin-top:12px;" data-action="add-real-passkey">${ICO.plus} Add a passkey</button>
+    ${browserSupportsPasskeys() ? `<button class="btn btn-sm" style="margin-top:12px;" data-action="add-real-passkey">${ICO.plus} Add a passkey</button>` : `<p style="color:var(--ink-3);font-size:12px;margin:12px 0 0;">This browser can't use passkeys. Open ASP Bookings in Safari or Chrome to add one.</p>`}
   `;
 }
 function renderUsersDashboardCard(){
@@ -2984,8 +2990,12 @@ function renderLogin(){
     ${loginWordmark()}
     <p style="color:var(--ink-2);font-size:13.5px;margin:16px 0 26px;">Sign in to view your schedule and bookings.</p>
     ${supabaseClient ? `
+    ${browserSupportsPasskeys() ? `
     <button class="btn btn-primary btn-block" data-action="real-signin-passkey">${ICO.key} Sign in with Passkey</button>
     <button class="btn btn-block btn-ghost" style="margin-top:8px;" data-action="open-real-signin">Sign in with email</button>
+    ` : `
+    <button class="btn btn-primary btn-block" data-action="open-real-signin">Sign in with email</button>
+    `}
     ` : `<p style="color:var(--crit);font-size:12.5px;">Sign-in is unavailable right now — the app could not reach its backend. Try reloading.</p>`}
   </div></div>`;
 }
