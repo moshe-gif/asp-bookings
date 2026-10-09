@@ -43,6 +43,9 @@ template silently regresses production. Rules:
 ---
 
 ## Engineering Priorities (read before planning any PR)
+**Before planning ANY PR, re-read this section and Security below. Before committing ANY PR,
+review its code (see PR Process step 5).** These are the owner's standing rules for every change.
+
 1. **Elegance.** Completely, directly, simply solve the problem. Reuse an existing convention
    over inventing one; delete/strangle bad patterns rather than duplicate them. No band-aids
    that leave the root cause in place.
@@ -113,7 +116,9 @@ routine choices, but explain the meaningful ones.
 2. Plan the arc: capability, minimum features to e2e-test it for real, atomic commits, waves.
 3. Assess blast radius: list call sites touched + what could break; mark high-risk for double-review.
 4. Implement (elegance + blast-radius rules).
-5. Review the diff: correctness, scope creep, SSOT violations, security.
+5. Review the PR's code — always, not only when asked: read your full diff for correctness,
+   scope creep, SSOT violations, security, and these priorities. For high-risk work (money,
+   auth, data, migrations) also have an agent-review team review the diff, then fix what it finds.
 6. Run the test harness (`test-harness/`, see the Testing section above) — always before the
    final commit+push, loop-fix until green — plus a real click-through of anything the harness
    doesn't cover yet.
