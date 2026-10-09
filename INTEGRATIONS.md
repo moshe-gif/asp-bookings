@@ -68,6 +68,13 @@ machine that isn't port-blocked (e.g. a local Windows box).
   password** on that Workspace account (needs 2-Step Verification on). Supabase's built-in
   sender is capped at 2 emails/hour for the whole project — custom SMTP is what makes real use
   possible (limit raised to 30/hour). Codes are 8 digits, valid 1 hour.
+  **Passkeys** are bound to one domain: Supabase Auth `webauthn_rp_id` = `app.aspmgmt.com`,
+  `webauthn_rp_origins` = `https://app.aspmgmt.com` (until 2026-10-09 these still pointed at the
+  old `moshe-gif.github.io` host, so every passkey on the real domain failed). Passkeys need a
+  secure context: GitHub Pages serves a Let's Encrypt cert for app.aspmgmt.com with HTTPS enforced
+  (also missing until 2026-10-09 — over plain http:// the browser hides WebAuthn entirely and
+  supabase-js reports "Browser does not support WebAuthn"). Moving the app to another domain means
+  updating both Supabase settings, and existing passkeys won't carry over.
 
 ## 5. Data & storage
 - **✓ proven — Firestore via REST** from the client with a public Web API key — security lives in

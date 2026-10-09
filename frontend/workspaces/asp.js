@@ -1951,7 +1951,7 @@ async function doAddRealPasskey(){
   render();
 }
 async function doRemoveRealPasskey(id){
-  const { error } = await supabaseClient.auth.passkey.delete({ id });
+  const { error } = await supabaseClient.auth.passkey.delete({ passkeyId: id }); // supabase-js expects passkeyId, not id
   if(error){ toast('Could not remove passkey: ' + error.message, 'system'); return; }
   toast('Passkey removed.', 'system');
   S.realPasskeys = null;
