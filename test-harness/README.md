@@ -9,7 +9,7 @@ deliberate for this project).
 Why Python and not Node/Playwright-JS: this dev machine has no `node`/`npm`/`brew` installed.
 `python3`/`pip3`/`venv` all work. Playwright's Python bindings are the exact same underlying
 browser-automation engine as the JS version — this was a tooling choice, not a capability
-tradeoff. See `AUDIT.md` finding #6 for the related discovery that `deploy/`'s Node-based scripts
+tradeoff. See `docs/archive/AUDIT.md` finding #6 for the related discovery that `deploy/`'s Node-based scripts
 have sat unused for the same reason.
 
 This only adds a dependency to `test-harness/` itself (its own venv) — `frontend/` stays exactly
@@ -133,6 +133,7 @@ than grepping the source to check.
 
 | File | Covers |
 |------|--------|
+| `test_contract_builder.py` | Contract Builder (Standard / Comedian / Multi-Performer / Creative templates): payee-profile autofill, boilerplate, line items + add-ons, tiered cancellation, live fee/deposit math, overtime/travel/discount rendering, reload persistence, schema migration. Plus the 2026-10-09 money fixes: approval is voided by any later change to client-facing terms (incl. Refresh from Lead), deposit % "0" uses the flat $ amount, multi-performer totals include every artist, Refresh from Lead keeps the contract's fee. |
 | `test_smoke.py` | Every admin role + every artist logs in for real, clicks every nav item, asserts no console errors and real content rendered. The baseline "is the app fundamentally broken" check. Also: External Events/Documents are absent from both menus for every admin, and the login screen hides the passkey button (email becomes primary) in a browser without WebAuthn. |
 | `test_mobile.py` | Same sweep at a real 390×844 viewport (`page.set_viewport_size` — no floor-size bug, unlike the `resize_window` MCP tool in interactive sessions), asserting no horizontal overflow anywhere. |
 | `test_core_flows.py` | A few real write-flows: create a lead, add a sticky-note board item, assign a project task to a person — each asserts the created state actually appears, not just "didn't crash." |

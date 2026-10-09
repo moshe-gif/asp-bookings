@@ -1,44 +1,91 @@
-# App Starter Kit — Engineering Guide (CLAUDE.md)
+# ASP Bookings — Engineering Guide (CLAUDE.md)
 
-> This file is loaded into every Claude Code session for this project. It encodes the
-> owner's build style so a fresh session — on any machine, any git account, with no prior
-> memory — builds the same way. **Read Engineering Priorities + Security + PR Process before
-> planning any change.** Replace every `<PLACEHOLDER>` when you adopt this kit.
+> Loaded into every Claude Code session for this repo. It encodes the owner's build style so a
+> fresh session — on any machine, any git account, with no prior memory — builds the same way.
+> **Read Engineering Priorities + Security + PR Process before planning any change.**
+> (This file started from the owner's generic "App Starter Kit" template; everything below the
+> facts section is the owner's standing rules. Where a generic rule names something this repo
+> doesn't have — a proxy, SFTP — the facts section wins.)
 
-## What this is
-A starting template for a single-author internal/ops web tool. Two deployables:
-- **Frontend:** one static `frontend/index.html` — **vanilla JS, no build step, no framework.**
-  Global `S` state object; `render()` rebuilds views via `innerHTML`; delegated `data-action`
-  handlers; `data-field`→form-model input mapping; `esc()` on ALL HTML interpolation. PWA
-  (manifest + icons + service worker). Data via a backend proxy and/or a hosted DB over REST.
-  **Exception, this app only (2026-09-11):** `frontend/` is now a thin `index.html` shell
-  (`shell.js`) plus per-workspace files (`workspaces/asp.js`, `workspaces/vox.js`), each a plain,
-  unbundled `<script src>` — still zero build step, zero framework, just more than one static
-  file. This exists because the app now hosts two independently-evolving company workspaces
-  (ASP, VOX) that must never require touching each other's code to change — see
-  `~/.claude/plans/eventual-snacking-globe.md` for the full rationale. Each workspace file keeps
-  the original single-file conventions (global `S`, `render()`/`innerHTML`, `data-action`,
-  `esc()`) internally; only the *file boundary* changed. Smaller single-purpose kit projects keep
-  the original one-file convention — this is the same kind of exception as "When to abandon 'no
-  build step'" below, just for modularity rather than tooling.
-- **Backend:** `backend/proxy.js` — Node, **no dependencies**. Holds all third-party API keys
-  server-side, gates every `/api/*` route behind verified auth, encrypts secrets at rest.
+## This repo — facts (keep current; last verified 2026-10-09)
+- **What it is:** ASP Bookings, the booking/ops app for ASP Management — live at
+  https://app.aspmgmt.com. GitHub `moshe-gif/asp-bookings` — **the repo is PUBLIC**, and so is
+  everything under `frontend/`. Never commit client personal data, bank/account numbers, secrets,
+  or an audit that describes unfixed security holes.
+- **Frontend:** `frontend/index.html` (24-line shell) + `frontend/styles.css` +
+  `frontend/workspaces/asp.js` (~8k lines, the whole ASP workspace) + `sw.js` + `manifest.json`.
+  Vanilla JS, no build step, no framework: global `S` state, `render()` rebuilds via `innerHTML`,
+  delegated `data-action` handlers, `data-form`/`data-field` binding, `esc()` on ALL interpolation.
+  `workspaces/vox.js` and a `shell.js` do **not** exist yet (planned second workspace; the
+  `window.Workspaces.asp` mount/unmount contract is still a stub).
+- **Deploy:** push to `main` → GitHub Actions (`.github/workflows/pages.yml`) → GitHub Pages
+  (custom domain via `frontend/CNAME`, HTTPS enforced). The owner wants changes auto-pushed, so
+  **a push is a production deploy** — run the harness first.
+- **Backend = Supabase** project `psgpxbkncuavlnpplykf`:
+  - Auth: passkeys + emailed one-time code (see INTEGRATIONS.md §4). Passkeys are bound to
+    `app.aspmgmt.com`. New staff are created in Supabase → Authentication → Add user; a trigger
+    (`link_new_user_to_roster`) links them to their `admin_users`/`artists` row by email.
+  - DB: `supabase/migrations/` — **applied by hand** in Supabase → SQL Editor, strictly in number
+    order; add an `-- Applied: <date>` header line when run. There is no migration ledger yet.
+  - Edge Functions: `supabase/functions/*` — deployed by pasting into the dashboard; JWT
+    verification is on except for OAuth callbacks/webhooks (see each `ops/*_SETUP.md`).
+    Secrets live in Edge Function secrets, never in the frontend.
+- **Where data lives today:** mostly in each browser's **localStorage** (`asp_mock_*` keys —
+  real data despite the name: events/gigs, contracts, payee profiles, projects, invoices, outside
+  bookings, documents, travel requests, pricing, org settings). Supabase tables exist for most of
+  these but are only partly written and mostly not read yet. Each office browser is its own copy:
+  never clear or "reset" localStorage, and never bump a storage key to reset data.
+- **Not used:** `backend/proxy.js` and `deploy/*.js` are unused starter-kit templates (never
+  deployed; the frontend makes no `/api/*` calls). Ignore the generic proxy/SFTP wording below.
+- **Tests:** `test-harness/` (Python Playwright, real browser) — runs against the **production**
+  Supabase project with dedicated `test-*@aspmgmt.com` accounts; see its README.
+- **Docs:** `INTEGRATIONS.md` (integration catalog + what's live), `WORKFLOWS.md`, `SETUP.md`,
+  `ops/*_SETUP.md` (one per integration). `docs/archive/` is historical — never execute it.
 
-Deploy = SFTP a single file up (`deploy/deploy-index.js` / `deploy-proxy.js`). Never hand-roll SFTP.
+Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM, push, PDF…)?
+**Read `INTEGRATIONS.md` first.** Pattern here: Edge Function + migration + `ops/<NAME>_SETUP.md`
++ Settings card + a harness spec.
 
-Wiring in any third-party capability (email, payments, maps, browser automation, scheduled jobs,
-LLM, push, PDF…)? **Read `INTEGRATIONS.md` first** — it catalogs every option with the proven
-picks and the gotchas already paid for.
+## Source-of-truth map (concept → owner today → target)
+| Concept | Owner today | Target |
+|---|---|---|
+| Gigs/events | localStorage per browser | Supabase `events` |
+| Contracts & versions | localStorage per browser | Supabase `contracts` / `contract_versions` |
+| Payee profiles (bank, Zelle, default fee) | localStorage + seed literals | Supabase `payee_profiles` (admin-only) |
+| Artist roster | `ARTISTS` seed + localStorage + Supabase `artists` | Supabase `artists` |
+| Admin roster | Supabase `admin_users` | same (key identity by uuid, not role) |
+| Event balance / artist payout | `eventBalance()` / `zelleBalance()` (derived) | same (rename to `artistPayout`) |
+| Contract money | `contractPaymentFigures()` (derived) | same |
+| Commission rate | literal `0.15` in 3 places | one `COMMISSION_RATE` |
+| Event statuses | `statusMeta()` + inline arrays | `EVENT_PIPELINE` + `STATUS_GROUPS` |
+| Views / nav | nav arrays + `pageTitle` + `renderView` + CSS hide-list | one `VIEWS` registry |
+| Brand / sender | Supabase `brand_config` via `getBrandConfig()` (+ legacy `DOC_BRANDS`) | `brand_config` |
+| Sign-in email template | `supabase/templates/signin-code.html` (pasted to dashboard) | same |
+| Schema | `supabase/migrations/` (hand-applied) | same + ledger |
 
-## Deploy discipline (learned the hard way)
-The deploy scripts OVERWRITE the live file with the local copy. If the live file was ever
-hot-patched in place (emergency fix applied directly on the server), a deploy from a stale local
-template silently regresses production. Rules:
-- Every change lands in the repo copy FIRST; hot patches on the server are an emergency measure
-  that must be back-ported to the repo the same day.
-- Before any backend deploy, diff the live file against the local one (download it or `ssh cat`);
-  investigate any difference you didn't write.
-- Take a dated server-side backup (`proxy.js.bak-YYYYMMDD`) before overwriting.
+## Conventions to reuse
+- `updateEvent(id, patch)` + `reportEventSave()` for event writes (concurrency check + visible
+  failure). Build a patch object; don't mutate `ev.*` first.
+- Derive, don't store (`eventBalance`, `contractPaymentFigures`).
+- Additive-defaults migrations for stored shapes (`migrateContract`, `migratePayeeProfiles`):
+  fill `undefined`, never overwrite user data.
+- Getter facades (`getContract`, `getPayeeProfile`, `getBrandConfig`) as strangler-fig seams.
+- `[key,label]` registries + lookup helpers (`PAYMENT_METHODS`) instead of inline lists.
+- Idempotency markers on multi-step side effects (`qboInvoiceId`, `calendarHoldsStatus`).
+- Dated "why" comments on non-obvious decisions.
+
+## Conventions being phased out (strangler-fig) — and how to live with them meanwhile
+- localStorage as the system of record → Supabase, one collection at a time. Meanwhile: never
+  clear it; never bump a key; additive migrations only.
+- Silent `catch(e){}` saves → report failures like `saveEvents()`.
+- Inline literals (`['booked','paid']`, `0.15`, "85%") → shared constants. Meanwhile: add no new ones.
+- The giant `switch(action)` / `pageTitle` / `renderView` chains / CSS nav hide-lists →
+  `ACTIONS` / `VIEWS` registries. Meanwhile: new entries go in a registry first.
+- Hand-rolled `fetch(.../functions/v1/...)` → one helper that requires a session.
+- Mock "sent/emailed" log lines → only log what actually happened.
+- "mock" / "Demo Mode" names on real data → accurate names via a read-old/write-new shim (don't
+  rename storage keys directly).
+- `fmtISO(new Date())` for "today" (UTC) → a local-date helper.
 
 ---
 
@@ -66,7 +113,7 @@ review its code (see PR Process step 5).** These are the owner's standing rules 
   server use nginx + Let's Encrypt with a force-HTTPS redirect + HSTS. See SETUP.md.
 - **Never trust the client.** The server validates everything. Any client-side gate (e.g. a PIN)
   is convenience only and must NOT be the real authorization boundary.
-- **Secrets live server-side only.** API keys never reach the browser — the proxy injects them.
+- **Secrets live server-side only.** API keys never reach the browser — here they live in Supabase Edge Function secrets.
   Encrypt sensitive tokens at rest (AES-256-GCM; key in a separate `0600` file or a secrets store).
 - **Gate every `/api/*` route** behind verified auth (e.g. a verified identity-provider ID token,
   signature-checked, with issuer/audience/expiry + an allowlist). Mark privileged routes admin-only.
@@ -122,4 +169,4 @@ routine choices, but explain the meaningful ones.
 6. Run the test harness (`test-harness/`, see the Testing section above) — always before the
    final commit+push, loop-fix until green — plus a real click-through of anything the harness
    doesn't cover yet.
-7. Verify live, then deploy via the deploy scripts.
+7. Commit + push to `main` (= deploy via GitHub Pages), then verify the change live on app.aspmgmt.com.
