@@ -1,9 +1,9 @@
 """
 Navigation/data-layer refactor, PR 12: ev.balance used to be a stored field that the Financials
 page's "All Jobs" table read raw, while its own "Artist Payouts — Gig Breakdown" table a few dozen
-lines above already computed zelleBalance(e) = price-commission + chargesTotal(e) -- two different
+lines above already computed artistPayout (formerly zelleBalance)(e) = price-commission + chargesTotal(e) -- two different
 Payout numbers for the same event on the same page whenever that event had a post-signing charge.
-zelleBalance() is now the one function both tables (and every other payout total in the app) read
+artistPayout() is now the one function both tables (and every other payout total in the app) read
 through. This reproduces the original bug scenario end to end and confirms both tables agree.
 
 Runs as admin_bookings.

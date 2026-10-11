@@ -54,7 +54,7 @@ Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM
 | Payee profiles (bank, Zelle, default fee) | localStorage + seed literals | Supabase `payee_profiles` (admin-only) |
 | Artist roster | `ARTISTS` seed + localStorage + Supabase `artists` | Supabase `artists` |
 | Admin roster | Supabase `admin_users` | same (key identity by uuid, not role) |
-| Event balance / artist payout | `eventBalance()` / `zelleBalance()` (derived) | same (rename to `artistPayout`) |
+| Event balance / artist payout | `eventBalance()` / `artistPayout()` (derived, next to each other) | same |
 | Contract money | `contractPaymentFigures()` (derived) | same |
 | Commission rate | literal `0.15` in 3 places | one `COMMISSION_RATE` |
 | Event statuses | `statusMeta()` + inline arrays | `EVENT_PIPELINE` + `STATUS_GROUPS` |

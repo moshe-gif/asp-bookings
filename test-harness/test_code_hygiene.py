@@ -55,3 +55,12 @@ def test_registered_actions_are_not_also_switch_cases():
     both = sorted(set(registered) & cases)
     assert not both, f"actions handled twice (registry wins, switch case is dead): {both}"
     assert len(registered) == len(set(registered)), "an action is registered twice"
+
+
+def test_the_two_dark_palettes_stay_identical():
+    css = (ASP_JS.parent.parent / "styles.css").read_text()
+    def decls(start):
+        i = css.index(start); j = css.index("{", i); k = css.index("}", j)
+        return sorted(x.strip() for x in css[j + 1:k].replace("\n", " ").split(";") if x.strip())
+    assert decls(':root:where(:not([data-theme="light"])){') == decls(':root[data-theme="dark"]{'), \
+        "styles.css: the system-dark and user-dark palettes differ — keep them identical"

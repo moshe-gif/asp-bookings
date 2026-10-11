@@ -18,6 +18,9 @@
   --font-body:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   --font-mono:ui-monospace,"SF Mono","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;
 }
+/* The dark palette appears twice -- once for "system is dark" (unless the user picked light) and once
+   for "user picked dark". CSS can't share one block between a media query and a selector, so
+   KEEP THESE TWO BLOCKS IDENTICAL (test_code_hygiene checks). */
 @media (prefers-color-scheme: dark){
   :root:where(:not([data-theme="light"])){
     color-scheme: dark;
@@ -46,21 +49,7 @@
   --shadow-sm:0 1px 3px rgba(0,0,0,.32); --shadow-md:0 16px 40px rgba(0,0,0,.42); --shadow-lg:0 24px 64px rgba(0,0,0,.5);
   --glass-sheen:rgba(255,255,255,.06); --glass-edge:rgba(255,255,255,.14);
 }
-:root[data-theme="light"]{
-  color-scheme: light;
-  --page:#EEEEF1; --surface:#FFFFFF; --surface-2:#F8F8FA; --surface-3:#E6E6EA;
-  --ink:#17171A; --ink-2:#67676D; --ink-3:#9A9AA1;
-  --border:#E1E1E6; --border-strong:#D1D1D8;
-  --accent:#4C6FA5; --accent-hover:#3D5C8C; --accent-wash:#E4EAF3; --accent-ink:#33517A;
-  --good:#1F8A54; --good-wash:#E5F5EC; --good-ink:#146B3F;
-  --warn:#C6860B; --warn-wash:#FFF2D6; --warn-ink:#8F5E0A;
-  --crit:#D64444; --crit-wash:#FDE9E9; --crit-ink:#A32E2E;
-  --cat-1:#5B7FA6; --cat-2:#5C8A6B; --cat-3:#B87F94; --cat-4:#AD8B57; --cat-5:#4F9488; --cat-6:#BC7355; --cat-7:#7A6FA0;
-  --shadow-sm:0 1px 3px rgba(20,20,26,.05),0 1px 1px rgba(20,20,26,.04);
-  --shadow-md:0 16px 40px rgba(20,20,26,.10),0 2px 8px rgba(20,20,26,.05);
-  --shadow-lg:0 24px 64px rgba(20,20,26,.16),0 4px 14px rgba(20,20,26,.06);
-  --glass-sheen:rgba(255,255,255,.55); --glass-edge:rgba(255,255,255,.75);
-}
+/* (A :root[data-theme="light"] block that repeated :root exactly was removed -- base :root IS the light theme.) */
 
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}

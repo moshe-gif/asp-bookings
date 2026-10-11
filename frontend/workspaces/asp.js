@@ -1541,7 +1541,7 @@ function zelleQrEmailBlock(ev, artist){
 // actually differs between the two.
 function clientNoticeEmailHtml(ev, artist, introHtml){
   const brand = getBrandConfig('asp');
-  const balance = zelleBalance(ev);
+  const balance = artistPayout(ev);
   return `<!doctype html><html><head><meta charset="utf-8"/><style>
     body{ margin:0; padding:24px; background:#F5F4EF; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#17171A; }
     .doc{ max-width:560px; margin:0 auto; background:#fff; padding:28px; border-radius:10px; }
@@ -1587,7 +1587,7 @@ function reminderIntroHtml(ev, artist, balance){
 async function doSendBookingConfirmationEmail(id){
   const ev = getEvent(id); if(!ev) return;
   const artist = artistById(ev.artistId);
-  const balance = zelleBalance(ev);
+  const balance = artistPayout(ev);
   const subject = `You're booked! — ${artist.name}, ${fmtDateShort(ev.date)}`;
   const intro = bookingConfirmationIntroHtml(ev, artist, balance);
   const html = clientNoticeEmailHtml(ev, artist, intro);
@@ -1607,7 +1607,7 @@ async function doSendBookingConfirmationEmail(id){
 async function doSendReminderEmail(id){
   const ev = getEvent(id); if(!ev) return;
   const artist = artistById(ev.artistId);
-  const balance = zelleBalance(ev);
+  const balance = artistPayout(ev);
   const subject = `Balance reminder — ${artist.name}, ${fmtDateShort(ev.date)}`;
   const intro = reminderIntroHtml(ev, artist, balance);
   const html = clientNoticeEmailHtml(ev, artist, intro);
@@ -1715,8 +1715,11 @@ function chargesTotal(ev){ return (ev.charges||[]).reduce((s,c)=>s+c.amount,0); 
 // own "Artist Payouts" table (and "payouts" vs. "owedTotal" a few lines apart on the very same
 // page) whenever an event had post-signing charges. eventBalance() replaces the stored field with
 // a pure derivation (the same formula the edit-handler already used) -- there is nothing left to
-// go stale. zelleBalance(), the one place that already got this right, now composes on top of it.
+// go stale. artistPayout(), the one place that already got this right, now composes on top of it.
 function eventBalance(ev){ return (ev.price||0) - (ev.commission||0); }
+// What the artist is owed for a gig: the balance after ASP's commission, plus any charges -- whatever
+// the payment method (was named zelleBalance, though it applies to cash/check too; 2026-10-09 audit 6.8).
+function artistPayout(ev){ return eventBalance(ev) + chargesTotal(ev); }
 // The standard ASP booking fee / commission. Single owner of the rate (it was a 0.15 literal in 3
 // places and "15%"/"85%" label text in 4 -- 2026-10-09 audit 3.8). Each gig still stores its own
 // ev.commission, which can differ (negotiated), so labels show the real figures, not this rate.
@@ -1730,7 +1733,7 @@ function sumByMonth(events, months, valueFn){
 }
 // Year-to-date by the date's own year (a date-only string parsed as a Date is UTC midnight, which
 // put Jan 1 payments in the previous year in US time zones).
-function ytdPayoutOf(events){ const year = todayISO().slice(0,4); return events.filter(e=>e.balanceReceived && String(e.balanceReceivedDate||'').slice(0,4)===year).reduce((s,e)=>s+zelleBalance(e),0); }
+function ytdPayoutOf(events){ const year = todayISO().slice(0,4); return events.filter(e=>e.balanceReceived && String(e.balanceReceivedDate||'').slice(0,4)===year).reduce((s,e)=>s+artistPayout(e),0); }
 
 let EVID = 1000;
 
@@ -2620,7 +2623,7 @@ function exportCSV(){
   const lines = [cols.join(',')];
   rows.sort((a,b)=>a.date.localeCompare(b.date)).forEach(e=>{
     const a = artistById(e.artistId); const sm = statusMeta(e);
-    lines.push([a.name, e.clientName, e.date, e.type, e.venue, e.city, e.state, e.price, chargesTotal(e), e.commission, zelleBalance(e), sm.label].map(csvEsc).join(','));
+    lines.push([a.name, e.clientName, e.date, e.type, e.venue, e.city, e.state, e.price, chargesTotal(e), e.commission, artistPayout(e), sm.label].map(csvEsc).join(','));
   });
   const blob = new Blob([lines.join('\r\n')], {type:'text/csv'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -2724,7 +2727,7 @@ function render(){
         ${isAdmin ? '' : renderArtistTopTabs()}
         <div class="topbar">
           <div style="display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;">
-            <button class="icon-btn hamburger-btn" data-action="open-mobile-menu" title="Menu">${ICO.menu}</button>
+            <button class="icon-btn hamburger-btn" data-action="open-mobile-menu" title="Menu" aria-label="Menu">${ICO.menu}</button>
             <h1 style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${pageTitle()}</h1>
           </div>
           <div style="display:flex;align-items:center;gap:10px;flex:none;">
@@ -2804,7 +2807,7 @@ function renderDayList(){
   const evs = S.events.filter(e=>e.date===iso && (isAdmin || e.artistId===S.user)).sort((a,b)=>a.time.localeCompare(b.time));
   return `<div class="overlay center" data-action="dayoverlay-close">
     <div class="modal" data-stop style="width:400px;">
-      <div class="sheet-head"><h2 style="font-size:1.1rem;">${fmtDate(iso)}</h2><button class="icon-btn" data-action="close-daylist">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.1rem;">${fmtDate(iso)}</h2><button class="icon-btn" data-action="close-daylist" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body" style="padding-top:8px;gap:2px;">
         ${evs.length? evs.map(e=>renderDayEventRow(e, isAdmin, 'open-event-from-day')).join('') : `<p style="color:var(--ink-3);font-size:13px;margin:0;">Nothing on this date.</p>`}
       </div>
@@ -2824,11 +2827,11 @@ function renderUserChip(){
   if(isAdminUser(S.user)){
     const u = adminById(S.user);
     return `<div class="user-chip"><span class="avatar" data-slot="0" style="background:var(--ink);color:var(--page);width:22px;height:22px;font-size:10px;">${esc(u.initials)}</span> <span class="chip-name">${esc(u.name)}</span>
-      <button class="icon-btn" data-action="logout" title="Switch user">${ICO.logout}</button></div>`;
+      <button class="icon-btn" data-action="logout" title="Switch user" aria-label="Switch user">${ICO.logout}</button></div>`;
   }
   const a = artistById(S.user);
   return `<div class="user-chip"><span class="avatar" data-slot="${a.slot}" style="width:22px;height:22px;font-size:10px;">${esc(a.initials)}</span> <span class="chip-name">${esc(a.name)}</span>
-    <button class="icon-btn" data-action="logout" title="Switch user">${ICO.logout}</button></div>`;
+    <button class="icon-btn" data-action="logout" title="Switch user" aria-label="Switch user">${ICO.logout}</button></div>`;
 }
 
 const MGMT_NAV_ITEMS = [
@@ -2904,7 +2907,7 @@ function renderArtistTopTabs(){
   return `<div class="artist-top-tabs">
   <div class="topbar" style="border-bottom:none;padding-bottom:0;">
     <div class="wordmark"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
-    <button class="icon-btn artist-settings-btn" data-action="nav" data-view="settings" title="Settings">${ICO.settings}</button>
+    <button class="icon-btn artist-settings-btn" data-action="nav" data-view="settings" title="Settings" aria-label="Settings">${ICO.settings}</button>
   </div>
   <div style="padding:0 28px;">
     <div class="tabbar">
@@ -2927,7 +2930,7 @@ function renderMobileMenu(isAdmin){
     <div class="mobile-menu-panel" data-stop>
       <div style="display:flex;align-items:center;justify-content:space-between;">
         <div class="wordmark"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
-        <button class="icon-btn" data-action="close-mobile-menu">${ICO.x}</button>
+        <button class="icon-btn" data-action="close-mobile-menu" aria-label="Close">${ICO.x}</button>
       </div>
       <div class="rail-nav">
         ${(isAdmin ? mgmtNavItemsFor(S.user) : ARTIST_NAV_ITEMS).map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span>${l}</a>`).join('')}
@@ -3006,7 +3009,7 @@ function renderRealPasskeySection(){
     ${list.length===0 ? `<p style="color:var(--ink-3);font-size:12.5px;margin:0 0 12px;">No passkeys yet on this account.</p>` : list.map(pk=>`<div class="passkey-row">
       <div class="passkey-ico">${ICO.key}</div>
       <div style="flex:1;min-width:0;"><strong style="font-size:13px;">${esc(pk.label)}</strong><br/><span style="font-size:11.5px;color:var(--ink-3);">${pk.addedAt?'Added '+fmtDateShort(pk.addedAt):''}</span></div>
-      <button class="icon-btn" data-action="remove-real-passkey" data-id="${esc(pk.id)}" title="Remove">${ICO.x}</button>
+      <button class="icon-btn" data-action="remove-real-passkey" data-id="${esc(pk.id)}" title="Remove" aria-label="Remove">${ICO.x}</button>
     </div>`).join('')}
     ${browserSupportsPasskeys() ? `<button class="btn btn-sm" style="margin-top:12px;" data-action="add-real-passkey">${ICO.plus} Add a passkey</button>` : `<p style="color:var(--ink-3);font-size:12px;margin:12px 0 0;">This browser can't use passkeys. Open ASP Bookings in Safari or Chrome to add one.</p>`}
   `;
@@ -3025,7 +3028,7 @@ function renderUsersDashboardCard(){
       <div><h4>${esc(u.name)} <span style="font-weight:400;color:var(--ink-3);">— ${esc(ADMIN_ROLE_LABELS[u.role]||u.role)}</span></h4><p>${esc(u.email)}</p></div>
       <span style="display:flex;align-items:center;gap:8px;flex:none;">
         <span class="pill ${u.user_id?'pill-good':''}">${u.user_id?'Active':'Invited'}</span>
-        <button class="icon-btn" data-action="open-edit-real-user" data-kind="admin" data-id="${u.id}" title="Edit">${ICO.pencil}</button>
+        <button class="icon-btn" data-action="open-edit-real-user" data-kind="admin" data-id="${u.id}" title="Edit" aria-label="Edit">${ICO.pencil}</button>
       </span>
     </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0 0 12px;">No office accounts yet.</p>`}
     <div class="u-label" style="margin:14px 0 6px;">Artists</div>
@@ -3033,7 +3036,7 @@ function renderUsersDashboardCard(){
       <div><h4>${esc(a.name)} <span style="font-weight:400;color:var(--ink-3);">— ${esc(a.role)}</span></h4><p>${esc(a.email)}</p></div>
       <span style="display:flex;align-items:center;gap:8px;flex:none;">
         <span class="pill ${a.user_id?'pill-good':''}">${a.user_id?'Active':'Invited'}</span>
-        <button class="icon-btn" data-action="open-edit-real-user" data-kind="artist" data-id="${a.id}" title="Edit">${ICO.pencil}</button>
+        <button class="icon-btn" data-action="open-edit-real-user" data-kind="artist" data-id="${a.id}" title="Edit" aria-label="Edit">${ICO.pencil}</button>
       </span>
     </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0;">No real artist accounts yet.</p>`}
     `}
@@ -3046,7 +3049,7 @@ function renderAddRealUserModal(){
   const artistRole = f.artistRole || 'Singer';
   return `<div class="overlay center" data-action="overlay-close-addrealuser">
     <div class="modal" data-stop data-form="addrealuser" style="width:420px;">
-      <div class="sheet-head"><h2 style="font-size:1.3rem;">Add Person</h2><button class="icon-btn" data-action="close-add-real-user">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">Add Person</h2><button class="icon-btn" data-action="close-add-real-user" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <div class="chip-row" style="margin-bottom:4px;">
           <button class="filter-chip ${kind==='artist'?'sel':''}" data-action="pick-real-user-kind" data-kind="artist">Artist</button>
@@ -3076,7 +3079,7 @@ function renderEditRealUserModal(){
   const artistRole = f.artistRole || 'Singer';
   return `<div class="overlay center" data-action="overlay-close-editrealuser">
     <div class="modal" data-stop data-form="edituser" style="width:420px;">
-      <div class="sheet-head"><h2 style="font-size:1.3rem;">Edit ${kind==='admin'?'Office':'Artist'} Account</h2><button class="icon-btn" data-action="close-edit-real-user">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">Edit ${kind==='admin'?'Office':'Artist'} Account</h2><button class="icon-btn" data-action="close-edit-real-user" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <div class="field"><label>Full Name</label><input data-field="name" value="${esc(f.name||'')}" placeholder="Full name" autofocus/></div>
         <div class="field"><label>Real Email</label><input type="email" data-field="email" value="${esc(f.email||'')}" placeholder="them@realdomain.com"/></div>
@@ -3107,7 +3110,7 @@ function renderSettingsPage(){
     ${st.passkeys.map(pk=>`<div class="passkey-row">
       <div class="passkey-ico">${ICO.key}</div>
       <div style="flex:1;min-width:0;"><strong style="font-size:13px;">${esc(pk.label)}</strong><br/><span style="font-size:11.5px;color:var(--ink-3);">Added ${fmtDateShort(pk.addedAt)}</span></div>
-      ${st.passkeys.length>1 ? `<button class="icon-btn" data-action="remove-passkey" data-id="${pk.id}" title="Remove">${ICO.x}</button>` : ''}
+      ${st.passkeys.length>1 ? `<button class="icon-btn" data-action="remove-passkey" data-id="${pk.id}" title="Remove" aria-label="Remove">${ICO.x}</button>` : ''}
     </div>`).join('')}
     <button class="btn btn-sm" style="margin-top:12px;" data-action="add-passkey">${ICO.plus} Add a passkey</button>
     `}
@@ -3221,7 +3224,7 @@ function renderRealSignIn(){
     </div></div>`;
   }
   return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
-    <button class="icon-btn chooser-back" data-action="close-real-signin">${ICO.chev('l')}</button>
+    <button class="icon-btn chooser-back" data-action="close-real-signin" aria-label="Close">${ICO.chev('l')}</button>
     ${loginWordmark()}
     <p style="color:var(--ink-2);font-size:13.5px;margin:16px 0 20px;">Enter your email and we'll send you a sign-in code.</p>
     <div class="field" data-form="realsignin" style="text-align:left;"><input id="realSignInEmailInput" type="email" data-field="realSignInEmail" value="${esc(f)}" placeholder="you@aspmanagement.com" autofocus/></div>
@@ -3315,7 +3318,7 @@ function renderOpenLeadsCard(events){
   `;
 }
 function subpageBack(){
-  return `<button class="icon-btn" data-action="nav" data-view="dashboard" title="Back to Dashboard" style="margin-bottom:14px;">${ICO.chev('l')}</button>`;
+  return `<button class="icon-btn" data-action="nav" data-view="dashboard" title="Back to Dashboard" style="margin-bottom:14px;" aria-label="Back to Dashboard">${ICO.chev('l')}</button>`;
 }
 function buildDailyDigestWhatsAppText(openLeads){
   const lines = [`Good morning! Here's today's follow-up list:`, ''];
@@ -3346,11 +3349,11 @@ function renderDailyDigestPage(){
   ${awaitingDeposit.length? `<div class="card card-pad" style="margin-bottom:20px;">${awaitingDeposit.map(e=>row(e, money(e.commission))).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
 
   <div class="section-head"><h2>Awaiting Final Payment (${awaitingBalance.length})</h2></div>
-  ${awaitingBalance.length? `<div class="card card-pad" style="margin-bottom:20px;">${awaitingBalance.map(e=>row(e, money(zelleBalance(e)))).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
+  ${awaitingBalance.length? `<div class="card card-pad" style="margin-bottom:20px;">${awaitingBalance.map(e=>row(e, money(artistPayout(e)))).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
 
   <div class="section-head"><h2>Payment Follow-Up — Alternative Method (${altPayment.length})</h2></div>
   <p style="font-size:11.5px;color:var(--ink-3);margin:-14px 0 8px;">Not on QuickBooks/Zelle — no automated reminder, follow up directly.</p>
-  ${altPayment.length? `<div class="card card-pad" style="margin-bottom:20px;">${altPayment.map(e=>row(e, `${paymentMethodLabel(e)} · ${money(e.depositReceived? zelleBalance(e) : e.commission)}`)).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
+  ${altPayment.length? `<div class="card card-pad" style="margin-bottom:20px;">${altPayment.map(e=>row(e, `${paymentMethodLabel(e)} · ${money(e.depositReceived? artistPayout(e) : e.commission)}`)).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
 
   <button class="btn btn-primary" data-action="copy-daily-digest">${ICO.share} Copy WhatsApp Message for Ilan (Open Leads)</button>
   `;
@@ -3367,7 +3370,7 @@ function renderInternationalPage(){
       <span style="cursor:pointer;" data-action="open-event" data-id="${e.id}"><strong>${esc(ae.name)}</strong> — ${esc(e.city)}, ${esc(e.state)}, ${fmtDateShort(e.date)}</span>
       <span style="display:flex;align-items:center;gap:10px;flex:none;">
         <span style="cursor:pointer;text-decoration:underline;" data-action="open-event" data-id="${e.id}">View</span>
-        <button class="icon-btn" data-action="dismiss-intl" data-id="${e.id}" title="Dismiss" style="width:22px;height:22px;">${ICO.x}</button>
+        <button class="icon-btn" data-action="dismiss-intl" data-id="${e.id}" title="Dismiss" style="width:22px;height:22px;" aria-label="Dismiss">${ICO.x}</button>
       </span></div>`;}).join('')}
   </div>`}
   `;
@@ -3428,9 +3431,9 @@ function renderCalendarPage(events, opts={}){
   const head = (label)=>`
     <div class="cal-head">
       <div class="cal-nav">
-        <button class="icon-btn" data-action="cal-prev">${ICO.chev('l')}</button>
+        <button class="icon-btn" data-action="cal-prev" aria-label="Previous">${ICO.chev('l')}</button>
         <strong style="font-family:var(--font-display);font-size:1.05rem;min-width:150px;text-align:center;">${label}</strong>
-        <button class="icon-btn" data-action="cal-next">${ICO.chev('r')}</button>
+        <button class="icon-btn" data-action="cal-next" aria-label="Next">${ICO.chev('r')}</button>
         <button class="btn btn-sm btn-ghost" data-action="cal-today">Today</button>
         ${opts.showBlockButton ? `<button class="btn btn-sm" data-action="open-block-time">${ICO.clock} Block Time</button>` : ''}
         ${modeToggle}
@@ -3450,7 +3453,7 @@ function renderCalendarPage(events, opts={}){
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:${evs.length?'6px':'0'};">
             <strong style="font-family:var(--font-display);">${d.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})}</strong>
             ${iso===todayIso?'<span class="pill pill-accent">Today</span>':''}
-            ${isAdmin? `<button class="icon-btn" data-action="quick-add-event" data-date="${iso}" title="Add event" style="margin-left:auto;width:26px;height:26px;">${ICO.plus}</button>`:''}
+            ${isAdmin? `<button class="icon-btn" data-action="quick-add-event" data-date="${iso}" title="Add event" style="margin-left:auto;width:26px;height:26px;" aria-label="Add event">${ICO.plus}</button>`:''}
           </div>
           ${evs.length? evs.map(e=>renderDayEventRow(e, isAdmin, 'open-event')).join('') : `<p style="color:var(--ink-3);font-size:12.5px;margin:0;">Nothing scheduled.</p>`}
         </div>`;
@@ -3504,7 +3507,7 @@ function renderCalendarPage(events, opts={}){
 // opts.asArtist (navigation/data-layer refactor PR 15): the artist-facing "My Gigs" table reused
 // this unchanged, including the office "Price" column -- e.unpaid? '-' : money(e.price) -- which
 // is the full CLIENT package price, not the artist's own fee. An artist should see their own net
-// (what zelleBalance() already computes correctly for Financials), never another number labeled
+// (what artistPayout() already computes correctly for Financials), never another number labeled
 // ambiguously as just "Price". Office call sites (showArtist:true dashboard/leads tables, the
 // admin's per-artist detail page) are unaffected -- only pass asArtist:true for an artist's own
 // session.
@@ -3518,7 +3521,7 @@ function renderEventTable(events, opts={}){
     <tbody>
       ${events.map(e=>{
         const a = artistById(e.artistId); const sm = statusMeta(e);
-        const amountCell = e.unpaid? '—' : money(opts.asArtist? zelleBalance(e) : e.price);
+        const amountCell = e.unpaid? '—' : money(opts.asArtist? artistPayout(e) : e.price);
         return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
           ${opts.showArtist?`<td data-label="Artist"><span style="display:flex;align-items:center;gap:7px;"><span class="avatar" data-slot="${a.slot}" style="width:22px;height:22px;font-size:9px;">${esc(a.initials)}</span>${esc(a.name)}</span></td>`:''}
           <td data-label="Client">${e.clientName? esc(e.clientName) : '—'}${e.needsReview? ` <span class="pill pill-warn" title="Imported from calendar -- not yet confirmed">Needs Review</span>` : ''}</td><td data-label="Type">${esc(e.type)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
@@ -3671,14 +3674,14 @@ function renderFinancialsPage(){
   const booked = filt.filter(e=>isConfirmed(e));
   const gross = booked.reduce((s,e)=>s+e.price,0);
   const commission = booked.reduce((s,e)=>s+e.commission,0);
-  const payouts = booked.reduce((s,e)=>s+zelleBalance(e),0);
+  const payouts = booked.reduce((s,e)=>s+artistPayout(e),0);
   const avg = booked.length ? Math.round(gross/booked.length) : 0;
   const openInvoices = CUSTOM_INVOICES.filter(i=>i.status==='open');
   const openInvoiceTotal = openInvoices.reduce((s,i)=>s+invoiceTotal(i),0);
   const payoutEligible = filt.filter(e=>e.balanceReceived);
   const owedToArtists = payoutEligible.filter(e=>!e.artistPaidOut);
-  const owedTotal = owedToArtists.reduce((s,e)=>s+zelleBalance(e),0);
-  const paidOutTotal = payoutEligible.filter(e=>e.artistPaidOut).reduce((s,e)=>s+zelleBalance(e),0);
+  const owedTotal = owedToArtists.reduce((s,e)=>s+artistPayout(e),0);
+  const paidOutTotal = payoutEligible.filter(e=>e.artistPaidOut).reduce((s,e)=>s+artistPayout(e),0);
 
   const months = lastNMonths(6);
   const monthlyGross = sumByMonth(booked, months, e=>e.price).map((val,i)=>({label: months[i].toLocaleDateString('en-US',{month:'short'}), val}));
@@ -3706,7 +3709,7 @@ function renderFinancialsPage(){
   <div class="section-head"><h2>Artist Payouts — Gig Breakdown (${payoutEligible.length})</h2></div>
   ${payoutEligible.length? `<div class="card u-scroll-x table-cards" style="margin-bottom:22px;"><table>
     <thead><tr><th>Artist</th><th>Client</th><th>Date</th><th>Fee</th><th>ASP Cut</th><th>Charges</th><th>Payout</th><th>Status</th><th></th></tr></thead>
-    <tbody>${payoutEligible.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const a=artistById(e.artistId); const amt=zelleBalance(e);
+    <tbody>${payoutEligible.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const a=artistById(e.artistId); const amt=artistPayout(e);
       return `<tr>
         <td data-label="Artist">${esc(a.name)}</td><td data-label="Client">${esc(e.clientName)}</td>
         <td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
@@ -3767,7 +3770,7 @@ function renderFinancialsPage(){
     <tbody>${booked.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const a=artistById(e.artistId); const sm=statusMeta(e);
       return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
         <td data-label="Artist">${esc(a.name)}</td><td data-label="Client">${esc(e.clientName)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
-        <td data-label="Price" class="u-mono">${money(e.price)}</td><td data-label="Commission" class="u-mono">${money(e.commission)}</td><td data-label="Payout" class="u-mono">${money(zelleBalance(e))}</td>
+        <td data-label="Price" class="u-mono">${money(e.price)}</td><td data-label="Commission" class="u-mono">${money(e.commission)}</td><td data-label="Payout" class="u-mono">${money(artistPayout(e))}</td>
         <td data-label="Status"><span class="pill ${sm.cls}">${esc(sm.label)}</span></td></tr>`;}).join('')}
     </tbody></table></div>
   `;
@@ -3836,7 +3839,7 @@ function renderOutsideBookingRemindersSection(b){
         <div class="field"><label>Due</label><input type="date" data-outside-reminder-field="${r.id}.dueAt" value="${r.dueAt?r.dueAt.slice(0,10):''}"/></div>
         <div class="field"><label>Owner</label><input data-outside-reminder-field="${r.id}.owner" value="${esc(r.owner||'')}" placeholder="e.g. Rivky"/></div>
         <div class="field" style="width:120px;"><label>Repeat (days)</label><input type="number" data-outside-reminder-field="${r.id}.recurrenceDays" value="${r.recurrenceDays||''}" placeholder="one-time"/></div>
-        <button class="icon-btn" data-action="remove-outside-booking-reminder" data-clause="${b.id}" data-id="${r.id}" title="Remove" style="flex:none;">${ICO.trash}</button>
+        <button class="icon-btn" data-action="remove-outside-booking-reminder" data-clause="${b.id}" data-id="${r.id}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
       </div>
       <input data-outside-reminder-field="${r.id}.notes" value="${esc(r.notes||'')}" placeholder="What's this reminder for?"/>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -3856,7 +3859,7 @@ function renderOutsideBookingDetailSheet(){
           <span class="pill pill-accent">External Event</span>
           <span class="pill ${b.status==='paid'?'pill-good':'pill-warn'}">${b.status==='paid'?'Paid':'Open'}</span>
         </div>
-        <button class="icon-btn" data-action="close-outside-booking-detail">${ICO.x}</button>
+        <button class="icon-btn" data-action="close-outside-booking-detail" aria-label="Close">${ICO.x}</button>
       </div>
       <div class="sheet-body">
         <div class="field-row">
@@ -3985,7 +3988,7 @@ function renderProjectFolderCard(p, opts={}){
         ${ICO.image}
         <input type="file" accept="image/*" data-action="upload-project-cover" data-id="${p.id}" style="display:none;"/>
       </label>` : ''}
-      ${p.coverImage && isAdmin? `<button class="icon-btn project-folder-cover-remove" data-action="remove-project-cover" data-id="${p.id}" title="Remove cover" style="width:24px;height:24px;">${ICO.x}</button>`:''}
+      ${p.coverImage && isAdmin? `<button class="icon-btn project-folder-cover-remove" data-action="remove-project-cover" data-id="${p.id}" title="Remove cover" style="width:24px;height:24px;" aria-label="Remove cover">${ICO.x}</button>`:''}
     </div>
     <div class="project-folder-body">
       ${opts.showArtist? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;"><span class="avatar" data-slot="${a?a.slot:0}" style="width:18px;height:18px;font-size:8px;">${a?a.initials:'—'}</span><span style="font-size:11px;color:var(--ink-2);">${a?esc(a.name):'General'}</span></div>`:''}
@@ -4071,7 +4074,7 @@ function renderBoardCard(pid, c){
   return `<div class="sticky-card" style="--card-accent:${boardCardColor(c.header)}">
     <div class="sticky-card-head">
       <input class="blend-input" data-action="set-board-card-header" data-id="${pid}" data-cardid="${c.id}" value="${esc(c.header)}" placeholder="Card title…" ${isAdmin?'':'readonly'}/>
-      ${isAdmin? `<button class="icon-btn" data-action="remove-board-card" data-id="${pid}" data-cardid="${c.id}" title="Remove card" style="width:24px;height:24px;flex:none;">${ICO.x}</button>`:''}
+      ${isAdmin? `<button class="icon-btn" data-action="remove-board-card" data-id="${pid}" data-cardid="${c.id}" title="Remove card" style="width:24px;height:24px;flex:none;" aria-label="Remove card">${ICO.x}</button>`:''}
     </div>
     <div class="sticky-card-items">
       ${items.length? items.map(it=>`<div class="sticky-card-item">
@@ -4081,7 +4084,7 @@ function renderBoardCard(pid, c){
     </div>
     ${isAdmin? `<div style="display:flex;gap:6px;margin-top:8px;">
       <input class="board-item-input" data-cardid="${c.id}" data-projectid="${pid}" placeholder="Type here…" style="flex:1;min-width:0;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc((S.newBoardItemText||{})[c.id]||'')}"/>
-      <button class="icon-btn" data-action="add-board-item" data-id="${pid}" data-cardid="${c.id}" style="width:28px;height:28px;flex:none;">${ICO.plus}</button>
+      <button class="icon-btn" data-action="add-board-item" data-id="${pid}" data-cardid="${c.id}" style="width:28px;height:28px;flex:none;" aria-label="Add item">${ICO.plus}</button>
     </div>` : ''}
   </div>`;
 }
@@ -4095,7 +4098,7 @@ function renderProjectDetail(){
   const backView = isAdmin ? 'projects' : 'a_projects';
 
   return `
-    <button class="icon-btn" data-action="nav" data-view="${backView}" title="Back to Projects" style="margin-bottom:14px;">${ICO.chev('l')}</button>
+    <button class="icon-btn" data-action="nav" data-view="${backView}" title="Back to Projects" style="margin-bottom:14px;" aria-label="Back to Projects">${ICO.chev('l')}</button>
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
       <span class="avatar" data-slot="${a?a.slot:0}" style="width:44px;height:44px;flex:none;">${a?a.initials:'—'}</span>
       <div style="min-width:0;flex:1;">
@@ -4189,7 +4192,7 @@ function renderProjectDetail(){
               <input type="checkbox" ${t.done?'checked':''} data-action="toggle-task" data-id="${p.id}" data-taskid="${t.id}" style="width:16px;height:16px;flex:none;"/>
               <span style="flex:1;min-width:120px;${t.done?'text-decoration:line-through;color:var(--ink-3);':''}">${esc(t.text)}</span>
               ${isAdmin? renderTaskAssigneeSelect(p,t) : renderAssigneeChip(p, t.assignedTo)}
-              ${isAdmin?`<button class="icon-btn" data-action="remove-task" data-id="${p.id}" data-taskid="${t.id}" style="width:24px;height:24px;">${ICO.x}</button>`:''}
+              ${isAdmin?`<button class="icon-btn" data-action="remove-task" data-id="${p.id}" data-taskid="${t.id}" style="width:24px;height:24px;" aria-label="Remove task">${ICO.x}</button>`:''}
             </div>`;
             }).join('') || `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">${S.taskAssigneeFilter? 'No tasks match this filter.' : 'No tasks yet.'}</p>`}
           </div>
@@ -4226,7 +4229,7 @@ function renderProjectDetail(){
           ${p.images.length? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px;">
             ${p.images.map(img=>`<div style="position:relative;">
               <a href="${safeDataUrl(img.dataUrl)}" target="_blank" rel="noopener" style="display:block;aspect-ratio:1;border-radius:8px;overflow:hidden;border:1px solid var(--border);"><img src="${safeDataUrl(img.dataUrl)}" alt="${esc(img.name)}" style="width:100%;height:100%;object-fit:cover;"/></a>
-              <button class="icon-btn" data-action="remove-project-image" data-id="${p.id}" data-imgid="${img.id}" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.55);color:#fff;width:22px;height:22px;">${ICO.x}</button>
+              <button class="icon-btn" data-action="remove-project-image" data-id="${p.id}" data-imgid="${img.id}" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.55);color:#fff;width:22px;height:22px;" aria-label="Remove image">${ICO.x}</button>
             </div>`).join('')}
           </div>` : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 20px;">No images yet.</p>`}
 
@@ -4235,7 +4238,7 @@ function renderProjectDetail(){
             ${p.links.length? p.links.map(l=>`<div class="log-item" style="align-items:center;">
               <span class="log-ico">${ICO.share}</span>
               <a href="${esc(l.url)}" target="_blank" rel="noopener" style="flex:1;color:var(--accent);text-decoration:none;font-size:12.5px;word-break:break-all;">${esc(l.label||l.url)}</a>
-              <button class="icon-btn" data-action="remove-project-link" data-id="${p.id}" data-linkid="${l.id}" style="width:24px;height:24px;">${ICO.x}</button>
+              <button class="icon-btn" data-action="remove-project-link" data-id="${p.id}" data-linkid="${l.id}" style="width:24px;height:24px;" aria-label="Remove project link">${ICO.x}</button>
             </div>`).join('') : `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No links yet.</p>`}
           </div>
           <div data-form="projectlink" style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -4257,7 +4260,7 @@ function renderProjectDetail(){
           <div class="log" style="margin-bottom:10px;">
             ${(p.financials.income||[]).length? p.financials.income.map(i=>`<div class="log-item" style="align-items:center;">
               <span style="flex:1;font-size:12.5px;">${esc(i.label)}</span><strong style="font-size:12.5px;">${money(i.amount)}</strong>
-              ${isAdmin?`<button class="icon-btn" data-action="remove-fin-item" data-id="${p.id}" data-kind="income" data-itemid="${i.id}" style="width:22px;height:22px;">${ICO.x}</button>`:''}
+              ${isAdmin?`<button class="icon-btn" data-action="remove-fin-item" data-id="${p.id}" data-kind="income" data-itemid="${i.id}" style="width:22px;height:22px;" aria-label="Remove fin item">${ICO.x}</button>`:''}
             </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0;">No income logged.</p>`}
           </div>
           ${isAdmin? `<div data-form="finincome" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px;">
@@ -4270,7 +4273,7 @@ function renderProjectDetail(){
           <div class="log" style="margin-bottom:10px;">
             ${(p.financials.expenses||[]).length? p.financials.expenses.map(i=>`<div class="log-item" style="align-items:center;">
               <span style="flex:1;font-size:12.5px;">${esc(i.label)}</span><strong style="font-size:12.5px;">${money(i.amount)}</strong>
-              ${isAdmin?`<button class="icon-btn" data-action="remove-fin-item" data-id="${p.id}" data-kind="expenses" data-itemid="${i.id}" style="width:22px;height:22px;">${ICO.x}</button>`:''}
+              ${isAdmin?`<button class="icon-btn" data-action="remove-fin-item" data-id="${p.id}" data-kind="expenses" data-itemid="${i.id}" style="width:22px;height:22px;" aria-label="Remove fin item">${ICO.x}</button>`:''}
             </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0;">No expenses logged.</p>`}
           </div>
           ${isAdmin? `<div data-form="finexpense" style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -4296,7 +4299,7 @@ function renderNewProjectModal(){
   const count = f.episodeCount || 2;
   return `<div class="overlay center" data-action="overlay-close-newproject">
     <div class="modal" data-stop data-form="newproject">
-      <div class="sheet-head"><h2 style="font-size:1.3rem;">${isBatch? 'New Recording Day' : 'New Project'}</h2><button class="icon-btn" data-action="close-new-project">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">${isBatch? 'New Recording Day' : 'New Project'}</h2><button class="icon-btn" data-action="close-new-project" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <div class="field"><label>Artist${isBatch?'':' (optional — leave unset for a general, non-gig project)'}</label>
           <div class="artist-pick">${ARTISTS.map(a=>`<div class="artist-opt ${f.artistId===a.id?'sel':''}" data-action="pick-project-artist" data-id="${a.id}">
@@ -4349,12 +4352,12 @@ function renderArtistDashboard(artistId){
 function renderArtistFinancials(artistId){
   const evs = eventsFor(artistId);
   const booked = evs.filter(e=>isConfirmed(e));
-  const totalPayout = booked.reduce((s,e)=>s+zelleBalance(e),0);
+  const totalPayout = booked.reduce((s,e)=>s+artistPayout(e),0);
   const avgPayout = booked.length ? Math.round(totalPayout/booked.length) : 0;
   const ytdPayout = ytdPayoutOf(evs);
 
   const months = lastNMonths(6);
-  const monthlyPayout = sumByMonth(booked, months, zelleBalance).map((val,i)=>({label: months[i].toLocaleDateString('en-US',{month:'short'}), val}));
+  const monthlyPayout = sumByMonth(booked, months, artistPayout).map((val,i)=>({label: months[i].toLocaleDateString('en-US',{month:'short'}), val}));
   const maxMonthly = Math.max(...monthlyPayout.map(m=>m.val),1);
 
   return `
@@ -4382,7 +4385,7 @@ function renderArtistFinancials(artistId){
     <tbody>${booked.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const sm=statusMeta(e);
       return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
         <td data-label="Client">${esc(e.clientName)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
-        <td data-label="Your Fee" class="u-mono">${money(zelleBalance(e))}</td>
+        <td data-label="Your Fee" class="u-mono">${money(artistPayout(e))}</td>
         <td data-label="Status"><span class="pill ${sm.cls}">${esc(sm.label)}</span></td></tr>`;}).join('')}
     </tbody></table></div>
   `;
@@ -4460,7 +4463,7 @@ function renderNewLeadModal(){
   const typeList = isInternal ? INTERNAL_EVENT_TYPES : EVENT_TYPES;
   return `<div class="overlay center" data-action="overlay-close">
     <div class="modal" data-stop data-form="lead">
-      <div class="sheet-head"><h2 style="font-size:1.3rem;">${isInternal?'New Internal Day':'New Lead'}</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">${isInternal?'New Internal Day':'New Lead'}</h2><button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <div class="chip-row">
           <button class="filter-chip ${!isInternal?'sel':''}" data-action="pick-booking-kind" data-kind="client">Client Booking</button>
@@ -4515,7 +4518,7 @@ function renderBlockTimeModal(){
   const allDay = f.allDay!==false;
   return `<div class="overlay center" data-action="overlay-close">
     <div class="modal" data-stop data-form="blocktime" style="width:380px;">
-      <div class="sheet-head"><h2 style="font-size:1.3rem;">Block Time</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">Block Time</h2><button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <p style="font-size:12px;color:var(--ink-3);margin:0;">Marks you unavailable — the office will see it and won't book you those dates.</p>
         <div class="field-row">
@@ -4552,7 +4555,7 @@ function renderAskAIModal(){
   ];
   return `<div class="overlay center" data-action="overlay-close">
     <div class="modal" data-stop data-form="askai" style="width:460px;display:flex;flex-direction:column;max-height:80vh;">
-      <div class="sheet-head"><h2 style="font-size:1.2rem;display:flex;align-items:center;gap:8px;">${ICO.sparkle} Ask AI</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.2rem;display:flex;align-items:center;gap:8px;">${ICO.sparkle} Ask AI</h2><button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button></div>
       <div style="flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px;">
         ${!history.length ? `
           <p style="font-size:12.5px;color:var(--ink-3);margin:0;">Ask about gigs, leads, or an artist's schedule.</p>
@@ -4566,7 +4569,7 @@ function renderAskAIModal(){
       </div>
       <div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;">
         <input id="askAIInput" data-field="query" value="${esc(f.query||'')}" placeholder="Ask a question…" style="flex:1;padding:9px 14px;border-radius:999px;border:1px solid var(--border-strong);background:var(--surface);font-size:16px;"/>
-        <button class="icon-btn" style="background:var(--accent);color:#fff;border-radius:50%;" data-action="submit-ask-ai" title="Send">${ICO.chev('r')}</button>
+        <button class="icon-btn" style="background:var(--accent);color:#fff;border-radius:50%;" data-action="submit-ask-ai" title="Send" aria-label="Send">${ICO.chev('r')}</button>
       </div>
     </div>
   </div>`;
@@ -4578,7 +4581,7 @@ function renderAddArtistModal(){
   const role = f.role || 'Singer';
   return `<div class="overlay center" data-action="overlay-close-addartist">
     <div class="modal" data-stop data-form="addartist" style="width:420px;">
-      <div class="sheet-head"><h2 style="font-size:1.3rem;">Add Artist</h2><button class="icon-btn" data-action="close-add-artist">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">Add Artist</h2><button class="icon-btn" data-action="close-add-artist" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <div class="field"><label>Full Name</label><input data-field="name" value="${esc(f.name||'')}" placeholder="Full name" autofocus/></div>
         <div class="field"><label>Role</label>
@@ -4591,7 +4594,6 @@ function renderAddArtistModal(){
   </div>`;
 }
 
-function zelleBalance(ev){ return eventBalance(ev) + chargesTotal(ev); }
 /* ============ PAYMENT METHOD (deposit exceptions) ============ */
 // Default is 'standard' (QuickBooks invoice for the deposit + Zelle for the balance, per
 // WORKFLOWS.md). No paymentMethod field at all means standard too -- undefined behaves as
@@ -4648,7 +4650,7 @@ function zellePaymentSentence(ev){
 }
 function zelleQrUrl(ev, artist, profile){
   const identifier = profile.zelle;
-  const zelleText = `Zelle payment to ${identifier} — ${money(zelleBalance(ev))} for ${artist.name} (${ev.type}, ${fmtDateShort(ev.date)})`;
+  const zelleText = `Zelle payment to ${identifier} — ${money(artistPayout(ev))} for ${artist.name} (${ev.type}, ${fmtDateShort(ev.date)})`;
   return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(zelleText)}`;
 }
 function renderZelleQrBlock(ev, artist){
@@ -4667,10 +4669,10 @@ function renderZelleQrBlock(ev, artist){
 function renderReminderPreview(){
   const ev = getEvent(S.eventId); if(!ev) return '';
   const artist = artistById(ev.artistId);
-  const balance = zelleBalance(ev);
+  const balance = artistPayout(ev);
   return `<div class="overlay center" data-action="overlay-close-reminderpreview">
     <div class="doc" data-stop style="width:440px;">
-      <div class="sheet-head"><h2 style="font-size:1.1rem;">Reminder Email Preview</h2><button class="icon-btn" data-action="close-reminder-preview">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.1rem;">Reminder Email Preview</h2><button class="icon-btn" data-action="close-reminder-preview" aria-label="Close">${ICO.x}</button></div>
       <div class="doc-body" style="padding:24px 26px 30px;">
         <div style="font-size:12.5px;line-height:1.6;margin-bottom:16px;">
           <div><strong>To:</strong> ${esc(ev.clientEmail)}</div>
@@ -4689,11 +4691,11 @@ function renderReminderPreview(){
 function renderBookingConfirmationPreview(){
   const ev = getEvent(S.eventId); if(!ev) return '';
   const artist = artistById(ev.artistId);
-  const balance = zelleBalance(ev);
+  const balance = artistPayout(ev);
   const busy = !!S.bookingConfirmationBusy;
   return `<div class="overlay center" data-action="overlay-close-bookingconfirmation">
     <div class="doc" data-stop style="width:440px;">
-      <div class="sheet-head"><h2 style="font-size:1.1rem;">Booking Confirmation</h2><button class="icon-btn" data-action="close-booking-confirmation">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.1rem;">Booking Confirmation</h2><button class="icon-btn" data-action="close-booking-confirmation" aria-label="Close">${ICO.x}</button></div>
       <div class="doc-body" style="padding:24px 26px 30px;">
         <div style="font-size:12.5px;line-height:1.6;margin-bottom:16px;">
           <div><strong>To:</strong> ${esc(ev.clientEmail)}</div>
@@ -4713,7 +4715,7 @@ function renderWelcomeEmailPreview(){
   const w = S.newArtistWelcome; if(!w) return '';
   return `<div class="overlay center" data-action="overlay-close-welcome">
     <div class="doc" data-stop style="width:480px;">
-      <div class="sheet-head"><h2 style="font-size:1.1rem;">${ICO.check} Artist Added</h2><button class="icon-btn" data-action="close-welcome">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.1rem;">${ICO.check} Artist Added</h2><button class="icon-btn" data-action="close-welcome" aria-label="Close">${ICO.x}</button></div>
       <div class="doc-body" style="padding:26px 28px 30px;">
         <p style="font-size:13px;color:var(--ink-2);margin:0 0 16px;"><strong style="color:var(--ink);">${esc(w.name)}</strong> was added to the roster with login <strong style="color:var(--ink);">${esc(w.email)}</strong>. A welcome email was sent:</p>
         <div class="card card-pad" style="background:var(--surface-2);">
@@ -4753,13 +4755,13 @@ function renderEventSheet(ev){
           <span class="pill ${sm.cls}">${esc(sm.label)}</span></div>
         </div>
         <div class="kebab-menu-wrap" style="display:flex;gap:4px;align-items:center;position:relative;">
-          ${isAdmin? `<button class="icon-btn" data-action="open-edit-event" title="Edit details">${ICO.edit}</button>`:''}
-          <button class="icon-btn" data-action="toggle-event-menu">${ICO.kebab}</button>
+          ${isAdmin? `<button class="icon-btn" data-action="open-edit-event" title="Edit details" aria-label="Edit details">${ICO.edit}</button>`:''}
+          <button class="icon-btn" data-action="toggle-event-menu" aria-label="Toggle event menu">${ICO.kebab}</button>
           ${S.showEventMenu? `<div class="kebab-dropdown">
             <button class="kebab-item" data-action="share-event" data-id="${ev.id}">${ICO.share} Share</button>
             <button class="kebab-item danger" data-action="delete-event" data-id="${ev.id}">${ICO.trash} Delete ${ev.unpaid?'Internal Day':ev.status==='lead'?'Lead':'Gig'}</button>
           </div>`:''}
-          <button class="icon-btn" data-action="close-sheet">${ICO.x}</button>
+          <button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button>
         </div>
       </div>
       <div class="sheet-body">
@@ -4788,7 +4790,7 @@ function renderEventSheet(ev){
             <span style="color:var(--ink-2);">Dress Code</span>
             <span style="display:flex;align-items:center;gap:6px;">
               <strong style="text-align:right;">${ev.dressCode? esc(ev.dressCode) : `<span style="color:var(--ink-3);font-weight:500;">${isAdmin?'Not set':'TBD'}</span>`}</strong>
-              ${isAdmin? `<button class="icon-btn" data-action="open-dresscode-form" style="width:20px;height:20px;" title="Edit dress code">${ICO.edit}</button>`:''}
+              ${isAdmin? `<button class="icon-btn" data-action="open-dresscode-form" style="width:20px;height:20px;" title="Edit dress code" aria-label="Edit dress code">${ICO.edit}</button>`:''}
             </span>
           </div>
           ${isAdmin && !ev.unpaid?`<div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;">${esc(ev.clientEmail)}<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.clientPhone)}</span></strong></div>`:''}
@@ -4800,7 +4802,7 @@ function renderEventSheet(ev){
         ${isInternational(ev) && !ev.intlOpportunityDismissed && !isPast(ev.date) ? `<div class="card card-pad" style="border-color:var(--accent);background:var(--accent-wash);">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
             <div style="display:flex;align-items:center;gap:8px;color:var(--accent-ink);font-weight:700;font-size:13px;">${ICO.plane} ${esc(a.name)} will be in ${esc(ev.city)}, ${esc(ev.state)}</div>
-            ${isAdmin?`<button class="icon-btn" data-action="dismiss-intl" data-id="${ev.id}" title="Dismiss" style="width:22px;height:22px;color:var(--accent-ink);flex:none;">${ICO.x}</button>`:''}
+            ${isAdmin?`<button class="icon-btn" data-action="dismiss-intl" data-id="${ev.id}" title="Dismiss" style="width:22px;height:22px;color:var(--accent-ink);flex:none;" aria-label="Dismiss">${ICO.x}</button>`:''}
           </div>
           ${isAdmin? `<p style="font-size:12.5px;color:var(--accent-ink);margin:6px 0 0;">Worth reaching out to contacts nearby — a good window to line up more bookings while ${esc(a.name.split(' ')[0])} is already out there.</p>` : `<p style="font-size:12.5px;color:var(--accent-ink);margin:6px 0 0;">Let the office know if you have contacts nearby — good window to add more bookings on this trip.</p>`}
         </div>` : ''}
@@ -4937,7 +4939,7 @@ function renderLedger(ev, isAdmin, opts={}){
   const extras = ev.charges||[];
   const extrasSum = chargesTotal(ev);
   const total = ev.price + extrasSum;
-  const artistTotal = zelleBalance(ev);
+  const artistTotal = artistPayout(ev);
   const compact = !!opts.compact;
   return `<div class="card card-pad" style="${compact?'padding:12px 14px;':''}">
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
@@ -4976,7 +4978,7 @@ function renderPrepSheets(ev, isAdmin){
         <span class="log-ico">${ICO.leads}</span>
         <span style="flex:1;">${esc(f.name)}<div class="log-time">Added ${fmtDateShort(f.uploadedAt)}</div></span>
         <a href="${safeDataUrl(f.dataUrl)}" target="_blank" rel="noopener" class="btn btn-sm">View</a>
-        ${isAdmin?`<button class="icon-btn" data-action="remove-prep" data-id="${ev.id}" data-prepid="${f.id}" title="Remove">${ICO.x}</button>`:''}
+        ${isAdmin?`<button class="icon-btn" data-action="remove-prep" data-id="${ev.id}" data-prepid="${f.id}" title="Remove" aria-label="Remove">${ICO.x}</button>`:''}
       </div>`).join('')}</div>` : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 ${isAdmin?'10px':'0'};">No prep sheets uploaded yet.</p>`}
     ${isAdmin? `<label class="btn btn-sm" style="cursor:pointer;display:inline-flex;">Upload File<input type="file" data-action="upload-prep" data-id="${ev.id}" multiple style="display:none;"/></label>` : ''}`;
 }
@@ -5031,7 +5033,7 @@ function renderGigInfoFormOverlay(){
   const cf = S.newGigContactForm;
   return `<div class="overlay center" data-action="giginfo-overlay-close">
     <div class="modal" data-stop data-form="giginfo" style="width:480px;">
-      <div class="sheet-head"><h2 style="font-size:1.2rem;">Gig Info Sheet</h2><button class="icon-btn" data-action="close-giginfo-form">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Gig Info Sheet</h2><button class="icon-btn" data-action="close-giginfo-form" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <div class="field"><label>Gig Info</label>
           <textarea data-field="text" rows="8" placeholder="Paste or write everything the artist needs to know — schedule, sound check, meal info, special requests...">${esc(f.text!==undefined?f.text:sheet.text)}</textarea>
@@ -5041,7 +5043,7 @@ function renderGigInfoFormOverlay(){
           ${contacts.length? `<div style="margin-bottom:8px;">${contacts.map(c=>`
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12.5px;padding:4px 0;">
               <span>${esc(c.name)}${c.role?` · ${esc(c.role)}`:''} ${c.phone?`— ${esc(c.phone)}`:''} ${c.email?`— ${esc(c.email)}`:''}</span>
-              <button class="icon-btn" data-action="remove-gig-contact" data-id="${ev.id}" data-contactid="${c.id}" title="Remove" style="width:20px;height:20px;">${ICO.x}</button>
+              <button class="icon-btn" data-action="remove-gig-contact" data-id="${ev.id}" data-contactid="${c.id}" title="Remove" style="width:20px;height:20px;" aria-label="Remove">${ICO.x}</button>
             </div>`).join('')}</div>` : ''}
           <div data-form="gigcontact" style="display:flex; gap:6px; padding:8px 0; border-top:1px dashed var(--border); align-items:flex-end; flex-wrap:wrap;">
             <div class="field" style="flex:1;min-width:100px;"><label style="font-size:10px;">Name</label><input data-field="name" value="${esc(cf.name||'')}" placeholder="Venue coordinator"/></div>
@@ -5065,8 +5067,8 @@ function renderGigInfoDoc(){
       <div class="sheet-head">
         <h2 style="font-size:1.1rem;">Gig Info Sheet</h2>
         <div style="display:flex;gap:6px;">
-          <button class="icon-btn" data-action="print-giginfo" title="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
-          <button class="icon-btn" data-action="close-giginfo-doc">${ICO.x}</button>
+          <button class="icon-btn" data-action="print-giginfo" title="Print / Save as PDF" aria-label="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
+          <button class="icon-btn" data-action="close-giginfo-doc" aria-label="Close">${ICO.x}</button>
         </div>
       </div>
       <div class="doc-body">
@@ -5129,7 +5131,7 @@ function renderFlightFormOverlay(){
   const f = S.flightForm;
   return `<div class="overlay center" data-action="flight-overlay-close">
     <div class="modal" data-stop data-form="flight" style="width:420px;">
-      <div class="sheet-head"><h2 style="font-size:1.2rem;">Flight Info</h2><button class="icon-btn" data-action="close-flight-form">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Flight Info</h2><button class="icon-btn" data-action="close-flight-form" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <div class="field"><label>Airline</label><input data-field="airline" value="${esc(f.airline||'')}" placeholder="Delta"/></div>
         <div class="field-row">
@@ -5158,7 +5160,7 @@ function renderTransportFormOverlay(){
   const f = S.transportForm;
   return `<div class="overlay center" data-action="transport-overlay-close">
     <div class="modal" data-stop data-form="transport" style="width:420px;">
-      <div class="sheet-head"><h2 style="font-size:1.2rem;">Ground Transport Info</h2><button class="icon-btn" data-action="close-transport-form">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Ground Transport Info</h2><button class="icon-btn" data-action="close-transport-form" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <div class="field"><label>Driver Name</label><input data-field="driverName" value="${esc(f.driverName||'')}" placeholder="Yossi K."/></div>
         <div class="field"><label>Driver Phone</label><input data-field="driverPhone" value="${esc(f.driverPhone||'')}" placeholder="(347) 555-1234"/></div>
@@ -5186,7 +5188,7 @@ function renderDressCodeFormOverlay(){
   const f = S.dressCodeForm;
   return `<div class="overlay center" data-action="dresscode-overlay-close">
     <div class="modal" data-stop data-form="dresscode" style="width:380px;">
-      <div class="sheet-head"><h2 style="font-size:1.2rem;">Dress Code</h2><button class="icon-btn" data-action="close-dresscode-form">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Dress Code</h2><button class="icon-btn" data-action="close-dresscode-form" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <div class="field"><label>Dress Code</label><input data-field="dressCode" value="${esc(f.dressCode||'')}" placeholder="e.g. Black tie, all black"/></div>
         <div class="chip-row">${DRESS_CODES.map(d=>`<button class="filter-chip" data-action="pick-dresscode" data-value="${esc(d)}">${esc(d)}</button>`).join('')}</div>
@@ -5203,7 +5205,7 @@ function renderEditEventFormOverlay(){
   const type = f.type!==undefined? f.type : ev.type;
   return `<div class="overlay center" data-action="editevent-overlay-close">
     <div class="modal" data-stop data-form="editevent">
-      <div class="sheet-head"><h2 style="font-size:1.3rem;">Edit ${ev.unpaid?'Internal Day':'Details'}</h2><button class="icon-btn" data-action="close-edit-event">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">Edit ${ev.unpaid?'Internal Day':'Details'}</h2><button class="icon-btn" data-action="close-edit-event" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <div class="field-row">
           ${!ev.unpaid? `<div class="field"><label>Client Name</label><input data-field="clientName" value="${esc(f.clientName!==undefined?f.clientName:(ev.clientName||''))}"/></div>`:''}
@@ -5249,7 +5251,7 @@ function renderNewInvoiceModal(){
   const total = items.reduce((s,it)=>s+(Number(it.amount)||0),0);
   return `<div class="overlay center" data-action="overlay-close">
     <div class="modal" data-stop data-form="newinvoice" style="width:440px;">
-      <div class="sheet-head"><h2 style="font-size:1.3rem;">New Invoice</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">New Invoice</h2><button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <p style="font-size:12px;color:var(--ink-3);margin:0;">For anything outside a gig booking — reimbursements, merch, extra fees. Branded as ASP, not tied to a specific event.</p>
         <div class="field-row">
@@ -5279,7 +5281,7 @@ function renderNewOutsideBookingModal(){
   const cut = Number(f.aspCut)||0;
   return `<div class="overlay center" data-action="overlay-close">
     <div class="modal" data-stop data-form="newoutsidebooking" style="width:440px;">
-      <div class="sheet-head"><h2 style="font-size:1.3rem;">New Outside Booking</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">New Outside Booking</h2><button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <p style="font-size:12px;color:var(--ink-3);margin:0;">For jobs that don't involve one of our own roster artists — an outside act we're coordinating or referring.</p>
         <div class="field"><label>Performer</label><input data-field="performerName" value="${esc(f.performerName||'')}" placeholder="Outside act's name"/></div>
@@ -5371,8 +5373,8 @@ function renderDocumentBuilderModal(){
     <div class="modal" data-stop data-form="document" style="width:560px;">
       <div class="sheet-head"><h2 style="font-size:1.3rem;">${isNew?'New Document':'Edit Document'}</h2>
         <div style="display:flex;gap:6px;">
-          ${!isNew? `<button class="icon-btn" data-action="print-document" title="Download as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>`:''}
-          <button class="icon-btn" data-action="close-sheet">${ICO.x}</button>
+          ${!isNew? `<button class="icon-btn" data-action="print-document" title="Download as PDF" aria-label="Download as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>`:''}
+          <button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button>
         </div>
       </div>
       <div class="sheet-body">
@@ -5427,7 +5429,7 @@ function renderDocumentDoc(doc){
   const brandInfo = DOC_BRANDS[doc.brand] || DOC_BRANDS.asp;
   return `<div class="overlay center" data-action="document-overlay-close">
     <div class="doc" data-stop>
-      <div class="sheet-head"><h2 style="font-size:1.1rem;">Document Preview</h2><button class="icon-btn" data-action="close-sheet">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.1rem;">Document Preview</h2><button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button></div>
       <div class="doc-body">
         <div class="doc-letterhead">
           ${doc.brand==='sing'
@@ -5463,8 +5465,8 @@ function renderInvoiceDoc(){
       <div class="sheet-head">
         <h2 style="font-size:1.1rem;">Invoice ${esc(inv.id)}</h2>
         <div style="display:flex;gap:6px;">
-          <button class="icon-btn" data-action="print-invoice" title="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
-          <button class="icon-btn" data-action="close-invoice-doc">${ICO.x}</button>
+          <button class="icon-btn" data-action="print-invoice" title="Print / Save as PDF" aria-label="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
+          <button class="icon-btn" data-action="close-invoice-doc" aria-label="Close">${ICO.x}</button>
         </div>
       </div>
       <div class="doc-body">
@@ -5512,8 +5514,8 @@ function renderContractDoc(){
       <div class="sheet-head">
         <h2 style="font-size:1.1rem;">${draft?'Draft Contract Preview':'Performance Agreement'}</h2>
         <div style="display:flex;gap:6px;">
-          <button class="icon-btn" data-action="print-contract" title="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
-          <button class="icon-btn" data-action="close-contract">${ICO.x}</button>
+          <button class="icon-btn" data-action="print-contract" title="Print / Save as PDF" aria-label="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
+          <button class="icon-btn" data-action="close-contract" aria-label="Close">${ICO.x}</button>
         </div>
       </div>
       <div class="doc-body" id="contractDocBody">
@@ -5584,7 +5586,7 @@ function renderContractDoc(){
         <div class="doc-section"><h3>Payment</h3>
           <p style="font-size:12.5px;line-height:1.7;margin:0;">
             <strong>Booking Fee</strong> (${money(ev.commission)}) — emailed as a QuickBooks invoice upon signing; pay by card or ACH directly from the invoice.<br/>
-            <strong>Balance</strong> (${money(zelleBalance(ev))}) — ${(zellePayeeFor(ev)||{}).identifier ? `Zelle to <span class="u-mono">${esc(zellePayeeFor(ev).identifier)}</span>` : 'by Zelle (the office will send the Zelle details)'}, due no later than the day of the event.<br/>
+            <strong>Balance</strong> (${money(artistPayout(ev))}) — ${(zellePayeeFor(ev)||{}).identifier ? `Zelle to <span class="u-mono">${esc(zellePayeeFor(ev).identifier)}</span>` : 'by Zelle (the office will send the Zelle details)'}, due no later than the day of the event.<br/>
             Prefer to pay by check? Contact <span class="u-mono">office@aspmgmt.com</span> to arrange.
           </p>
         </div>
@@ -5620,7 +5622,7 @@ function renderTemplatePickerModal(){
   const hasMultipleArtists = lead && (lead.additionalArtists||[]).length;
   return `<div class="overlay center" data-action="templatepicker-overlay-close">
     <div class="modal" data-stop style="width:420px;">
-      <div class="sheet-head"><h2 style="font-size:1.2rem;">Choose a Contract Template</h2><button class="icon-btn" data-action="close-template-picker">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Choose a Contract Template</h2><button class="icon-btn" data-action="close-template-picker" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body" style="display:flex;flex-direction:column;gap:10px;">
         <p style="font-size:12px;color:var(--ink-3);margin:0;">The template can't be changed once the contract is created.</p>
         ${hasMultipleArtists? `<p style="font-size:12px;color:var(--accent-ink);margin:0;background:var(--accent-wash);padding:8px 10px;border-radius:8px;">This lead has ${lead.additionalArtists.length+1} artists -- Multi-Performer / Package Agreement will pre-fill one line item per artist.</p>` : ''}
@@ -5650,7 +5652,7 @@ function renderFlightSegmentsSection(tr){
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
         <button class="btn btn-sm" data-action="check-segment-flight-status" data-id="${tr.id}" data-seg="${seg.id}" ${S.flightStatusBusy===seg.id?'disabled':''}>${S.flightStatusBusy===seg.id?'Checking…':'Check Status'}</button>
-        <button class="icon-btn" data-action="remove-flight-segment" data-id="${tr.id}" data-seg="${seg.id}" title="Remove">${ICO.x}</button>
+        <button class="icon-btn" data-action="remove-flight-segment" data-id="${tr.id}" data-seg="${seg.id}" title="Remove" aria-label="Remove">${ICO.x}</button>
       </div>
       ${seg.lastStatus? `<p style="font-size:11px;color:var(--ink-2);margin:0;">Last checked: <strong>${esc(seg.lastStatus)}</strong>${seg.lastStatusAt? ` (${fmtDateShort(seg.lastStatusAt.slice(0,10))})` : ''}</p>` : ''}
     </div>`).join('')}
@@ -5667,8 +5669,8 @@ function renderTravelRequestDetailSheet(){
       <div class="sheet-head">
         <div><h2 style="font-size:1.2rem;margin-bottom:4px;">Travel Request</h2><span class="pill ${tr.status==='draft'?'':'pill-good'}">${esc(travelRequestStatusLabel(tr.status))}</span></div>
         <div style="display:flex;gap:6px;">
-          <button class="icon-btn" data-action="delete-travel-request" data-id="${tr.id}" title="Delete">${ICO.trash}</button>
-          <button class="icon-btn" data-action="close-travel-request-detail">${ICO.x}</button>
+          <button class="icon-btn" data-action="delete-travel-request" data-id="${tr.id}" title="Delete" aria-label="Delete">${ICO.trash}</button>
+          <button class="icon-btn" data-action="close-travel-request-detail" aria-label="Close">${ICO.x}</button>
         </div>
       </div>
       <div class="sheet-body" style="display:flex;flex-direction:column;gap:10px;">
@@ -5716,7 +5718,7 @@ function renderSendContractConfirmModal(){
   const busy = !!S.sendContractBusy;
   return `<div class="overlay center" data-action="sendcontract-overlay-close">
     <div class="modal" data-stop data-form="sendcontract" style="width:420px;">
-      <div class="sheet-head"><h2 style="font-size:1.2rem;">Send Contract</h2><button class="icon-btn" data-action="close-send-contract-confirm" ${busy?'disabled':''}>${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Send Contract</h2><button class="icon-btn" data-action="close-send-contract-confirm" ${busy?'disabled':''} aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body" style="display:flex;flex-direction:column;gap:10px;">
         <div class="field"><label>To</label><input data-field="to" type="email" value="${esc(f.to||'')}" placeholder="client@email.com" ${busy?'disabled':''}/></div>
         <div class="field"><label>Subject</label><input data-field="subject" value="${esc(f.subject||'')}" ${busy?'disabled':''}/></div>
@@ -5746,7 +5748,7 @@ function renderVerifyDepositModal(){
   const f = S.verifyDepositForm||{};
   return `<div class="overlay center" data-action="verifydeposit-overlay-close">
     <div class="modal" data-stop data-form="verifydeposit" style="width:420px;">
-      <div class="sheet-head"><h2 style="font-size:1.2rem;">Verify Deposit &amp; Confirm Booking</h2><button class="icon-btn" data-action="close-verify-deposit">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Verify Deposit &amp; Confirm Booking</h2><button class="icon-btn" data-action="close-verify-deposit" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body" style="display:flex;flex-direction:column;gap:10px;">
         <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Automated payment matching isn't connected to this booking yet — record what you actually verified, so there's a real, queryable audit trail instead of a one-click guess.</p>
         <div class="field"><label>How was the deposit verified?</label>
@@ -5776,9 +5778,9 @@ function renderContractBuilderModal(){
           <span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span>
         </div>
         <div style="display:flex;gap:6px;">
-          <button class="icon-btn" data-action="view-contract-builder-doc" title="Preview &amp; Print">${ICO.leads}</button>
-          <button class="icon-btn" data-action="delete-contract" title="Delete">${ICO.trash}</button>
-          <button class="icon-btn" data-action="close-contract-builder">${ICO.x}</button>
+          <button class="icon-btn" data-action="view-contract-builder-doc" title="Preview &amp; Print" aria-label="Preview &amp; Print">${ICO.leads}</button>
+          <button class="icon-btn" data-action="delete-contract" title="Delete" aria-label="Delete">${ICO.trash}</button>
+          <button class="icon-btn" data-action="close-contract-builder" aria-label="Close">${ICO.x}</button>
         </div>
       </div>
       <div class="sheet-body">
@@ -5961,7 +5963,7 @@ function renderContractCancellationSection(c){
         <span style="font-size:12px;color:var(--ink-3);">days:</span>
         <input type="number" data-contract-field="tier.${t.id}.percent" value="${t.percent}" style="width:70px;"/>
         <span style="font-size:12px;color:var(--ink-3);">%</span>
-        <button class="icon-btn" data-action="remove-cancellation-tier" data-id="${t.id}" title="Remove" style="flex:none;">${ICO.trash}</button>
+        <button class="icon-btn" data-action="remove-cancellation-tier" data-id="${t.id}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
       </div>`).join('')}
       <button class="btn btn-sm" data-action="add-cancellation-tier" data-id="${c.id}">${ICO.plus} Add Tier</button>
     </div>` : ''}
@@ -6014,7 +6016,7 @@ function renderContractLineItemsSection(c){
         <div class="field" style="width:130px;"><label>Fee ($)</label><input type="number" data-contract-field="lineitem.${li.id}.fee" data-focus-key="lineitem.${li.id}.fee" data-live value="${li.fee||0}"/></div>
         <div class="field" style="width:170px;"><label>Overtime Rate</label><input data-contract-field="lineitem.${li.id}.overtimeRate" value="${esc(li.overtimeRate||'')}" placeholder="e.g. $150/musician/half hr"/></div>
         <div class="field" style="width:150px;"><label>Date (optional)</label><input type="date" data-contract-field="lineitem.${li.id}.date" value="${li.date||''}"/></div>
-        <button class="icon-btn" data-action="remove-line-item" data-id="${li.id}" title="Remove" style="flex:none;">${ICO.trash}</button>
+        <button class="icon-btn" data-action="remove-line-item" data-id="${li.id}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
       </div>
       <textarea data-contract-field="lineitem.${li.id}.notes" rows="2" placeholder="Notes for this night/set (e.g. who opens, set length, timing)" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(li.notes||'')}</textarea>
       <details>
@@ -6044,7 +6046,7 @@ function renderContractLineItemsSection(c){
     ${c.addOns.map(a=>`<div class="field-row" style="align-items:flex-end;">
       <div class="field"><label>Label</label><input data-contract-field="addon.${a.id}.label" data-focus-key="addon.${a.id}.label" value="${esc(a.label||'')}" placeholder="e.g. Custom Bandstands"/></div>
       <div class="field" style="width:130px;"><label>Amount ($)</label><input type="number" data-contract-field="addon.${a.id}.amount" data-focus-key="addon.${a.id}.amount" data-live value="${a.amount||0}"/></div>
-      <button class="icon-btn" data-action="remove-add-on" data-id="${a.id}" title="Remove" style="flex:none;">${ICO.trash}</button>
+      <button class="icon-btn" data-action="remove-add-on" data-id="${a.id}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
     </div>`).join('')}
   </div>`;
 }
@@ -6057,7 +6059,7 @@ function renderContractCustomClausesSection(c){
     ${c.customClauses.map(cc=>`<div style="display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--surface-2);border-radius:8px;">
       <div style="display:flex;gap:6px;align-items:center;">
         <input data-contract-field="customclause.${cc.id}.title" value="${esc(cc.title||'')}" placeholder="Clause title" style="flex:1;font-weight:700;font-size:12.5px;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);"/>
-        <button class="icon-btn" data-action="remove-custom-clause" data-id="${cc.id}" title="Remove" style="flex:none;">${ICO.trash}</button>
+        <button class="icon-btn" data-action="remove-custom-clause" data-id="${cc.id}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
       </div>
       <textarea data-contract-field="customclause.${cc.id}.body" rows="2" placeholder="Body text" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(cc.body||'')}</textarea>
     </div>`).join('')}
@@ -6071,9 +6073,9 @@ function docChrome(innerHtml, c){
       <div class="sheet-head">
         <h2 style="font-size:1.1rem;">Contract Preview</h2>
         <div style="display:flex;gap:6px;">
-          ${c ? `<button class="icon-btn" data-action="open-send-contract" data-id="${c.id}" title="Send Contract"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg></button>` : ''}
-          <button class="icon-btn" data-action="print-contract-builder" title="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
-          <button class="icon-btn" data-action="close-contract-builder-doc">${ICO.x}</button>
+          ${c ? `<button class="icon-btn" data-action="open-send-contract" data-id="${c.id}" title="Send Contract" aria-label="Send Contract"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg></button>` : ''}
+          <button class="icon-btn" data-action="print-contract-builder" title="Print / Save as PDF" aria-label="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
+          <button class="icon-btn" data-action="close-contract-builder-doc" aria-label="Close">${ICO.x}</button>
         </div>
       </div>
       <div class="doc-body">${innerHtml}</div>
@@ -6111,12 +6113,8 @@ function docBsdHeader(c){
 }
 function renderContractBuilderDoc(c){
   if(!c) return '';
-  if(c.template==='comedian') return renderComedianDoc(c);
-  if(c.template==='multiline') return renderMultilineDoc(c);
-  if(c.template==='creative') return renderCreativeDoc(c);
-  return renderStandardDoc(c);
+  return docChrome(contractDocContent(c), c);
 }
-function renderStandardDoc(c){ return docChrome(standardDocContent(c), c); }
 function standardDocContent(c){
   const profile = contractPayeeProfile(c, housePayeeProfile);
   const brand = getBrandConfig(c.brand);
@@ -6166,7 +6164,6 @@ function standardDocContent(c){
     ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
   `;
 }
-function renderComedianDoc(c){ return docChrome(comedianDocContent(c), c); }
 function comedianDocContent(c){
   const profile = contractPayeeProfile(c, housePayeeProfile);
   const brand = getBrandConfig(c.brand);
@@ -6221,7 +6218,6 @@ function comedianDocContent(c){
     ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
   `;
 }
-function renderMultilineDoc(c){ return docChrome(multilineDocContent(c), c); }
 function multilineDocContent(c){
   const profile = contractPayeeProfile(c, housePayeeProfile);
   const brand = getBrandConfig(c.brand);
@@ -6273,7 +6269,6 @@ function multilineDocContent(c){
     ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
   `;
 }
-function renderCreativeDoc(c){ return docChrome(creativeDocContent(c), c); }
 function creativeDocContent(c){
   const profile = contractPayeeProfile(c, airschnitzPayeeProfile);
   const brand = getBrandConfig(c.brand);
@@ -6322,11 +6317,12 @@ function creativeDocContent(c){
     ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
   `;
 }
+// Template key → its document body. The single dispatcher for both the on-screen doc and the
+// emailed HTML (there were two identical if-chains; 2026-10-09 audit 5.4, first step). A new
+// template adds one row here (plus its builder sections / defaults, still in the builder for now).
+const CONTRACT_DOC_CONTENT = { standard: standardDocContent, comedian: comedianDocContent, multiline: multilineDocContent, creative: creativeDocContent };
 function contractDocContent(c){
-  if(c.template==='comedian') return comedianDocContent(c);
-  if(c.template==='multiline') return multilineDocContent(c);
-  if(c.template==='creative') return creativeDocContent(c);
-  return standardDocContent(c);
+  return (CONTRACT_DOC_CONTENT[c.template] || standardDocContent)(c);
 }
 // Standalone HTML for the emailed copy -- inlined, hardcoded colors (not var(...), which many
 // email clients strip) since the recipient's inbox never loads styles.css. Mirrors the on-screen
@@ -6401,8 +6397,8 @@ function renderPayeeProfilesCard(){
         <div><h4>${esc(p.entityName)}</h4><p>${artist? `Default for ${esc(artist.name)}` : 'House profile (no specific artist)'}</p></div>
       </div>
       <div style="display:flex;gap:4px;">
-        <button class="icon-btn" data-action="open-payee-profile-form" data-id="${p.id}" title="Edit">${ICO.edit}</button>
-        <button class="icon-btn" data-action="delete-payee-profile" data-id="${p.id}" title="Delete">${ICO.trash}</button>
+        <button class="icon-btn" data-action="open-payee-profile-form" data-id="${p.id}" title="Edit" aria-label="Edit">${ICO.edit}</button>
+        <button class="icon-btn" data-action="delete-payee-profile" data-id="${p.id}" title="Delete" aria-label="Delete">${ICO.trash}</button>
       </div>
     </div>`; }).join('')}
   </div>`;
@@ -6645,7 +6641,7 @@ function renderPayeeProfileFormModal(){
   const editing = !!S.editingPayeeProfileId;
   return `<div class="overlay center" data-action="payeeprofileform-overlay-close">
     <div class="modal" data-stop data-form="payeeprofile" style="width:460px;">
-      <div class="sheet-head"><h2 style="font-size:1.3rem;">${editing?'Edit Payee Profile':'Add Payee Profile'}</h2><button class="icon-btn" data-action="close-payee-profile-form">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">${editing?'Edit Payee Profile':'Add Payee Profile'}</h2><button class="icon-btn" data-action="close-payee-profile-form" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <div class="field"><label>Entity Name</label><input data-field="entityName" value="${esc(f.entityName||'')}" placeholder="e.g. Baruch Levine Music Inc."/></div>
         <div class="field"><label>Default Artist (optional — blank = house profile)</label>
@@ -6706,8 +6702,8 @@ function renderItineraryDoc(){
       <div class="sheet-head">
         <h2 style="font-size:1.1rem;">Travel Itinerary</h2>
         <div style="display:flex;gap:6px;">
-          <button class="icon-btn" data-action="print-itinerary" title="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
-          <button class="icon-btn" data-action="close-itinerary">${ICO.x}</button>
+          <button class="icon-btn" data-action="print-itinerary" title="Print / Save as PDF" aria-label="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
+          <button class="icon-btn" data-action="close-itinerary" aria-label="Close">${ICO.x}</button>
         </div>
       </div>
       <div class="doc-body">
@@ -6954,7 +6950,7 @@ function doSaveEditEvent(id){
     ev.commission = Math.max(0, Number(f.commission)||0);
     if(ev.commission!==oldCommission) notes.push(`deposit changed from ${money(oldCommission)} to ${money(ev.commission)}`);
   }
-  // ev.balance is no longer a stored field (PR 12) -- eventBalance(ev)/zelleBalance(ev) derive it
+  // ev.balance is no longer a stored field (PR 12) -- eventBalance(ev)/artistPayout(ev) derive it
   // live from price/commission/charges on every read, so there's nothing to recompute here.
   if(!ev.unpaid && f.paymentMethod!==undefined){
     const oldMethod = ev.paymentMethod || 'standard';
@@ -7104,7 +7100,7 @@ function doMarkBalance(id){
 function doToggleArtistPaidOut(id){
   const ev = getEvent(id); if(!ev) return;
   const artistPaidOut = !ev.artistPaidOut;
-  logEvent(ev, artistPaidOut?'success':'system', artistPaidOut? `Marked paid out to ${artistById(ev.artistId).name} (${money(zelleBalance(ev))}).` : 'Payout unmarked.');
+  logEvent(ev, artistPaidOut?'success':'system', artistPaidOut? `Marked paid out to ${artistById(ev.artistId).name} (${money(artistPayout(ev))}).` : 'Payout unmarked.');
   if(reportEventSave(updateEvent(id, { artistPaidOut, artistPaidOutDate: artistPaidOut? todayISO() : null }), 'updating payout status')) toast(artistPaidOut? 'Marked paid out.' : 'Payout unmarked.', 'success');
   render();
 }
