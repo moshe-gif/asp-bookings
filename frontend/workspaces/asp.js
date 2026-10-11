@@ -53,6 +53,20 @@ function markLoader(heightPx){
   return `<span class="mark" style="height:${heightPx||16}px;"><i></i><i></i><i></i><i></i><i></i></span>`;
 }
 
+/* ============ LOCAL PERSISTENCE ============ */
+// Every collection still lives in this browser's localStorage (the only copy -- see CLAUDE.md).
+// persist() is the one write path for them: a full quota or blocked storage is reported to the
+// user instead of silently losing the change (was an empty catch in 10 save functions; 2026-10-09
+// audit 3.4). Returns {ok}.
+function persist(key, value, label){
+  try{ localStorage.setItem(key, JSON.stringify(value)); return { ok:true }; }
+  catch(e){
+    console.error('save failed', key, e);
+    try{ toast(`Could not save ${label||'your change'} — your browser storage may be full or unavailable. Back up your data (Settings) before continuing.`, 'system'); }catch(_){}
+    return { ok:false, error:e };
+  }
+}
+
 /* ============ SEED DATA ============ */
 function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
 const rng = mulberry32(88771);
@@ -71,7 +85,7 @@ let ARTISTS = [
 const artistById = (id)=>ARTISTS.find(a=>a.id===id);
 const ARTISTS_LS_KEY = 'asp_mock_artists_v1';
 function loadArtists(){ try{ const raw = localStorage.getItem(ARTISTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
-function saveArtists(){ try{ localStorage.setItem(ARTISTS_LS_KEY, JSON.stringify(ARTISTS)); }catch(e){} }
+function saveArtists(){ return persist(ARTISTS_LS_KEY, ARTISTS, 'the artist roster'); }
 { const saved = loadArtists();
   if(saved && saved.length){
     const canonical = {baruch:1, benny:2, moshe:3, yaakov:4, eli:7, dovie:6};
@@ -152,7 +166,7 @@ function seedProjects(){
 }
 const PROJECTS_LS_KEY = 'asp_mock_projects_v1';
 function loadProjects(){ try{ const raw = localStorage.getItem(PROJECTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
-function saveProjects(){ try{ localStorage.setItem(PROJECTS_LS_KEY, JSON.stringify(PROJECTS)); }catch(e){} }
+function saveProjects(){ return persist(PROJECTS_LS_KEY, PROJECTS, 'projects'); }
 let PROJECTS = loadProjects();
 if(!PROJECTS){ PROJECTS = seedProjects(); saveProjects(); }
 else {
@@ -211,7 +225,7 @@ function seedCustomInvoices(){
 }
 const INVOICES_LS_KEY = 'asp_mock_invoices_v1';
 function loadCustomInvoices(){ try{ const raw = localStorage.getItem(INVOICES_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
-function saveCustomInvoices(){ try{ localStorage.setItem(INVOICES_LS_KEY, JSON.stringify(CUSTOM_INVOICES)); }catch(e){} }
+function saveCustomInvoices(){ return persist(INVOICES_LS_KEY, CUSTOM_INVOICES, 'invoices'); }
 let CUSTOM_INVOICES = loadCustomInvoices();
 if(!CUSTOM_INVOICES){ CUSTOM_INVOICES = seedCustomInvoices(); saveCustomInvoices(); }
 else { INVID = CUSTOM_INVOICES.reduce((max,i)=>{ const n=parseInt(String(i.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, INVID); }
@@ -273,7 +287,7 @@ function seedOutsideBookings(){
 }
 const OUTSIDE_BOOKINGS_LS_KEY = 'asp_mock_outside_bookings_v1';
 function loadOutsideBookings(){ try{ const raw = localStorage.getItem(OUTSIDE_BOOKINGS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
-function saveOutsideBookings(){ try{ localStorage.setItem(OUTSIDE_BOOKINGS_LS_KEY, JSON.stringify(OUTSIDE_BOOKINGS)); }catch(e){} }
+function saveOutsideBookings(){ return persist(OUTSIDE_BOOKINGS_LS_KEY, OUTSIDE_BOOKINGS, 'external events'); }
 let OUTSIDE_BOOKINGS = loadOutsideBookings();
 if(!OUTSIDE_BOOKINGS){ OUTSIDE_BOOKINGS = seedOutsideBookings(); saveOutsideBookings(); }
 else {
@@ -318,7 +332,7 @@ function getBrandConfig(key){
 let DOCID = 1;
 const DOCUMENTS_LS_KEY = 'asp_mock_documents_v1';
 function loadDocuments(){ try{ const raw = localStorage.getItem(DOCUMENTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
-function saveDocuments(){ try{ localStorage.setItem(DOCUMENTS_LS_KEY, JSON.stringify(DOCUMENTS)); }catch(e){} }
+function saveDocuments(){ return persist(DOCUMENTS_LS_KEY, DOCUMENTS, 'documents'); }
 let DOCUMENTS = loadDocuments();
 if(!DOCUMENTS){
   // One-time migration: promote any doc saved on an outside booking (from before this was
@@ -355,7 +369,7 @@ const INTERNAL_EVENT_TYPES = ['Recording Day','Filming Day','Rehearsal','Studio 
 const PAYEE_PROFILES_LS_KEY = 'asp_mock_payee_profiles_v1';
 let PPID = 1;
 function loadPayeeProfiles(){ try{ const raw = localStorage.getItem(PAYEE_PROFILES_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
-function savePayeeProfiles(){ try{ localStorage.setItem(PAYEE_PROFILES_LS_KEY, JSON.stringify(PAYEE_PROFILES)); }catch(e){} }
+function savePayeeProfiles(){ return persist(PAYEE_PROFILES_LS_KEY, PAYEE_PROFILES, 'payee profiles'); }
 function blankBoilerplateDefaults(){
   return { mechitza:false, mechitzaWithDancingOnly:false, noSecularSongs:false, noMixedDancing:false, weatherReturnsDeposit:false,
     postponementCreditsReschedule:false, runOfShowApproval:false, bandSoundLightingApproval:false, adsGraphicsApproval:false,
@@ -538,13 +552,21 @@ const CONTRACTS_LS_KEY = 'asp_mock_contracts_v1';
 const CONTRACTS_SCHEMA_VERSION = 3;
 let CTID = 1;
 function loadContracts(){ try{ const raw = localStorage.getItem(CONTRACTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
-function saveContracts(){ try{ localStorage.setItem(CONTRACTS_LS_KEY, JSON.stringify(CONTRACTS)); }catch(e){} }
+function saveContracts(){ return persist(CONTRACTS_LS_KEY, CONTRACTS, 'contracts'); }
 // Additive-defaults migration, same convention as loadProjects() -- a versioned pass so future
 // field additions never drop an already-saved contract. A v1 record (the clause-library shape
 // shipped briefly this morning) has its old clauses/freeText folded into one customClauses entry
 // so nothing already saved is silently dropped, then is brought up to the current v2 shape.
+// A version snapshot is the contract as sent -- WITHOUT its own version history. Copying c whole
+// nested every earlier version (and its HTML) inside each new one, doubling the record per send
+// until storage filled up (2026-10-09 audit 3.3).
+function contractVersionSnapshot(c){
+  const { versions, _supabaseId, _migratedAt, ...terms } = c;
+  return JSON.parse(JSON.stringify(terms));
+}
 function migrateContract(c){
   let migrated = false;
+  (c.versions||[]).forEach(v=>{ if(v.snapshot && (v.snapshot.versions || v.snapshot._supabaseId || v.snapshot._migratedAt)){ delete v.snapshot.versions; delete v.snapshot._supabaseId; delete v.snapshot._migratedAt; migrated = true; } });
   if(c.schemaVersion === 1){
     const oldBits = [];
     (c.clauses||[]).forEach(cl=>{ if(cl.bodyText) oldBits.push(`${cl.title||'Clause'}: ${cl.bodyText}`); });
@@ -1221,12 +1243,12 @@ async function doSendContractEmail(){
     // possible once c._supabaseId exists -- never blocks the send itself if it fails.
     c.versions = c.versions || [];
     const versionNumber = c.versions.length + 1;
-    c.versions.push({ versionNumber, snapshot: JSON.parse(JSON.stringify(c)), renderedHtml: html, sentTo: to, sentAt: new Date().toISOString() });
+    c.versions.push({ versionNumber, snapshot: contractVersionSnapshot(c), renderedHtml: html, sentTo: to, sentAt: new Date().toISOString() });
     saveContracts();
     if(supabaseClient && c._supabaseId && session){
       try{
         await supabaseClient.from('contract_versions').insert({
-          contract_id: c._supabaseId, version_number: versionNumber, snapshot: c, rendered_html: html, sent_to: to, created_by: session.user.id,
+          contract_id: c._supabaseId, version_number: versionNumber, snapshot: contractVersionSnapshot(c), rendered_html: html, sent_to: to, created_by: session.user.id,
         });
       } catch(err){ console.error('contract_versions sync failed', c.id, err); }
     }
@@ -1340,7 +1362,7 @@ const adminById = (id)=>ADMIN_USERS.find(u=>u.id===id);
 // per-user getUserSettings() since this is an office-wide fact, not a personal preference.
 const ORG_SETTINGS_LS_KEY = 'asp_mock_org_settings_v1';
 function loadOrgSettings(){ try{ const raw = localStorage.getItem(ORG_SETTINGS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
-function saveOrgSettings(){ try{ localStorage.setItem(ORG_SETTINGS_LS_KEY, JSON.stringify(ORG_SETTINGS)); }catch(e){} }
+function saveOrgSettings(){ return persist(ORG_SETTINGS_LS_KEY, ORG_SETTINGS, 'office settings'); }
 let ORG_SETTINGS = loadOrgSettings();
 if(!ORG_SETTINGS) ORG_SETTINGS = { rivkyEmail:'' };
 if(ORG_SETTINGS.rivkyEmail===undefined) ORG_SETTINGS.rivkyEmail='';
@@ -1357,7 +1379,7 @@ if(ORG_SETTINGS.rivkyEmail===undefined) ORG_SETTINGS.rivkyEmail='';
 const TRAVEL_REQUESTS_LS_KEY = 'asp_mock_travel_requests_v1';
 let TRVID = 1;
 function loadTravelRequests(){ try{ const raw = localStorage.getItem(TRAVEL_REQUESTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
-function saveTravelRequests(){ try{ localStorage.setItem(TRAVEL_REQUESTS_LS_KEY, JSON.stringify(TRAVEL_REQUESTS)); }catch(e){} }
+function saveTravelRequests(){ return persist(TRAVEL_REQUESTS_LS_KEY, TRAVEL_REQUESTS, 'travel requests'); }
 let TRAVEL_REQUESTS = loadTravelRequests();
 if(!TRAVEL_REQUESTS) TRAVEL_REQUESTS = [];
 TRVID = TRAVEL_REQUESTS.reduce((m,t)=>Math.max(m, Number((t.id||'TRV-0').split('-')[1])||0), 0) + 1;
@@ -1631,7 +1653,7 @@ function seedPricing(){
   return p;
 }
 function loadPricing(){ try{ const raw = localStorage.getItem(PRICING_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
-function savePricing(){ try{ localStorage.setItem(PRICING_LS_KEY, JSON.stringify(PRICING)); }catch(e){} }
+function savePricing(){ return persist(PRICING_LS_KEY, PRICING, 'pricing'); }
 let PRICING = loadPricing();
 if(!PRICING) PRICING = seedPricing();
 ARTISTS.forEach(a=>{ if(!PRICING[a.id]) PRICING[a.id] = {}; EVENT_TYPES.forEach((type,i)=>{ if(!PRICING[a.id][type]) PRICING[a.id][type] = { hourlyRate: 300 + a.slot*35 + i*15, includedHours: 2 }; }); });
@@ -1724,7 +1746,10 @@ function gmailAuthorizeUrl(mailboxId){
 }
 
 /* ============ STATE ============ */
-const LS_KEY='asp_mock_state_v3'; // v3: gig list cleared 2026-10-07 -- bumping makes every browser drop its cached copy and reseed
+// NEVER bump this key to "reset" data: it silently discards every gig each browser holds (that
+// happened on 2026-10-07, when v2→v3 cleared the gigs). Use additive migrations, or Settings →
+// Back up / Restore. (The name says "mock" but this is real data -- see CLAUDE.md.)
+const LS_KEY='asp_mock_state_v3';
 let S = {
   user: null, // 'admin' or artist id
   view: 'dashboard',
@@ -1858,16 +1883,7 @@ function loadEvents(){
   try{ const raw = localStorage.getItem(LS_KEY); if(raw) return JSON.parse(raw); }catch(e){}
   return seedAll();
 }
-function saveEvents(){
-  try{ localStorage.setItem(LS_KEY, JSON.stringify(S.events)); return { ok:true }; }
-  catch(e){
-    // Was a silent catch(e){} before -- a full browser storage quota or private-mode block would
-    // lose the user's last change with zero feedback. Surface it instead of failing quietly.
-    console.error('saveEvents failed', e);
-    toast('Could not save — your browser storage may be full or unavailable. Your latest change was NOT saved.', 'system');
-    return { ok:false, error:e };
-  }
-}
+function saveEvents(){ return persist(LS_KEY, S.events, 'gigs'); }
 S.events = loadEvents();
 EVID = S.events.reduce((max,e)=>{ const n=parseInt(String(e.id).split('-')[1],10); return isNaN(n)? max : Math.max(max,n+1); }, EVID);
 
@@ -2200,7 +2216,7 @@ function setThemePref(pref){
 const SETTINGS_LS_KEY = 'asp_mock_settings_v1';
 function loadAllSettings(){ try{ const raw = localStorage.getItem(SETTINGS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return {}; }
 let ALL_SETTINGS = loadAllSettings();
-function saveAllSettings(){ try{ localStorage.setItem(SETTINGS_LS_KEY, JSON.stringify(ALL_SETTINGS)); }catch(e){} }
+function saveAllSettings(){ return persist(SETTINGS_LS_KEY, ALL_SETTINGS, 'your settings'); }
 function defaultUserSettings(){
   return {
     passkeys: [{id:'pk-'+randInt(1,999999), label:'This device', addedAt: todayISO()}],
@@ -2972,6 +2988,7 @@ function renderSettingsPage(){
 
   ${isAdmin ? renderZelleReviewQueueCard() : ''}
 
+  ${isAdmin ? renderBackupCard() : ''}
   ${isAdmin ? renderDataMigrationCard() : ''}
 
   ${isAdmin ? renderTravelSettingsCard() : ''}
@@ -6399,6 +6416,74 @@ function renderZelleReviewQueueCard(){
       </div>`}
   </div>`;
 }
+/* ---- Back up / Restore (2026-10-09 audit 3.1, first step) ----
+   Each office browser's localStorage is the ONLY copy of its business data. Back up downloads every
+   asp_* key as one JSON file (generated here, uploaded nowhere). Restore MERGES a file in: records
+   are added by id where this browser doesn't have them, nothing here is overwritten or deleted.
+   The same restore also imports a prepared gig file (same format) without putting client data in
+   the public code. */
+const LAST_BACKUP_LS_KEY = 'asp_last_backup_at';
+const BACKUP_FORMAT = 'asp-local-backup';
+function aspLocalKeys(){ const keys = []; for(let i=0;i<localStorage.length;i++){ const k = localStorage.key(i); if(k && k.startsWith('asp_') && k!==LAST_BACKUP_LS_KEY) keys.push(k); } return keys.sort(); }
+function doDownloadBackup(){
+  const data = {};
+  aspLocalKeys().forEach(k=>{ try{ data[k] = JSON.parse(localStorage.getItem(k)); }catch(e){ data[k] = localStorage.getItem(k); } });
+  const file = { format: BACKUP_FORMAT, formatVersion: 1, app: 'asp-bookings', appVersion: APP_VERSION, createdAt: new Date().toISOString(), data };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(file, null, 1)], { type:'application/json' }));
+  a.download = `asp-bookings-backup-${todayISO()}.json`; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 10000);
+  try{ localStorage.setItem(LAST_BACKUP_LS_KEY, new Date().toISOString()); }catch(e){}
+  toast('Backup downloaded — keep it somewhere safe (it contains client details).', 'success');
+  render();
+}
+// Pure merge plan: what restoring `file` would add to this browser. Arrays of {id} records merge by
+// id (only missing ids are added); any other value is restored only if this browser has none.
+function planRestore(file){
+  if(!file || file.format!==BACKUP_FORMAT || !file.data || typeof file.data!=='object') return { error:'That file isn\'t an ASP Bookings backup.' };
+  const steps = [];
+  Object.keys(file.data).filter(k=>k.startsWith('asp_') && k!==LAST_BACKUP_LS_KEY).forEach(k=>{
+    const incoming = file.data[k];
+    let local = null; try{ local = JSON.parse(localStorage.getItem(k)); }catch(e){ local = localStorage.getItem(k); }
+    if(Array.isArray(incoming) && incoming.every(x=>x && typeof x==='object' && x.id!==undefined)){
+      const have = new Set((Array.isArray(local)? local : []).map(x=>x.id));
+      const add = incoming.filter(x=>!have.has(x.id));
+      if(add.length) steps.push({ key:k, merged:(Array.isArray(local)? local : []).concat(add), added:add.length });
+    } else if(local===null || local===undefined){
+      steps.push({ key:k, merged:incoming, added:1, whole:true });
+    }
+  });
+  return { steps };
+}
+function doRestoreFromFile(fileObj){
+  if(!fileObj) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    let parsed; try{ parsed = JSON.parse(reader.result); }catch(e){ toast('That file isn\'t valid JSON.', 'system'); return; }
+    const plan = planRestore(parsed);
+    if(plan.error){ toast(plan.error, 'system'); return; }
+    if(!plan.steps.length){ toast('Nothing to restore — this browser already has everything in that file.', 'system'); return; }
+    const summary = plan.steps.map(st=> st.whole ? `• ${st.key}: restore (none here yet)` : `• ${st.key}: add ${st.added} record${st.added===1?'':'s'}`).join('\n');
+    if(!confirm(`Restore from "${fileObj.name}"?\n\nThis only ADDS what this browser doesn't have — nothing here is changed or deleted.\n\n${summary}`)) return;
+    for(const st of plan.steps){ const r = persist(st.key, st.merged, 'the restored data'); if(!r.ok) return; }
+    location.reload();
+  };
+  reader.readAsText(fileObj);
+}
+function renderBackupCard(){
+  let last = null; try{ last = localStorage.getItem(LAST_BACKUP_LS_KEY); }catch(e){}
+  const ageDays = last ? Math.floor((Date.now() - Date.parse(last)) / 86400000) : null;
+  const stale = ageDays===null || ageDays > 7;
+  return `<div class="card card-pad" style="margin-bottom:20px;">
+    <h3 style="margin-bottom:6px;">Back up &amp; restore this browser's data</h3>
+    <p style="font-size:12.5px;color:var(--ink-2);margin:0 0 10px;">Gigs, contracts, payee profiles and the rest are stored <strong>only in this browser</strong> on this computer for now. Clearing browser data or switching computers loses them unless you have a backup.</p>
+    <p style="font-size:12px;margin:0 0 12px;color:${stale?'var(--warn-ink)':'var(--ink-3)'};">${last ? `Last backup: ${esc(fmtDateShort(localISO(new Date(last))))}${stale?' — time for a new one':''}` : 'No backup yet from this browser.'}</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-sm btn-primary" data-action="download-backup">${ICO.check} Back up my data</button>
+      <label class="btn btn-sm" style="cursor:pointer;">Restore / import from file<input id="restoreFileInput" type="file" accept="application/json,.json" style="display:none;"/></label>
+    </div>
+  </div>`;
+}
 function renderDataMigrationCard(){
   const preview = S.migrationPreview;
   return `<div class="card card-pad" style="margin-bottom:20px;">
@@ -7562,6 +7647,8 @@ function bindGlobal(){
   }
   const realSignInEmailInput = document.getElementById('realSignInEmailInput');
   if(realSignInEmailInput) realSignInEmailInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doSendSignInCode(); } });
+  const restoreFileInput = document.getElementById('restoreFileInput');
+  if(restoreFileInput) restoreFileInput.addEventListener('change', e=>{ doRestoreFromFile(e.target.files && e.target.files[0]); e.target.value = ''; });
   const realSignInCodeInput = document.getElementById('realSignInCodeInput');
   if(realSignInCodeInput){
     realSignInCodeInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doVerifySignInCode(); } });
@@ -7580,6 +7667,7 @@ function bindGlobal(){
     if(action==='overlay-close' && e.target===t){ closeSheet(); return; }
     if(action==='overlay-close') return;
     switch(action){
+      case 'download-backup': doDownloadBackup(); break;
       case 'logout': if(S.realSession && supabaseClient) supabaseClient.auth.signOut(); S.user=null; S.realSession=null; S.realPasskeys=null; S.eventId=null; S.showNewLead=false; S.showMobileMenu=false; history.pushState(null,'',location.pathname+location.search); render(); break;
       case 'open-real-signin': S.showRealSignIn=true; S.realSignInSent=false; render(); break;
       case 'close-real-signin': S.showRealSignIn=false; S.realSignInSent=false; S.realSignInEmail=''; S.realSignInCode=''; render(); break;
