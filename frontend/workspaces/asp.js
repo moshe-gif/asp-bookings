@@ -1164,6 +1164,17 @@ function doRevokeContractApproval(id){
 }
 
 /* ---- Send Contract (real email, via the send-contract-email Supabase Edge Function) ---- */
+// A contract going out (really emailed, or marked sent/signed by hand when it went out another way)
+// moves its lead forward to contract_sent -- forward only, never back from booked/paid -- and records
+// it on the lead in the same guarded write. This is the only path into contract_sent now that the
+// event sheet's old button no longer fakes a send.
+function advanceLeadForContract(c, logText){
+  const lead = getEvent(c.leadId); if(!lead) return;
+  const entry = { ts:new Date().toISOString(), type:'system', text: logText };
+  const patch = { log: [...(lead.log||[]), entry] };
+  if(['lead','negotiating'].includes(lead.status)) patch.status = 'contract_sent';
+  reportEventSave(updateEvent(lead.id, patch), 'updating the lead for this contract');
+}
 async function doSendContractEmail(){
   const c = getContract(S.contractBuilderId); if(!c) return;
   if(!isContractApproved(c)){ toast(c.approvedAt ? 'Money/terms changed since this contract was approved — re-approve it before sending.' : 'Approve this contract for sending first — money/terms must be approved before it can go out.', 'system'); return; }
@@ -1201,6 +1212,8 @@ async function doSendContractEmail(){
       return;
     }
     if(c.status==='draft'){ c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); }
+    // The real send is what moves the lead along (only forward: lead/negotiating -> contract_sent).
+    advanceLeadForContract(c, `Contract ${c.id} emailed to ${to}.`);
     // Immutable snapshot of exactly what was sent (contract_versions, migration 0010) -- a contract
     // can be edited after sending; this is what proves what the client actually received on a given
     // date. Local mirror (c.versions) is always written so there's an audit trail even for contracts
@@ -1465,9 +1478,11 @@ function travelRequestEmailHtml(tr){
 // zelleProfileForEvent() resolution, so "never cross-send one artist's QR to another" holds here
 // exactly as it does in the in-app preview.
 function zelleQrEmailBlock(ev, artist){
-  const profile = zelleProfileForEvent(ev, artist);
-  const usingRealQr = !!(profile && profile.zelleQrDataUrl);
-  const label = (profile && (profile.zelleRecipientLabel || profile.zelle)) || artist.email;
+  const payee = zellePayeeFor(ev);
+  if(!payee) return '';
+  const profile = payee.profile;
+  const usingRealQr = !!profile.zelleQrDataUrl;
+  const label = payee.label;
   return `<div style="text-align:center;padding:16px;background:#F5F4EF;border-radius:10px;margin:16px 0;">
     <img src="${usingRealQr? profile.zelleQrDataUrl : zelleQrUrl(ev,artist,profile)}" alt="Zelle QR code" width="180" height="180" style="border-radius:8px;background:#fff;padding:8px;"/>
     <div style="font-size:11.5px;color:#67676D;margin-top:8px;">${esc(label)}</div>
@@ -1513,14 +1528,21 @@ async function sendClientNoticeEmail(ev, subject, html){
 // Fires automatically right after a deposit is marked received (doMarkDeposit) -- "after verified
 // payment... send an ASP-branded confirmation with balance + QR for the correct payee" (item 5).
 // Also reachable manually via a Resend button on the preview, per "manual resend + audit log."
+function bookingConfirmationIntroHtml(ev, artist, balance){
+  return `<p style="margin:0 0 8px;">Hi ${esc((ev.clientName||'').split(' ')[0])},</p>
+    <p style="margin:0 0 8px;">You're all set — ${esc(artist.name)} is booked for your ${esc(ev.type)} on ${esc(fmtDate(ev.date))} at ${esc(fmtTime(ev.time))}.</p>
+    <p style="margin:0 0 8px;">Remaining balance of ${money(balance)} is due before the event${isStandardPayment(ev)? zellePaymentSentence(ev) : ` (${esc(paymentMethodLabel(ev))})`}.</p>`;
+}
+function reminderIntroHtml(ev, artist, balance){
+  return `<p style="margin:0 0 8px;">Hi ${esc((ev.clientName||'').split(' ')[0])},</p>
+    <p style="margin:0 0 8px;">Just a reminder — the remaining balance of ${money(balance)} for ${esc(artist.name)}'s ${esc(ev.type)} on ${esc(fmtDate(ev.date))} is due${isStandardPayment(ev)? zellePaymentSentence(ev) : ` (${esc(paymentMethodLabel(ev))})`}.</p>`;
+}
 async function doSendBookingConfirmationEmail(id){
   const ev = getEvent(id); if(!ev) return;
   const artist = artistById(ev.artistId);
   const balance = zelleBalance(ev);
   const subject = `You're booked! — ${artist.name}, ${fmtDateShort(ev.date)}`;
-  const intro = `<p style="margin:0 0 8px;">Hi ${esc((ev.clientName||'').split(' ')[0])},</p>
-    <p style="margin:0 0 8px;">You're all set — ${esc(artist.name)} is booked for your ${esc(ev.type)} on ${esc(fmtDate(ev.date))} at ${esc(fmtTime(ev.time))}.</p>
-    <p style="margin:0 0 8px;">Remaining balance of ${money(balance)} is due before the event${isStandardPayment(ev)? ' via Zelle — scan the code below or send directly to '+esc(artist.email) : ` (${esc(paymentMethodLabel(ev))})`}.</p>`;
+  const intro = bookingConfirmationIntroHtml(ev, artist, balance);
   const html = clientNoticeEmailHtml(ev, artist, intro);
   S.bookingConfirmationBusy = true; render();
   const result = await sendClientNoticeEmail(ev, subject, html);
@@ -1540,8 +1562,7 @@ async function doSendReminderEmail(id){
   const artist = artistById(ev.artistId);
   const balance = zelleBalance(ev);
   const subject = `Balance reminder — ${artist.name}, ${fmtDateShort(ev.date)}`;
-  const intro = `<p style="margin:0 0 8px;">Hi ${esc((ev.clientName||'').split(' ')[0])},</p>
-    <p style="margin:0 0 8px;">Just a reminder — the remaining balance of ${money(balance)} for ${esc(artist.name)}'s ${esc(ev.type)} on ${esc(fmtDate(ev.date))} is due${isStandardPayment(ev)? ' via Zelle. Scan the code below or send to '+esc(artist.email) : ` (${esc(paymentMethodLabel(ev))})`}.</p>`;
+  const intro = reminderIntroHtml(ev, artist, balance);
   const html = clientNoticeEmailHtml(ev, artist, intro);
   S.reminderBusy = true; render();
   const result = await sendClientNoticeEmail(ev, subject, html);
@@ -2955,15 +2976,6 @@ function renderSettingsPage(){
 
   ${isAdmin ? renderTravelSettingsCard() : ''}
 
-  <div class="card card-pad" style="margin-bottom:20px;">
-    <h3 style="margin-bottom:12px;">Connected Accounts</h3>
-    <div class="settings-row" style="border-bottom:none;padding-bottom:0;">
-      <div><h4>Google Calendar</h4><p>${st.calendarConnected? `Connected as ${esc(st.calendarEmail)}` : 'Not connected'}</p></div>
-      ${st.calendarConnected
-        ? `<button class="btn btn-sm btn-ghost" data-action="disconnect-calendar">Disconnect</button>`
-        : `<button class="btn btn-sm btn-primary" data-action="connect-calendar">Connect</button>`}
-    </div>
-  </div>
 
   <div class="card card-pad" style="margin-bottom:20px;">
     <h3 style="margin-bottom:8px;">Notifications</h3>
@@ -4415,7 +4427,7 @@ function renderAddArtistModal(){
         <div class="field"><label>Role</label>
           <div class="chip-row">${ARTIST_ROLES.map(r=>`<button class="filter-chip ${role===r?'sel':''}" data-action="pick-artist-role" data-role="${r}">${r}</button>`).join('')}</div>
         </div>
-        <p style="font-size:12px;color:var(--ink-3);margin:0;">A login email and a "Welcome to ASP Management" message get generated automatically once you add them.</p>
+        <p style="font-size:12px;color:var(--ink-3);margin:0;">This adds them to the roster here. To give them a login, add them under Settings → Users → Add Person.</p>
         <button class="btn btn-primary btn-block" data-action="confirm-add-artist">Add Artist</button>
       </div>
     </div>
@@ -4451,15 +4463,43 @@ function zelleProfileForEvent(ev, artist){
   const profile = defaultPayeeProfileForArtist(ev.artistId);
   return (profile && profile.zelleActive!==false) ? profile : null;
 }
+// Who the client pays by Zelle (2026-10-09 audit 2.4) -- in order:
+//   1. the payee on the lead's latest sent/signed contract (what the client agreed to pay), else
+//   2. the artist's OWN payee profile.
+// Never the artist's app login email (not a Zelle address), and never a silent fallback to the
+// house or another artist's profile. null (→ client is told to contact the office) when that payee
+// has no active Zelle details. zellePayeeReason() explains a null to staff.
+function zellePayeeProfileFor(ev){
+  const sent = contractsForLead(ev.id).find(c=>c.status==='sent' || c.status==='signed');
+  return (sent && getPayeeProfile(sent.payeeProfileId)) || PAYEE_PROFILES.find(p=>p.artistId===ev.artistId) || null;
+}
+function zellePayeeFor(ev){
+  const profile = zellePayeeProfileFor(ev);
+  if(!profile || profile.zelleActive===false || !(profile.zelle || profile.zelleQrDataUrl)) return null;
+  return { identifier: profile.zelle || '', label: profile.zelleRecipientLabel || profile.zelle || '', profile };
+}
+function zellePayeeReason(ev){
+  const profile = zellePayeeProfileFor(ev);
+  if(!profile) return 'has no payee profile yet';
+  if(profile.zelleActive===false) return `has Zelle switched off on the "${profile.entityName||profile.displayName||'payee'}" profile`;
+  return `has no Zelle details on the "${profile.entityName||profile.displayName||'payee'}" profile`;
+}
+function zellePaymentSentence(ev){
+  const payee = zellePayeeFor(ev);
+  if(!payee) return ' via Zelle — please contact the office for the Zelle details';
+  return payee.identifier ? ' via Zelle — scan the code below or send directly to '+esc(payee.identifier) : ' via Zelle — scan the code below';
+}
 function zelleQrUrl(ev, artist, profile){
-  const identifier = (profile && profile.zelle) || artist.email;
+  const identifier = profile.zelle;
   const zelleText = `Zelle payment to ${identifier} — ${money(zelleBalance(ev))} for ${artist.name} (${ev.type}, ${fmtDateShort(ev.date)})`;
   return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(zelleText)}`;
 }
 function renderZelleQrBlock(ev, artist){
-  const profile = zelleProfileForEvent(ev, artist);
-  const usingRealQr = !!(profile && profile.zelleQrDataUrl);
-  const label = (profile && (profile.zelleRecipientLabel || profile.zelle)) || artist.email;
+  const payee = zellePayeeFor(ev);
+  if(!payee) return `<p style="font-size:12px;color:var(--warn-ink);background:var(--warn-wash);padding:10px 12px;border-radius:var(--r-md);margin:0;">${esc(artist.name)} ${esc(zellePayeeReason(ev))} — the client will be told to contact the office for Zelle details. Fix it in Settings → Payee Profiles.</p>`;
+  const profile = payee.profile;
+  const usingRealQr = !!profile.zelleQrDataUrl;
+  const label = payee.label;
   return `<div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px;background:var(--surface-2);border-radius:var(--r-md);">
     <img src="${usingRealQr? profile.zelleQrDataUrl : zelleQrUrl(ev,artist,profile)}" alt="Zelle QR code" width="180" height="180" style="border-radius:8px;background:#fff;padding:8px;"/>
     <span class="u-mono" style="font-size:11.5px;color:var(--ink-2);">${esc(label)}</span>
@@ -4479,8 +4519,7 @@ function renderReminderPreview(){
           <div><strong>To:</strong> ${esc(ev.clientEmail)}</div>
           <div><strong>Subject:</strong> Balance reminder — ${esc(artist.name)}, ${esc(fmtDateShort(ev.date))}</div>
           <hr style="border:none;border-top:1px solid var(--border);margin:10px 0;"/>
-          <p style="margin:0 0 8px;">Hi ${esc(ev.clientName.split(' ')[0])},</p>
-          <p style="margin:0 0 8px;">Just a reminder — the remaining balance of ${money(balance)} for ${esc(artist.name)}'s ${esc(ev.type)} on ${esc(fmtDate(ev.date))} is due${isStandardPayment(ev)? ' via Zelle. Scan the code below or send to '+esc(artist.email) : ` (${esc(paymentMethodLabel(ev))})`}.</p>
+          ${reminderIntroHtml(ev, artist, balance)}
           ${hasLocation(ev)? `<p style="margin:0 0 8px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:var(--accent);">Open in Maps</a></p>` : ''}
         </div>
         ${isStandardPayment(ev)? renderZelleQrBlock(ev, artist) : ''}
@@ -4503,10 +4542,8 @@ function renderBookingConfirmationPreview(){
           <div><strong>To:</strong> ${esc(ev.clientEmail)}</div>
           <div><strong>Subject:</strong> You're booked! — ${esc(artist.name)}, ${esc(fmtDateShort(ev.date))}</div>
           <hr style="border:none;border-top:1px solid var(--border);margin:10px 0;"/>
-          <p style="margin:0 0 8px;">Hi ${esc(ev.clientName.split(' ')[0])},</p>
-          <p style="margin:0 0 8px;">You're all set — ${esc(artist.name)} is booked for your ${esc(ev.type)} on ${esc(fmtDate(ev.date))} at ${esc(fmtTime(ev.time))}.</p>
+          ${bookingConfirmationIntroHtml(ev, artist, balance)}
           ${hasLocation(ev)? `<p style="margin:0 0 8px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:var(--accent);">Open in Maps</a></p>` : ''}
-          <p style="margin:0 0 8px;">Remaining balance of ${money(balance)} is due before the event${isStandardPayment(ev)? ' via Zelle — scan the code below or send directly to '+esc(artist.email) : ` (${esc(paymentMethodLabel(ev))})`}.</p>
         </div>
         ${isStandardPayment(ev)? renderZelleQrBlock(ev, artist) : ''}
         <button class="btn btn-primary btn-block" style="margin-top:14px;" data-action="resend-booking-confirmation" data-id="${ev.id}" ${busy?'disabled':''}>${busy?'Sending…':(ev.bookingConfirmationSentAt?'Resend':'Send')}</button>
@@ -4897,7 +4934,6 @@ function renderGigInfoDoc(){
 
         ${!sheet.text && !(sheet.contacts||[]).length? `<p style="font-size:13px;color:var(--ink-3);">No gig info added yet.</p>` : ''}
 
-        <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
       </div>
     </div>
   </div>`;
@@ -4907,7 +4943,7 @@ function renderGigInfoDoc(){
 function renderAdminActions(ev){
   const buttons=[];
   if(ev.status==='lead'||ev.status==='negotiating'){
-    buttons.push(`<button class="btn btn-primary btn-block" data-action="send-contract" data-id="${ev.id}">${ICO.mail} Send Contract + Invoice (${money(ev.commission)} booking fee)</button>`);
+    buttons.push(`<button class="btn btn-primary btn-block" data-action="send-contract" data-id="${ev.id}">${ICO.mail} ${contractsForLead(ev.id).some(c=>c.status!=='void') ? 'Review & Send Contract' : 'Create & Send Contract'}</button>`);
   }
   if(ev.status==='contract_sent'){
     buttons.push(`<button class="btn btn-primary btn-block" data-action="mark-deposit" data-id="${ev.id}">${ICO.check} Mark Booking Fee Received — Lock In Booking</button>`);
@@ -5261,7 +5297,6 @@ function renderDocumentDoc(doc){
           <div class="doc-sign-line"><strong>${esc(documentAttribution(doc))}</strong></div>
         </div>
 
-        <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
       </div>
     </div>
   </div>`;
@@ -5288,7 +5323,7 @@ function renderInvoiceDoc(){
         <div class="doc-sub">${esc(inv.id)} &middot; ${fmtDate(inv.createdAt)}</div>
 
         <div class="doc-parties">
-          <div class="doc-party"><h4>From</h4><p><strong>ASP Artist Management</strong><br/>office@aspmanagement.com</p></div>
+          <div class="doc-party"><h4>From</h4><p><strong>ASP Artist Management</strong><br/>office@aspmgmt.com</p></div>
           <div class="doc-party"><h4>Bill To</h4><p><strong>${esc(inv.clientName)}</strong><br/>${esc(inv.clientEmail)}</p></div>
         </div>
 
@@ -5301,10 +5336,9 @@ function renderInvoiceDoc(){
         ${inv.notes? `<div class="doc-section"><p style="font-size:12.5px;color:var(--ink-2);margin:0;">${esc(inv.notes)}</p></div>` : ''}
 
         <div class="doc-section"><h3>Payment</h3>
-          <p style="font-size:12.5px;line-height:1.7;margin:0;">Payment via QuickBooks invoice, Zelle, or check made out to ASP Artist Management. Contact <span class="u-mono">office@aspmanagement.com</span> with questions.</p>
+          <p style="font-size:12.5px;line-height:1.7;margin:0;">Payment via QuickBooks invoice, Zelle, or check made out to ASP Artist Management. Contact <span class="u-mono">office@aspmgmt.com</span> with questions.</p>
         </div>
 
-        <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
       </div>
     </div>
   </div>`;
@@ -5397,12 +5431,12 @@ function renderContractDoc(){
         <div class="doc-section"><h3>Payment</h3>
           <p style="font-size:12.5px;line-height:1.7;margin:0;">
             <strong>Booking Fee</strong> (${money(ev.commission)}) — emailed as a QuickBooks invoice upon signing; pay by card or ACH directly from the invoice.<br/>
-            <strong>Balance</strong> (${money(zelleBalance(ev))}) — Zelle to <span class="u-mono">${esc(artist.email)}</span>, due no later than the day of the event.<br/>
-            Prefer to pay by check? Contact <span class="u-mono">office@aspmanagement.com</span> to arrange.
+            <strong>Balance</strong> (${money(zelleBalance(ev))}) — ${(zellePayeeFor(ev)||{}).identifier ? `Zelle to <span class="u-mono">${esc(zellePayeeFor(ev).identifier)}</span>` : 'by Zelle (the office will send the Zelle details)'}, due no later than the day of the event.<br/>
+            Prefer to pay by check? Contact <span class="u-mono">office@aspmgmt.com</span> to arrange.
           </p>
         </div>
 
-        <div class="doc-foot">This is a mockup document for demonstration purposes. Payment link and Zelle details are sent with the live email.</div>
+        <div class="doc-foot">Payment link and Zelle details are sent with the live email.</div>
       </div>
     </div>
   </div>`;
@@ -6485,18 +6519,21 @@ function renderItineraryDoc(){
 
         ${!f && !g ? `<p style="font-size:13px;color:var(--ink-3);">No travel arranged yet.</p>` : ''}
 
-        <div class="doc-foot">This is a mockup document for demonstration purposes.</div>
       </div>
     </div>
   </div>`;
 }
 
 /* ============ ACTIONS ============ */
+// Event-sheet primary contract button. It used to send NOTHING while setting contract_sent,
+// logging "emailed" and toasting "sent" (2026-10-09 audit 2.5). Now it routes to the one real
+// send path: the lead's latest Contract Builder contract (or the template picker to create one).
+// The real send (doSendContractEmail) is what advances the lead to contract_sent.
 function doSendContract(id){
-  const ev = getEvent(id); ev.status='contract_sent';
-  const depositVia = isStandardPayment(ev) ? 'QuickBooks invoice' : paymentMethodLabel(ev);
-  logEvent(ev,'email',`Contract + ${money(ev.commission)} booking fee (via ${depositVia}) emailed to ${ev.clientEmail}.`);
-  toast(`Contract & invoice sent to ${ev.clientName}.`, 'email'); saveEvents(); openEvent(id);
+  const latest = contractsForLead(id).find(c=>c.status!=='void');
+  if(latest){ S.showContractBuilder = true; S.contractBuilderId = latest.id; }
+  else { S.showTemplatePicker = true; S.templatePickerLeadId = id; }
+  render();
 }
 function doMarkDeposit(id){
   const ev = getEvent(id); if(!ev) return;
@@ -6949,15 +6986,16 @@ function doAddArtist(){
   let uniq = id, n = 2;
   while(ARTISTS.some(a=>a.id===uniq)){ uniq = id + n; n++; }
   id = uniq;
-  const email = `${first}${last? '.'+last : ''}@aspmanagement.com`;
+  // No invented email and no "welcome email" (none was ever sent -- 2026-10-09 audit 2.5): this only
+  // adds a roster entry here. A real login is created via Users → Add Person + Supabase.
+  const email = '';
   const initials = (parts[0][0] + (parts[1]? parts[1][0] : '')).toUpperCase();
   const slot = (ARTISTS.length % 6) + 1;
   const role = ARTIST_ROLES.includes(S.addArtistForm.role) ? S.addArtistForm.role : 'Singer';
   const artist = {id, name, slot, initials, email, role};
   ARTISTS.push(artist); saveArtists();
   S.showAddArtist = false; S.addArtistForm = {};
-  S.newArtistWelcome = {name, email};
-  toast(`${name} added — welcome email sent to ${email}.`, 'email');
+  toast(`${name} added to the roster. To give them a login, add them under Settings → Users → Add Person.`, 'success');
   render();
 }
 function logProjectEvent(p, type, text){ p.log.push({ts:new Date().toISOString(), type, text}); }
@@ -7684,7 +7722,7 @@ function bindGlobal(){
       case 'contractbuilder-overlay-close': if(e.target===t){ S.showContractBuilder=false; S.contractBuilderId=null; render(); } break;
       case 'contract-refresh-from-lead': doRefreshContractFromLead(S.contractBuilderId); break;
       case 'delete-contract': doDeleteContract(S.contractBuilderId); break;
-      case 'set-contract-status': { const c=getContract(S.contractBuilderId); if(c){ c.status=t.getAttribute('data-status'); if(c.status==='signed' && !c.signedAt) c.signedAt=new Date().toISOString(); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
+      case 'set-contract-status': { const c=getContract(S.contractBuilderId); if(c){ c.status=t.getAttribute('data-status'); if(c.status==='signed' && !c.signedAt) c.signedAt=new Date().toISOString(); c.updatedAt=new Date().toISOString(); saveContracts(); if(c.status==='sent' || c.status==='signed') advanceLeadForContract(c, `Contract ${c.id} marked ${c.status} by hand (sent outside the app).`); } render(); break; }
       case 'approve-contract-for-sending': doApproveContractForSending(id); break;
       case 'revoke-contract-approval': doRevokeContractApproval(id); break;
       case 'pick-contract-overtime-interval': { const c=getContract(S.contractBuilderId); if(c){ c.overtime.interval=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
@@ -7804,8 +7842,6 @@ function bindGlobal(){
       case 'remove-passkey': { const st=getUserSettings(S.user); if(st.passkeys.length>1){ st.passkeys = st.passkeys.filter(pk=>pk.id!==id); saveAllSettings(); toast('Passkey removed.', 'system'); render(); } break; }
       case 'add-real-passkey': doAddRealPasskey(); break;
       case 'remove-real-passkey': doRemoveRealPasskey(id); break;
-      case 'connect-calendar': { const st=getUserSettings(S.user); const who=isAdminUser(S.user)?adminById(S.user):artistById(S.user); st.calendarConnected=true; st.calendarEmail=who.email; saveAllSettings(); toast('Google Calendar connected.', 'success'); render(); break; }
-      case 'disconnect-calendar': { const st=getUserSettings(S.user); st.calendarConnected=false; saveAllSettings(); toast('Google Calendar disconnected.', 'system'); render(); break; }
       case 'export-csv': exportCSV(); break;
       case 'filter-project-artist': S.projectArtistFilter = t.getAttribute('data-id'); render(); break;
       case 'open-project': navigate('project_detail', {projectId:id}); break;

@@ -6,11 +6,13 @@ harness's standing convention.
 
 Runs as admin_bookings (Contract Builder/admin-only actions are not visible to admin_ceo).
 """
-from helpers import login_as, collect_console_errors
+from helpers import login_as, collect_console_errors, mark_contract_sent_from_event_sheet
 
 
 def _create_lead_to_contract_sent(page, client_name):
-    """Real clicks: new lead -> Send Contract + Invoice. Lands the event in 'contract_sent'."""
+    """Real clicks: new lead -> contract button -> Contract Builder -> mark the contract Sent (the
+    "went out another way" path; a real email send advances the lead the same way). Lands the
+    event in 'contract_sent'. (Until 2026-10-09 the event-sheet button faked a send.)"""
     page.locator('[data-action="open-new-lead"]').click()
     page.locator('[data-action="pick-artist"][data-id="benny"]').click()
     page.locator('input[data-field="clientName"]').fill(client_name)
@@ -19,8 +21,8 @@ def _create_lead_to_contract_sent(page, client_name):
 
     sheet = page.locator(".sheet")
     assert sheet.is_visible(), "event sheet didn't open after submitting a lead"
-    page.locator('[data-action="send-contract"]').click()
-    assert "Contract Sent" in sheet.inner_text(), "lead didn't reach Contract Sent after Send Contract + Invoice"
+    mark_contract_sent_from_event_sheet(page)
+    assert "Contract Sent" in sheet.inner_text(), "lead didn't reach Contract Sent after marking its contract sent"
 
 
 def test_verify_deposit_button_present_alongside_existing_mark_deposit(live_server, page):

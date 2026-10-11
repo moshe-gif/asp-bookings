@@ -8,7 +8,7 @@ through. This reproduces the original bug scenario end to end and confirms both 
 
 Runs as admin_bookings.
 """
-from helpers import login_as, collect_console_errors
+from helpers import login_as, collect_console_errors, mark_contract_sent_from_event_sheet
 
 
 def test_all_jobs_and_artist_payouts_tables_agree_with_a_post_signing_charge(live_server, page):
@@ -28,7 +28,7 @@ def test_all_jobs_and_artist_payouts_tables_agree_with_a_post_signing_charge(liv
 
     # Lead -> contract_sent -> booked (deposit) -> balance received, so the event qualifies for
     # BOTH Financials tables ("All Jobs" = status booked/paid; "Artist Payouts" = balanceReceived).
-    page.locator('[data-action="send-contract"]').click()
+    mark_contract_sent_from_event_sheet(page)
     page.locator('[data-action="mark-deposit"]').click()
     page.locator('[data-action="close-booking-confirmation"]').click()
     page.locator('[data-action="mark-balance"]').click()
