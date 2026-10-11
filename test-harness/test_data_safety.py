@@ -7,7 +7,7 @@
 """
 import json
 
-from helpers import login_as, goto_nav, collect_console_errors, fake_gig, seed_events, EVENTS_LS_KEY
+from helpers import login_as, goto_nav, collect_console_errors, fake_gig, seed_events, EVENTS_LS_KEY, create_lead
 
 
 def _open_settings(page):
@@ -60,11 +60,7 @@ def test_stored_contract_versions_are_cleaned_of_nested_history(live_server, pag
     has_contract = page.evaluate("() => JSON.parse(localStorage.getItem('asp_mock_contracts_v1') || '[]').length > 0")
     if not has_contract:
         # Create one through the real UI so there is something to migrate.
-        page.locator('[data-action="open-new-lead"]').click()
-        page.locator('[data-action="pick-artist"][data-id="benny"]').click()
-        page.locator('input[data-field="clientName"]').fill("Snapshot Client")
-        page.locator('input[data-field="date"]').fill("2027-08-08")
-        page.locator('[data-action="submit-lead"]').click()
+        create_lead(page, "Snapshot Client", "2027-08-08", artist_id="benny")
         page.locator('[data-action="create-contract"]').click()
         page.locator('[data-action="pick-template-create"][data-template="standard"]').click()
         return test_stored_contract_versions_are_cleaned_of_nested_history(live_server, page)
@@ -78,9 +74,5 @@ def test_failed_save_is_reported_not_silent(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
     page.evaluate("() => { Storage.prototype.setItem = function(){ throw new DOMException('quota', 'QuotaExceededError'); }; }")
-    page.locator('[data-action="open-new-lead"]').click()
-    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
-    page.locator('input[data-field="clientName"]').fill("Quota Client")
-    page.locator('input[data-field="date"]').fill("2027-09-09")
-    page.locator('[data-action="submit-lead"]').click()
+    create_lead(page, "Quota Client", "2027-09-09", artist_id="benny")
     page.locator('#toasts .toast', has_text="Could not save").first.wait_for(state="visible", timeout=5000)

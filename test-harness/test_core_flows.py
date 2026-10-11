@@ -4,7 +4,7 @@ genuine end-to-end (real clicks, real typing, real re-render), not just "the pag
 
 All three run as admin_bookings, since these are admin-only actions today.
 """
-from helpers import login_as, goto_nav, collect_console_errors, create_project
+from helpers import login_as, goto_nav, collect_console_errors, create_project, create_lead
 
 
 def test_create_lead(live_server, page):
@@ -12,11 +12,7 @@ def test_create_lead(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
 
-    page.locator('[data-action="open-new-lead"]').click()
-    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
-    page.locator('input[data-field="clientName"]').fill("Test Harness Client")
-    page.locator('input[data-field="date"]').fill("2027-06-15")
-    page.locator('[data-action="submit-lead"]').click()
+    create_lead(page, "Test Harness Client", "2027-06-15", artist_id="benny")
 
     # doSubmitLead() opens the new event's sheet directly on success — assert it's really there.
     sheet = page.locator(".sheet")

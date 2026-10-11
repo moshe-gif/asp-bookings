@@ -245,3 +245,12 @@ def create_outside_booking(page, performer="Test Harness Outside Act", client="T
     modal.locator('input[data-field="aspCut"]').fill("400")
     modal.locator('[data-action="submit-outside-booking"]').click()
     page.wait_for_timeout(400)
+
+
+def create_lead(page, client_name, date, artist_id="benny"):
+    """New Lead modal → pick artist → client name + date → submit. Leaves the new lead's event sheet open."""
+    page.locator('[data-action="open-new-lead"]').click()
+    page.locator(f'[data-action="pick-artist"][data-id="{artist_id}"]').click()
+    page.locator('input[data-field="clientName"]').fill(client_name)
+    page.locator('input[data-field="date"]').fill(date)
+    page.locator('[data-action="submit-lead"]').click()

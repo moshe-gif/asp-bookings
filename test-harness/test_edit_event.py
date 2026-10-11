@@ -8,7 +8,7 @@ Creates a fresh lead first (rather than editing a seeded demo event) so the payo
 predictable -- a brand-new lead always starts with an empty charges list, so its displayed payout
 is exactly price*0.85, with no pre-existing "+ Add Charge" line to account for.
 """
-from helpers import login_as, collect_console_errors
+from helpers import login_as, collect_console_errors, create_lead
 
 
 def test_edit_event_updates_core_fields(live_server, page):
@@ -16,11 +16,7 @@ def test_edit_event_updates_core_fields(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
 
-    page.locator('[data-action="open-new-lead"]').click()
-    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
-    page.locator('input[data-field="clientName"]').fill("Original Client")
-    page.locator('input[data-field="date"]').fill("2027-06-15")
-    page.locator('[data-action="submit-lead"]').click()
+    create_lead(page, "Original Client", "2027-06-15", artist_id="benny")
 
     sheet = page.locator(".sheet")
     assert sheet.is_visible(), "event sheet didn't open after submitting a lead"

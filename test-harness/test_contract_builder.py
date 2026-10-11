@@ -8,15 +8,8 @@ Comedian contract with the No-Recording/credit-future cancellation defaults, a M
 with line items + add-ons matching the real Stein package numbers and its tiered cancellation
 schedule, live fee/deposit math, and reload persistence.
 """
-from helpers import login_as, goto_nav, collect_console_errors
+from helpers import login_as, goto_nav, collect_console_errors, create_lead
 
-
-def create_lead(page, client_name, date, artist_id="benny"):
-    page.locator('[data-action="open-new-lead"]').click()
-    page.locator(f'[data-action="pick-artist"][data-id="{artist_id}"]').click()
-    page.locator('input[data-field="clientName"]').fill(client_name)
-    page.locator('input[data-field="date"]').fill(date)
-    page.locator('[data-action="submit-lead"]').click()
 
 
 def create_contract_from_lead(page, template):

@@ -47,3 +47,11 @@ def test_no_variable_shadows_the_function_it_calls():
     # `const total = total(x)` throws ReferenceError (temporal dead zone) and blanks the whole page.
     hits = re.findall(r"\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*\1\s*\(", SRC)
     assert not hits, f"variables shadowing the function they call: {hits}"
+
+
+def test_registered_actions_are_not_also_switch_cases():
+    registered = re.findall(r"^registerAction\('([^']+)'", SRC, re.M)
+    cases = set(re.findall(r"^\s*case '([^']+)':", SRC, re.M))
+    both = sorted(set(registered) & cases)
+    assert not both, f"actions handled twice (registry wins, switch case is dead): {both}"
+    assert len(registered) == len(set(registered)), "an action is registered twice"

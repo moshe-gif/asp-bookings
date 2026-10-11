@@ -7547,6 +7547,21 @@ function doAskAI(){
   }, 550);
 }
 
+/* ============ ACTIONS REGISTRY (2026-10-09 audit 5.2, first step) ============
+   New data-action handlers register here instead of growing the big switch in bindGlobal: the
+   dispatcher checks ACTIONS first, then falls back to the switch. Migrate switch cases here one
+   feature at a time (test_code_hygiene guards against duplicate names either way).
+   Handler signature: ({ id, t, e }) -- id = data-id, t = the clicked [data-action] element. */
+const ACTIONS = {};
+function registerAction(name, fn){
+  if(ACTIONS[name]) console.error('registerAction: duplicate action', name);
+  ACTIONS[name] = fn;
+}
+registerAction('download-backup', ()=>doDownloadBackup());
+registerAction('oauth-connect', ({ id, t })=>doOAuthConnect(t.getAttribute('data-provider'), id));
+registerAction('remove-real-user', ()=>doRemoveRealUser());
+registerAction('retry-roster-link', ()=>{ supabaseClient.auth.getSession().then(({data:{session}})=>{ if(session) linkRealSessionToRoster(session); else { S.realSignInError = null; render(); } }); });
+
 /* ============ EVENT BINDING ============ */
 function bindGlobal(){
   const staleFlight = document.getElementById('flightOverlayHost');
@@ -7683,7 +7698,11 @@ function bindGlobal(){
       if(form==='task'){ S.newTaskText = el.value; return; }
       if(form==='comment'){ S.newCommentText = el.value; return; }
       const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, edituser:S.editRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm, payeeprofile:S.payeeProfileForm, sendcontract:S.sendContractForm, verifydeposit:S.verifyDepositForm, orgsettings:ORG_SETTINGS, gmailmailbox:S.newGmailMailboxForm };
-      const target = formTargets[form] || S.newLeadForm;
+      formTargets.lead = S.newLeadForm;
+      // A misspelled data-form used to write silently into the New Lead form (2026-10-09 audit 5.2).
+      // Fields with no data-form at all keep the old New-Lead default.
+      if(form && !formTargets[form]){ console.warn('data-field inside unknown data-form:', form, key); return; }
+      const target = form ? formTargets[form] : S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
       if(form==='orgsettings') saveOrgSettings();
       if(el.type==='checkbox') render();
@@ -7799,10 +7818,8 @@ function bindGlobal(){
     const id = t.getAttribute('data-id');
     if(action==='overlay-close' && e.target===t){ closeSheet(); return; }
     if(action==='overlay-close') return;
+    if(ACTIONS[action]){ ACTIONS[action]({ id, t, e }); return; }
     switch(action){
-      case 'download-backup': doDownloadBackup(); break;
-      case 'oauth-connect': doOAuthConnect(t.getAttribute('data-provider'), id); break;
-      case 'retry-roster-link': supabaseClient.auth.getSession().then(({data:{session}})=>{ if(session) linkRealSessionToRoster(session); else { S.realSignInError = null; render(); } }); break;
       case 'logout': doRealSignOut(); break;
       case 'open-real-signin': S.showRealSignIn=true; S.realSignInSent=false; render(); break;
       case 'close-real-signin': S.showRealSignIn=false; S.realSignInSent=false; S.realSignInEmail=''; S.realSignInCode=''; render(); break;
@@ -8101,7 +8118,6 @@ function bindGlobal(){
       case 'pick-artist-role': S.addArtistForm.role = t.getAttribute('data-role'); render(); break;
       case 'close-welcome': S.newArtistWelcome=null; render(); break;
       case 'overlay-close-welcome': if(e.target===t){ S.newArtistWelcome=null; render(); } break;
-      case 'remove-real-user': doRemoveRealUser(); break;
       case 'open-add-real-user': closeAllOverlays(); S.addRealUserForm={}; S.showAddRealUser=true; render(); break;
       case 'close-add-real-user': S.showAddRealUser=false; render(); break;
       case 'overlay-close-addrealuser': if(e.target===t){ S.showAddRealUser=false; render(); } break;
