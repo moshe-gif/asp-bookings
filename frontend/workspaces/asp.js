@@ -315,14 +315,14 @@ const DOC_BRANDS = {
 };
 // Centralized brand config (see supabase/migrations/0015_zelle_gmail_and_brand.sql): the real,
 // admin-editable source of truth once populated. Falls back to DOC_BRANDS' hardcoded text --
-// identical strings today -- when the table isn't reachable yet (Demo Mode, offline, or before
+// identical strings today -- when the table isn't reachable yet (signed out, offline, or before
 // that migration has been applied), so nothing changes visually until an admin actually edits a
 // brand in Supabase. New consumers should call getBrandConfig(key) rather than reading DOC_BRANDS
 // directly; existing DOC_BRANDS call sites (e.g. the Documents builder) are untouched for now.
 let BRAND_CONFIG_CACHE = null;
 async function loadBrandConfig(){
   if(!supabaseClient) return;
-  // Same guard as refreshQboStatus(): Demo Mode has no real Supabase session, so skip the network
+  // Same guard as refreshQboStatus(): signed out there is no Supabase session, so skip the network
   // call entirely rather than let it 404/RLS-reject against a live project with nothing to gain --
   // matters beyond tidiness, since a real fetch failure logs "Failed to load resource" to the
   // console regardless of whether the JS promise rejection itself is caught.
@@ -373,7 +373,7 @@ const INTERNAL_EVENT_TYPES = ['Recording Day','Filming Day','Rehearsal','Studio 
 /* ============ CONTRACT BUILDER (real-template, per-artist contracts) ============ */
 // v2 -- replaces the earlier clause-library/brand-driven version with a small set of concrete
 // templates (Standard / Comedian / Multiline) mirroring the real documents ASP's office sends,
-// plus per-artist payee profiles. See ~/.claude/plans/eventual-snacking-globe.md for the design.
+// plus per-artist payee profiles.
 
 /* ---- Payee profiles (contracting entity + payment details + defaults, per artist) ---- */
 const PAYEE_PROFILES_LS_KEY = 'asp_mock_payee_profiles_v1';
@@ -1129,7 +1129,7 @@ async function loadReconciliationQueue(){
   }
 }
 async function doMigratePayeeProfilesToSupabase(){
-  if(!supabaseClient){ toast('Sign in with your real ASP account first (not available in Demo Mode).', 'system'); return; }
+  if(!supabaseClient){ toast('Sign in with your ASP account first.', 'system'); return; }
   const todo = PAYEE_PROFILES.filter(p=>!p._supabaseId);
   if(!todo.length){ toast('All payee profiles are already migrated.', 'system'); return; }
   let ok=0, failed=0;
@@ -1143,7 +1143,7 @@ async function doMigratePayeeProfilesToSupabase(){
   render();
 }
 async function doMigrateContractsToSupabase(){
-  if(!supabaseClient){ toast('Sign in with your real ASP account first (not available in Demo Mode).', 'system'); return; }
+  if(!supabaseClient){ toast('Sign in with your ASP account first.', 'system'); return; }
   const todo = CONTRACTS.filter(c=>!c._supabaseId);
   if(!todo.length){ toast('All contracts are already migrated.', 'system'); return; }
   let ok=0, failed=0;
@@ -1232,7 +1232,7 @@ async function doSendContractEmail(){
   const qboDescription = S.sendContractForm.qboDescription||'Deposit';
   if(!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)){ toast('Enter a valid recipient email.', 'system'); return; }
   if(!subject){ toast('Enter a subject.', 'system'); return; }
-  if(!supabaseClient){ toast('Sign in with your real ASP account to send email (not available in Demo Mode).', 'system'); return; }
+  if(!supabaseClient){ toast('Sign in with your ASP account to send email.', 'system'); return; }
   S.sendContractBusy = true; render();
   try{
     const html = contractEmailHtml(c);
@@ -1345,10 +1345,10 @@ async function doCreateCalendarHoldsForContract(c){
   // uuid, but gigs here still have local ids ("EV-1063"). Sending one made every send create a
   // duplicate Google hold. Skip honestly until gigs live in the shared events table.
   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(lead.id))) return { status:'skipped', detail:'Contract sent. Calendar holds are paused until gigs move to the shared database (each send would otherwise add a duplicate hold).' };
-  if(!supabaseClient) return { status:'skipped', detail:'Calendar holds need a real signed-in session (not available in Demo Mode).' };
+  if(!supabaseClient) return { status:'skipped', detail:'Calendar holds need a signed-in session.' };
   try{
     const { data: { session } } = await supabaseClient.auth.getSession();
-    if(!session) return { status:'skipped', detail:'Calendar holds need a real signed-in session (not available in Demo Mode).' };
+    if(!session) return { status:'skipped', detail:'Calendar holds need a signed-in session.' };
     const artist = artistById(lead.artistId);
     const artistIds = [lead.artistId, ...(lead.additionalArtists||[]).map(x=>x.artistId)].filter(Boolean);
     const startISO = `${lead.date}T${(lead.time||'19:00')}:00`;
@@ -1561,13 +1561,13 @@ function clientNoticeEmailHtml(ev, artist, introHtml){
   </div></body></html>`;
 }
 async function sendClientNoticeEmail(ev, subject, html){
-  if(!supabaseClient) return { ok:false, error:'Sign in with your real ASP account to send email (not available in Demo Mode).' };
-  // Guard on a real SESSION, not just supabaseClient (which always exists, Demo Mode included) --
-  // without this, Demo Mode fires a real network request that fails at the connection level and
+  if(!supabaseClient) return { ok:false, error:'Sign in with your ASP account to send email.' };
+  // Guard on a real SESSION, not just supabaseClient (which always exists, even signed out) --
+  // without this, a signed-out page fires a real network request that fails at the connection level and
   // logs a browser-level console error regardless of this function's own try/catch, exactly the
   // loadBrandConfig() bug fixed earlier this project (see the memory note on that lesson).
   const { data: { session } } = await supabaseClient.auth.getSession();
-  if(!session) return { ok:false, error:'Sign in with your real ASP account to send email (not available in Demo Mode).' };
+  if(!session) return { ok:false, error:'Sign in with your ASP account to send email.' };
   const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-contract-email`, {
     method:'POST',
     headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
@@ -1632,7 +1632,7 @@ async function doSendReminderEmail(id){
 async function doSendTravelRequest(id){
   const tr = getTravelRequest(id); if(!tr) return;
   if(!ORG_SETTINGS.rivkyEmail){ toast('Set Rivky\'s email in Settings first — it is never hardcoded.', 'system'); return; }
-  if(!supabaseClient){ toast('Sign in with your real ASP account to send email (not available in Demo Mode).', 'system'); return; }
+  if(!supabaseClient){ toast('Sign in with your ASP account to send email.', 'system'); return; }
   S.travelRequestBusy = true; render();
   try{
     const ev = getEvent(tr.eventId);
@@ -1750,7 +1750,7 @@ function seedAll(){
   return JSON.parse(JSON.stringify(REAL_IMPORTED_EVENTS));
 }
 
-/* ============ SUPABASE (real backend, not yet used for data -- auth only so far) ============ */
+/* ============ SUPABASE (auth, shared records, Edge Functions) ============ */
 // Publishable/anon key is meant to be public -- real access control lives in RLS policies,
 // not in keeping this secret. See supabase/migrations/ in the repo for the schema + policies.
 const SUPABASE_URL = 'https://psgpxbkncuavlnpplykf.supabase.co';
@@ -1817,7 +1817,7 @@ let S = {
   user: null, // 'admin' or artist id
   view: 'dashboard',
   eventId: null,
-  realSession: null, // {supabaseUserId, email} once someone signs in for real (not Demo Mode)
+  realSession: null, // {supabaseUserId, email} once someone signs in
   showRealSignIn: false,
   realSignInEmail: '',
   realSignInSent: false,
@@ -2222,8 +2222,7 @@ S.events = loadEvents();
 EVID = S.events.reduce((max,e)=>{ const n=parseInt(String(e.id).split('-')[1],10); return isNaN(n)? max : Math.max(max,n+1); }, EVID);
 
 /* ============ REAL AUTH (Supabase) ============ */
-// Separate from Demo Mode entirely: a real session never touches ARTISTS/ADMIN_USERS
-// mock data except to add exactly the one matching row for whoever just signed in, so the
+// A session never touches the ARTISTS/ADMIN_USERS roster lists except to add exactly the one matching row for whoever just signed in, so the
 // rest of the app's isAdminUser()/artistById()/adminById() logic works completely unchanged.
 // INITIAL_SESSION and SIGNED_IN can arrive back to back: run one roster link at a time.
 let rosterLinkInFlight = null;
@@ -2260,7 +2259,7 @@ async function linkRealSessionToRosterNow(session){
   if(adminRow){
     // The app's admin logic checks S.user against literal role slugs ('admin_ceo' etc.)
     // throughout (isCEO, CEO_HIDDEN_NAV_VIEWS) -- use the DB row's role as the in-memory id so
-    // those checks work unchanged for a real login, same as they already do in Demo Mode. The
+    // those checks work unchanged for a real login. The
     // row's own uuid (its real Postgres identity) is kept as dbId for anything that needs it.
     //
     // Navigation/data-layer refactor (PR 18): ADMIN_USERS now starts empty (no more hardcoded
@@ -2540,7 +2539,7 @@ async function loadGmailStatus(){
   }
 }
 async function doAddGmailMailbox(){
-  if(!supabaseClient){ toast('Sign in with your real ASP account (not available in Demo Mode).', 'system'); return; }
+  if(!supabaseClient){ toast('Sign in with your ASP account.', 'system'); return; }
   const f = S.newGmailMailboxForm||{};
   const email = (f.email||'').trim();
   if(!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ toast('Enter a valid mailbox email.', 'system'); return; }

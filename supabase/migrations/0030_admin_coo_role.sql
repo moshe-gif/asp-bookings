@@ -1,5 +1,5 @@
 -- Navigation/data-layer refactor: Moshe's real role is COO, not CEO -- the plan's placeholder
--- bootstrap insert (see ~/.claude/plans/eventual-snacking-globe.md "Single gated actions") used
+-- bootstrap insert (design notes were in a local plan file, no longer kept) used
 -- admin_ceo as a stand-in since no COO role existed yet. Extends the role check constraint
 -- (migration 0003) to add admin_coo, then fixes Moshe's row. COO gets the SAME unrestricted nav
 -- access as admin_bookings/admin_bookkeeping (CEO_HIDDEN_NAV_VIEWS, asp.js, only ever restricted

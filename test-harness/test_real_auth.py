@@ -6,18 +6,13 @@ starts relying on it to replace Demo Mode entirely.
 
 Needs test-harness/.env configured (ASP_TEST_HARNESS_EMAIL/ASP_TEST_HARNESS_PASSWORD) and the
 matching admin_users row already seeded with that account's real user_id -- see README.md
-"Real-auth test account setup". Skips cleanly if not configured, rather than failing the whole
-suite in an environment where no one has set this up yet.
+"Real-auth test account setup". Fails with a clear error if not configured.
 """
-import os
-
 import pytest
 from helpers import login_as_real, goto_nav, collect_console_errors, mgmt_nav_items_for
 
-pytestmark = pytest.mark.skipif(
-    not (os.environ.get("ASP_TEST_HARNESS_EMAIL") and os.environ.get("ASP_TEST_HARNESS_PASSWORD")),
-    reason="real-auth test credentials not configured (test-harness/.env) -- see README.md",
-)
+# No skip when credentials are missing: login_as_real() raises a clear "not configured" error,
+# the same as every other spec, so a missing test-harness/.env can't pass silently (audit 7.1).
 
 
 def test_real_login_lands_on_admin_dashboard(live_server, page):

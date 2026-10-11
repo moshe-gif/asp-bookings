@@ -1,6 +1,6 @@
 -- Additive-only: adds sync bookkeeping columns to events/projects so Axis can tell what
 -- changed and when. Zero change to frontend/workspaces/asp.js or any user-visible behavior --
--- see ~/.claude/plans/eventual-snacking-globe.md, "ASP (migration 0007, additive only...)".
+-- (design notes were in a local plan file, no longer kept).
 -- (Numbered 0007, not 0006 -- 0006 was already used by the company-scoping revert.)
 --
 -- Neither table had any "last changed" timestamp before this (confirmed by reading 0001), so

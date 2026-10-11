@@ -1,11 +1,9 @@
 # Workflows & Automation Spec — ASP Bookings
 
-> The exact rules for every automated email/notification ASP Bookings should send once a real
-> backend + email sending exists (see `INTEGRATIONS.md` §1 for the send mechanism). Written up
-> front so backend work can implement these directly rather than re-deriving them. Where a rule is
-> already represented in today's mockup (as a simulated activity-log entry / toast, per the app's
-> "mocked send, real data" convention), that's noted — those are the reference implementation for
-> content/wording; only the actual delivery is fake today.
+> The rules for every automated email/notification ASP Bookings sends or should send. What is
+> actually live today is in INTEGRATIONS.md "Status in this app": client emails (contracts,
+> confirmations, reminders, travel requests) really send through `send-contract-email`; anything
+> marked automatic/scheduled below is not built yet unless that table says so.
 
 ---
 

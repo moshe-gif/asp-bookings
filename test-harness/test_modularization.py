@@ -10,7 +10,13 @@ editing only frontend/workspaces/asp.js. That shell.js and workspaces/vox.js nee
 land it is a repo-structure fact (verifiable via `git diff --stat`, not something Playwright can
 assert), not a runtime behavior -- documented here rather than faked as a browser assertion.
 """
+import pathlib
+import re
+
+from playwright.sync_api import expect
 from helpers import login_as
+
+ASP_JS = (pathlib.Path(__file__).parent.parent / "frontend" / "workspaces" / "asp.js").read_text()
 
 
 def test_workspace_contract_registered(live_server, page):
@@ -32,5 +38,7 @@ def test_workspace_contract_registered(live_server, page):
 def test_app_version_bumped_for_modularization(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
-    page.locator('.rail-link[data-action="nav"][data-view="settings"]')  # sanity the rail rendered
-    assert page.locator("text=v1.1.0").count() >= 1, "expected the post-extraction APP_VERSION to render in the rail footer"
+    expect(page.locator('.rail-link[data-action="nav"][data-view="settings"]')).to_be_visible()
+    # Read the version from asp.js itself so a later bump doesn't break this (audit 7.6).
+    version = re.search(r"const APP_VERSION = '([^']+)'", ASP_JS).group(1)
+    assert page.locator(f"text={version}").count() >= 1, f"expected APP_VERSION {version} to render in the rail footer"

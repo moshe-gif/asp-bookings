@@ -76,7 +76,7 @@ def login_as_real(page, email=None, password=None):
     """
     Signs in via the REAL Supabase auth path (signInWithPassword) instead of clicking through
     Demo Mode -- uses only the publishable/anon key already shipped in the frontend
-    (window.supabaseClient, asp.js:17290), never a service-role key. Requires a pre-seeded
+    (window.supabaseClient), never a service-role key. Requires a pre-seeded
     admin_users/artists row whose user_id already matches this account's auth.users row (the
     roster-link trigger only fires on NEW auth.users inserts, so a roster row created after the
     account exists needs its user_id set directly) -- see README.md "Real-auth test account

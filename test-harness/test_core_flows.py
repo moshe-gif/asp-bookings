@@ -52,7 +52,7 @@ def test_assign_task_to_person(live_server, page):
     # Add a task and assign it to the person we just added, via the real assignee <select>.
     page.locator('input[data-field="newTaskText"]').fill("Test harness task")
     # Must select by label: doAddPerson() gives each project-person a random "PPL-xxxxx" id
-    # (asp.js:16356), so the assignee <select>'s option *values* aren't predictable -- only the
+    # so the assignee <select>'s option *values* aren't predictable -- only the
     # label is. The label is the real admin_ceo test account's name (test-ceo@aspmgmt.com,
     # see README.md "Real-auth test account setup"), not the old Demo Mode "ASP Office — CEO"
     # string (Demo Mode removed in PR 18).
