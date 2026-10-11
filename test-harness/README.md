@@ -51,7 +51,8 @@ with dedicated `test-*@aspmgmt.com` accounts, so:
 - **Auth rate limits are shared with real staff.** Many full runs in a short time can make sign-in
   fail with "Failed to fetch"/401 for a few minutes — rerun the failing specs later before assuming a bug.
 - **Specs must not write real shared data.** Gig data is seeded per test browser (`seed_events`);
-  `window.ASP_DISABLE_EVENT_SYNC` will keep test gigs out of the shared gig list once that ships.
+  `window.ASP_DISABLE_EVENT_SYNC` (set for every test browser) turns off all shared sync — gigs and
+  the `app_records` collections — so test data never reaches the office's real shared lists.
   `test_passkey.py` registers and then removes a passkey on the test account.
 - Accounts in `ROLE_EMAILS` exist only for the 9 roles listed; the `admin_coo` role and the artist
   `shmili` have no test accounts yet, so the sweeps don't cover them (audit 7.3).
@@ -137,7 +138,7 @@ than grepping the source to check.
 | `has_no_horizontal_overflow(page)` | `helpers.py` | Real check for the app's "no sideways scrolling, ever" rule (`scrollWidth <= innerWidth`). Returns bool, not an assertion, so callers can report actual values on failure. |
 | `fake_gig(id, artist_id, date, **overrides)` | `helpers.py` | A complete event record (the app's stored shape) with obviously fictional data. Real gigs never live in the code — the repo is public. |
 | `seed_events(page, events)` | `helpers.py` | Seeds gigs into the test browser's localStorage before the app loads (only if that browser has none, so reloads/second tabs keep test changes). Storage key read from asp.js (`EVENTS_LS_KEY`). Call before `page.goto()`. |
-| `no_shared_sync(context)` | `helpers.py` | For specs that open their own browser contexts: sets `window.ASP_DISABLE_EVENT_SYNC` so test gigs never reach the office's real shared gig list. The default `page` fixture already gets it (conftest autouse fixture). |
+| `no_shared_sync(context)` | `helpers.py` | For specs that open their own browser contexts: sets `window.ASP_DISABLE_EVENT_SYNC` so test data never reaches the office's real shared lists (gigs and `app_records`). The default `page` fixture already gets it (conftest autouse fixture). |
 | `mark_contract_sent_from_event_sheet(page)` | `helpers.py` | From an open lead's event sheet: contract button → Contract Builder (Standard) → mark Sent → close. The honest path to Contract Sent (a real emailed send advances the lead the same way). |
 | `create_lead(page, client_name, date, artist_id="benny")` | `helpers.py` | New Lead modal → pick artist → client name + date → submit; leaves the new lead's event sheet open. Use it instead of repeating the clicks (audit 7.5). |
 | `create_project(page, title, artist_id="")` | `helpers.py` | Projects board → New Project → artist (or the explicit "None" tile) → title → create; lands on its detail page. Fresh browsers have no projects (the fake seeds were removed 2026-10-09). |

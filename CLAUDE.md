@@ -33,13 +33,17 @@
 - **Where data lives today:**
   - **Gigs/events: the shared Supabase `events` table** (since 2026-10-10). Each gig is one
     `app_doc` row keyed by `legacy_id` ("EV-…"); signed-in admins load it, every save writes
-    through, and Realtime pushes other admins' changes live. A browser's first admin sign-in
-    uploads its local-only gigs once. localStorage (`asp_mock_state_v3`) is only a cache. Artists
-    don't sync (RLS) and the test harness never does (`window.ASP_DISABLE_EVENT_SYNC`).
-  - **Everything else is still per-browser localStorage** (`asp_mock_*` keys — real data despite
-    the name: contracts, payee profiles, projects, invoices, outside bookings, documents, travel
-    requests, pricing, org settings). Never clear or "reset" it, never bump a storage key; back up
-    via Settings → Back up my data.
+    through, and Realtime pushes other admins' changes live. localStorage (`asp_mock_state_v3`)
+    is only a cache.
+  - **Contracts, payee profiles, projects, invoices, outside bookings, documents, travel
+    requests: the shared `app_records` table** (since 2026-10-11), one row per record keyed by
+    (collection, legacy_id). Same engine as gigs: `createSharedCollection()` in asp.js
+    ("SHARED RECORDS") — dirty local records win, new ids that collide are re-numbered with
+    references remapped, a browser's first admin sign-in uploads its local-only records once.
+    Artists don't sync (RLS) and the test harness never does (`window.ASP_DISABLE_SHARED_SYNC`
+    or `ASP_DISABLE_EVENT_SYNC`).
+  - **Still per-browser localStorage** (`asp_mock_*` keys): pricing, org settings, artist roster
+    edits. Never clear or "reset" it, never bump a storage key; back up via Settings → Back up my data.
 - **Not used:** `backend/proxy.js` and `deploy/*.js` are unused starter-kit templates (never
   deployed; the frontend makes no `/api/*` calls). Ignore the generic proxy/SFTP wording below.
 - **Tests:** `test-harness/` (Python Playwright, real browser) — runs against the **production**
@@ -55,8 +59,8 @@ Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM
 | Concept | Owner today | Target |
 |---|---|---|
 | Gigs/events | Supabase `events.app_doc` (shared, live) + localStorage cache | done (2026-10-10) |
-| Contracts & versions | localStorage per browser | Supabase `contracts` / `contract_versions` |
-| Payee profiles (bank, Zelle, default fee) | localStorage + seed literals | Supabase `payee_profiles` (admin-only) |
+| Contracts & versions | Supabase `app_records` (collection `contracts`, shared, live) + localStorage cache | done (2026-10-11) |
+| Payee profiles (bank, Zelle, default fee) | Supabase `app_records` (`payee_profiles`, admin-only) + seed literals | done (2026-10-11); drop seed literals |
 | Artist roster | `ARTISTS` seed + localStorage + Supabase `artists` | Supabase `artists` |
 | Admin roster | Supabase `admin_users` | same (key identity by uuid, not role) |
 | Event balance / artist payout | `eventBalance()` / `artistPayout()` (derived, next to each other) | same |
