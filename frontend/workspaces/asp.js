@@ -1376,15 +1376,21 @@ async function doCreateCalendarHoldsForContract(c){
 
 // Navigation/data-layer refactor (PR 18): used to ship pre-seeded with 3 fake Demo Mode entries
 // whose `id` was the literal role string ('admin_ceo' etc.) -- the exact same id a REAL admin
-// session uses (linkRealSessionToRoster sets S.user = adminRow.role). Since the push-if-missing
+// session used then (linkRealSessionToRoster set S.user = adminRow.role). Since the push-if-missing
 // check there keys on that same id, a real admin's session was silently shadowed by the demo
 // entry's name/email instead of showing the real signed-in person (confirmed live: a real test
 // account with role admin_bookings displayed as "ASP Office — Bookings" / bookings@aspmanagement.com,
 // not its own real name). Starts empty now -- every real admin's entry is populated the first
 // time they actually sign in, which is the only path left now that Demo Mode is gone.
 const ADMIN_USERS = [];
-const isAdminUser = (id)=>ADMIN_USERS.some(u=>u.id===id);
-const adminById = (id)=>ADMIN_USERS.find(u=>u.id===id);
+// Admins are identified by their admin_users uuid (audit 3.7) -- the role is a separate field, so two
+// admins with the same role stay two people. Records saved before 2026-10-11 stored the role slug
+// ('admin_bookings') as the person; those still resolve, to an admin holding that role.
+const adminById = (id)=>id ? (ADMIN_USERS.find(u=>u.id===id) || ADMIN_USERS.find(u=>u.role===id)) : undefined;
+const isAdminUser = (id)=>!!adminById(id);
+const adminRoleOf = (id)=>(adminById(id)||{}).role || null;
+// Is this stored person reference the signed-in user? (their uuid, or a legacy role slug of theirs)
+const isMeRef = (ref)=>!!ref && (ref===S.user || (isAdminUser(S.user) && ref===adminRoleOf(S.user) && !ADMIN_USERS.some(u=>u.id===ref)));
 
 /* ============ ORG SETTINGS (ops automation spec: "never hardcoded" integration addresses) ============ */
 // ASP-wide (not per-user) config that isn't tied to any one integration's own table -- currently
@@ -2272,24 +2278,17 @@ async function linkRealSessionToRosterNow(session){
     return;
   }
   if(adminRow){
-    // The app's admin logic checks S.user against literal role slugs ('admin_ceo' etc.)
-    // throughout (isCEO, CEO_HIDDEN_NAV_VIEWS) -- use the DB row's role as the in-memory id so
-    // those checks work unchanged for a real login. The
-    // row's own uuid (its real Postgres identity) is kept as dbId for anything that needs it.
-    //
-    // Navigation/data-layer refactor (PR 18): ADMIN_USERS now starts empty (no more hardcoded
-    // Demo Mode entries shadowing real ones by role-id collision -- see its own declaration
-    // comment). That means an office-wide picker like the project assignee dropdown would show
-    // NOBODY until every admin has personally signed in at least once, which is a real, awkward
-    // gap -- so pull the full office roster here (same shape loadRealRoster() already uses for
-    // the Users Dashboard), not just this one signed-in person's row.
+    // Pull the full office roster (not just this person) so office-wide pickers -- e.g. the project
+    // assignee dropdown -- list everyone even before they've signed in themselves. Each admin is
+    // keyed by their own uuid; role-based checks go through adminRoleOf().
     const { data: allAdmins } = await supabaseClient.from('admin_users').select('*').order('created_at');
     (allAdmins||[adminRow]).forEach(row=>{
-      const existing = ADMIN_USERS.find(u=>u.id===row.role);
-      if(existing) Object.assign(existing, {name:row.name, email:row.email, initials:row.initials, dbId:row.id});
-      else ADMIN_USERS.push({id:row.role, name:row.name, email:row.email, initials:row.initials, dbId:row.id});
+      const existing = ADMIN_USERS.find(u=>u.id===row.id);
+      const fields = {name:row.name, email:row.email, initials:row.initials, role:row.role, dbId:row.id};
+      if(existing) Object.assign(existing, fields);
+      else ADMIN_USERS.push({id:row.id, ...fields});
     });
-    S.user = adminRow.role;
+    S.user = adminRow.id;
   } else {
     // Mirrors the admin branch's own trick above: artists.id is a real uuid, but every seeded/
     // imported gig (event.artistId, S.events) keys to the ORIGINAL short string id ('baruch'
@@ -2641,6 +2640,9 @@ function defaultUserSettings(){
   };
 }
 function getUserSettings(userId){
+  // Settings saved before 2026-10-11 were keyed by role slug: carry them over to this admin once.
+  const legacyKey = adminRoleOf(userId);
+  if(!ALL_SETTINGS[userId] && legacyKey && legacyKey!==userId && ALL_SETTINGS[legacyKey]) ALL_SETTINGS[userId] = JSON.parse(JSON.stringify(ALL_SETTINGS[legacyKey]));
   if(!ALL_SETTINGS[userId]) ALL_SETTINGS[userId] = defaultUserSettings();
   const st = ALL_SETTINGS[userId];
   Object.keys(st.notify).forEach(k=>{ if(typeof st.notify[k]==='boolean') st.notify[k] = {inApp: st.notify[k], email:false}; });
@@ -3140,7 +3142,7 @@ const MGMT_NAV_ITEMS = [
 // simplified view — hidden for that login only.
 const CEO_HIDDEN_NAV_VIEWS = ['contract_builder'];
 function mgmtNavItemsFor(userId){
-  return MGMT_NAV_ITEMS.filter(([v])=> !(CEO_HIDDEN_NAV_VIEWS.includes(v) && userId==='admin_ceo'));
+  return MGMT_NAV_ITEMS.filter(([v])=> !(CEO_HIDDEN_NAV_VIEWS.includes(v) && adminRoleOf(userId)==='admin_ceo'));
 }
 /* ============ "NEW SINCE YOU LAST LOOKED" BADGES ============ */
 // Per-section last-visited date (YYYY-MM-DD), persisted so the badge survives a reload.
@@ -3540,7 +3542,7 @@ function renderWelcomeHeader(name){
   </div>`;
 }
 function renderMgmtDashboard(){
-  const isCEO = S.user==='admin_ceo';
+  const isCEO = adminRoleOf(S.user)==='admin_ceo';
   if(isCEO){
     return `
     ${renderWelcomeHeader((adminById(S.user).name||'').split(' ')[0])}
@@ -4328,7 +4330,7 @@ function renderPersonAvatar(person, size){
 function renderAssigneeChip(p, personId){
   const person = personId ? (p.people||[]).find(x=>x.id===personId) : null;
   if(!person) return `<span style="font-size:11px;color:var(--ink-3);">Unassigned</span>`;
-  const isMe = person.kind==='internal' && person.refId===S.user;
+  const isMe = person.kind==='internal' && isMeRef(person.refId);
   return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;${isMe?'font-weight:700;color:var(--accent-ink);':'color:var(--ink-2);'}">${renderPersonAvatar(person,16)}${isMe?'You':esc(person.name)}</span>`;
 }
 function renderTaskAssigneeSelect(p, t){
@@ -4353,7 +4355,7 @@ function renderWaitingOnStrip(p){
     if(key==='__unassigned') return `<button class="filter-chip ${S.taskAssigneeFilter==='__unassigned'?'sel':''}" data-action="filter-tasks-by-assignee" data-pid="__unassigned">Unassigned (${n})</button>`;
     const person = (p.people||[]).find(x=>x.id===key);
     if(!person) return '';
-    const isMe = person.kind==='internal' && person.refId===S.user;
+    const isMe = person.kind==='internal' && isMeRef(person.refId);
     return `<button class="filter-chip ${S.taskAssigneeFilter===key?'sel':''}" data-action="filter-tasks-by-assignee" data-pid="${key}">${isMe?'You':esc(person.name)} (${n})</button>`;
   }).join('');
   return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:12px;">
@@ -4480,7 +4482,7 @@ function renderProjectDetail(){
           <div class="log">
             ${p.tasks.filter(t=> !S.taskAssigneeFilter || (S.taskAssigneeFilter==='__unassigned'? !t.assignedTo : t.assignedTo===S.taskAssigneeFilter)).map(t=>{
               const assignedPerson = t.assignedTo ? (p.people||[]).find(x=>x.id===t.assignedTo) : null;
-              const isMine = assignedPerson && assignedPerson.kind==='internal' && assignedPerson.refId===S.user;
+              const isMine = assignedPerson && assignedPerson.kind==='internal' && isMeRef(assignedPerson.refId);
               return `<div class="log-item" style="align-items:center;flex-wrap:wrap;gap:8px;${isMine&&!t.done?'background:var(--accent-wash);border-radius:8px;':''}">
               <input type="checkbox" ${t.done?'checked':''} data-action="toggle-task" data-id="${p.id}" data-taskid="${t.id}" style="width:16px;height:16px;flex:none;"/>
               <span style="flex:1;min-width:120px;${t.done?'text-decoration:line-through;color:var(--ink-3);':''}">${esc(t.text)}</span>

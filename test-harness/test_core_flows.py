@@ -45,7 +45,8 @@ def test_assign_task_to_person(live_server, page):
     create_project(page, "Task Assign Test Project")
 
     # Add an internal person (defaults to Internal) so there's someone to assign to.
-    page.locator(".person-refid-select").select_option("admin_ceo")
+    # Office people are keyed by their admin_users uuid (audit 3.7), so pick by name, not role.
+    page.locator(".person-refid-select").select_option(label="CEO Test")
     page.locator('[data-form="person"] input[data-field="role"]').fill("Approver")
     page.locator('[data-action="add-person"]').click()
 

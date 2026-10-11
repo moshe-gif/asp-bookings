@@ -64,7 +64,7 @@ Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM
 | Contracts & versions | Supabase `app_records` (collection `contracts`, shared, live) + localStorage cache | done (2026-10-11) |
 | Payee profiles (bank, Zelle, default fee) | Supabase `app_records` (`payee_profiles`, admin-only) + seed literals | done (2026-10-11); drop seed literals |
 | Artist roster | `ARTISTS` seed + localStorage + Supabase `artists` | Supabase `artists` |
-| Admin roster | Supabase `admin_users` | same (key identity by uuid, not role) |
+| Admin roster | Supabase `admin_users`; session = the admin's uuid, role via `adminRoleOf()` (2026-10-11) | done; old records holding a role slug resolve through `adminById()` |
 | Event balance / artist payout | `eventBalance()` / `artistPayout()` (derived, next to each other) | same |
 | Contract money | `contractPaymentFigures()` (derived) | same |
 | Commission rate | literal `0.15` in 3 places | one `COMMISSION_RATE` |
