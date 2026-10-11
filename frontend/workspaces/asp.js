@@ -1217,9 +1217,12 @@ async function doSendContractEmail(){
   try{
     const html = contractEmailHtml(c);
     const { data: { session } } = await supabaseClient.auth.getSession();
+    // A session is required: falling back to the publishable key as a bearer token only produced
+    // a confusing server-side auth failure (2026-10-09 audit 5.5).
+    if(!session){ toast('Your sign-in has expired — sign in again to send email.', 'system'); return; }
     const authHeaders = {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${session ? session.access_token : SUPABASE_PUBLISHABLE_KEY}`,
+      'Authorization': `Bearer ${session.access_token}`,
       'apikey': SUPABASE_PUBLISHABLE_KEY,
     };
     // Retry-safe: re-sending after a prior failure re-runs the email step (send-contract-email has
@@ -1315,6 +1318,10 @@ async function doCreateCalendarHoldsForContract(c){
   }
   const lead = c.leadId ? getEvent(c.leadId) : null;
   if(!lead) return { status:'skipped', detail:'Contract sent, but calendar holds were skipped — no linked lead to create an event for.' };
+  // Stopgap (2026-10-09 audit 4.5): gcal-create-hold keys its calendar_links on the events table's
+  // uuid, but gigs here still have local ids ("EV-1063"). Sending one made every send create a
+  // duplicate Google hold. Skip honestly until gigs live in the shared events table.
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(lead.id))) return { status:'skipped', detail:'Contract sent. Calendar holds are paused until gigs move to the shared database (each send would otherwise add a duplicate hold).' };
   if(!supabaseClient) return { status:'skipped', detail:'Calendar holds need a real signed-in session (not available in Demo Mode).' };
   try{
     const { data: { session } } = await supabaseClient.auth.getSession();
@@ -1609,9 +1616,10 @@ async function doSendTravelRequest(id){
     const html = travelRequestEmailHtml(tr);
     const subject = `Travel Request — ${ev? (artistById(ev.artistId)||{}).name||'' : ''}${tr.details.eventDate? ` (${fmtDateShort(tr.details.eventDate)})`:''}`;
     const { data: { session } } = await supabaseClient.auth.getSession();
+    if(!session){ toast('Your sign-in has expired — sign in again to send email.', 'system'); return; }
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-contract-email`, {
       method:'POST',
-      headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${session ? session.access_token : SUPABASE_PUBLISHABLE_KEY}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
+      headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
       body: JSON.stringify({ to: ORG_SETTINGS.rivkyEmail, subject, html }),
     });
     const data = await resp.json().catch(()=>({ok:false, error:'Unexpected response from the server.'}));
@@ -1891,12 +1899,31 @@ EVID = S.events.reduce((max,e)=>{ const n=parseInt(String(e.id).split('-')[1],10
 // Separate from Demo Mode entirely: a real session never touches ARTISTS/ADMIN_USERS
 // mock data except to add exactly the one matching row for whoever just signed in, so the
 // rest of the app's isAdminUser()/artistById()/adminById() logic works completely unchanged.
-async function linkRealSessionToRoster(session){
+// INITIAL_SESSION and SIGNED_IN can arrive back to back: run one roster link at a time.
+let rosterLinkInFlight = null;
+function linkRealSessionToRoster(session){
+  if(!rosterLinkInFlight) rosterLinkInFlight = linkRealSessionToRosterNow(session).finally(()=>{ rosterLinkInFlight = null; });
+  return rosterLinkInFlight;
+}
+async function linkRealSessionToRosterNow(session){
   S.realSession = { supabaseUserId: session.user.id, email: session.user.email };
-  const [{data: adminRow}, {data: artistRow}] = await Promise.all([
-    supabaseClient.from('admin_users').select('*').eq('user_id', session.user.id).maybeSingle(),
-    supabaseClient.from('artists').select('*').eq('user_id', session.user.id).maybeSingle(),
-  ]);
+  // A failed lookup (network, outage) is NOT "your account isn't set up" -- show a retry instead
+  // of sending staff to the office about a problem that isn't theirs (2026-10-09 audit 4.3).
+  let adminRow = null, artistRow = null;
+  try{
+    const [a, r] = await Promise.all([
+      supabaseClient.from('admin_users').select('*').eq('user_id', session.user.id).maybeSingle(),
+      supabaseClient.from('artists').select('*').eq('user_id', session.user.id).maybeSingle(),
+    ]);
+    if(a.error || r.error) throw new Error((a.error||r.error).message);
+    adminRow = a.data; artistRow = r.data;
+  }catch(err){
+    S.realSignInError = String(err && err.message || err);
+    S.realSignInNotFound = false; S.showRealSignIn = false;
+    render();
+    return;
+  }
+  S.realSignInError = null;
   const row = adminRow || artistRow;
   if(!row){
     S.realSignInNotFound = true;
@@ -1940,8 +1967,9 @@ async function linkRealSessionToRoster(session){
       S.user = artistRow.id;
     }
   }
-  S.view = adminRow ? 'dashboard' : 'a_dashboard';
-  S.showRealSignIn = false; S.realSignInSent = false; S.realSignInNotFound = false;
+  // Keep the view the URL asked for (reload / deep link) when this user may open it.
+  if(!viewAllowed(S.view, !!adminRow)) S.view = homeViewFor(!!adminRow);
+  S.showRealSignIn = false; S.realSignInSent = false; S.realSignInNotFound = false; S.realSignInError = null;
   S.realPasskeys = null;
   pendingViewTransition = true;
   pendingViewDirection = 'right';
@@ -2562,7 +2590,14 @@ function repositionNavSliders(){
   });
 }
 /* ============ RENDER: SHELL ============ */
+// Search boxes that re-render on every keystroke need their cursor back after render -- but only
+// if they had it, or just appeared (a modal opened). Focusing them unconditionally on every render
+// stole the cursor from whatever field the user was typing in (2026-10-09 audit 4.8).
+const AUTO_FOCUS_INPUT_IDS = ['contractsSearchInput','askAIInput','contractSearchInput'];
+let autoFocusBeforeRender = { focusedId:null, present:[] };
+function shouldRefocus(id){ return autoFocusBeforeRender.focusedId===id || !autoFocusBeforeRender.present.includes(id); }
 function render(){
+  autoFocusBeforeRender = { focusedId: document.activeElement && document.activeElement.id || null, present: AUTO_FOCUS_INPUT_IDS.filter(id=>document.getElementById(id)) };
   const app = document.getElementById('app');
   const prevScroll = { sheet: document.querySelector('.sheet')?.scrollTop, modal: document.querySelector('.modal')?.scrollTop };
   const hadOverlay = !!document.querySelector('.overlay');
@@ -2815,7 +2850,16 @@ function renderMobileMenu(isAdmin){
   </div>`;
 }
 
+// Which views each kind of user can open (by URL as well as by menu). A reload or shared link keeps
+// its view when it's allowed for the signed-in user; anything else lands on their home view instead
+// of a blank page (2026-10-09 audit 4.2).
+const ADMIN_VIEWS = ['dashboard','calendar','leads','needs_review','artists','artist_detail','financials','outside_bookings','documents','contracts','contract_builder','messages','projects','pricing','international','daily_digest','travel'];
+const ARTIST_VIEWS = ['a_dashboard','a_calendar','a_gigs','a_financials','a_travel','a_projects'];
+const SHARED_VIEWS = ['settings','project_detail'];
+function homeViewFor(isAdmin){ return isAdmin ? 'dashboard' : 'a_dashboard'; }
+function viewAllowed(view, isAdmin){ return SHARED_VIEWS.includes(view) || (isAdmin ? ADMIN_VIEWS : ARTIST_VIEWS).includes(view); }
 function renderView(){
+  if(S.user && !viewAllowed(S.view, isAdminUser(S.user))){ S.view = homeViewFor(isAdminUser(S.user)); syncURL(); }
   if(S.view==='settings') return renderSettingsPage();
   if(S.view==='project_detail') return renderProjectDetail();
   if(isAdminUser(S.user)){
@@ -3048,6 +3092,13 @@ function loginWordmark(){
 function renderLogin(){
   if(S.showRealSignIn) return renderRealSignIn();
   if(S.realSignInNotFound) return renderRealSignInNotFound();
+  if(S.realSignInError) return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
+    ${loginWordmark()}
+    <h2 style="font-size:1.05rem;margin:16px 0 6px;">Couldn't reach ASP Bookings</h2>
+    <p style="color:var(--ink-2);font-size:13px;margin:0 0 22px;">You're signed in, but loading your account didn't work (${esc(S.realSignInError)}). This is usually a connection problem — try again in a moment.</p>
+    <button class="btn btn-primary btn-block" data-action="retry-roster-link">Try again</button>
+    <button class="btn btn-block btn-ghost" style="margin-top:8px;" data-action="real-signout">Sign Out</button>
+  </div></div>`;
   return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
     ${loginWordmark()}
     <p style="color:var(--ink-2);font-size:13.5px;margin:16px 0 26px;">Sign in to view your schedule and bookings.</p>
@@ -7630,20 +7681,17 @@ function bindGlobal(){
   const contractsSearchInput = document.getElementById('contractsSearchInput');
   if(contractsSearchInput){
     contractsSearchInput.addEventListener('input', ()=>{ S.contractsSearchQuery = contractsSearchInput.value; render(); });
-    contractsSearchInput.focus();
-    const v = contractsSearchInput.value; contractsSearchInput.value=''; contractsSearchInput.value=v;
+    if(shouldRefocus('contractsSearchInput')){ contractsSearchInput.focus(); const v = contractsSearchInput.value; contractsSearchInput.value=''; contractsSearchInput.value=v; }
   }
   const askAIInput = document.getElementById('askAIInput');
   if(askAIInput){
     askAIInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doAskAI(); } });
-    askAIInput.focus();
-    const v = askAIInput.value; askAIInput.value=''; askAIInput.value=v;
+    if(shouldRefocus('askAIInput')){ askAIInput.focus(); const v = askAIInput.value; askAIInput.value=''; askAIInput.value=v; }
   }
   const contractSearchInput = document.getElementById('contractSearchInput');
   if(contractSearchInput){
     contractSearchInput.addEventListener('input', ()=>{ S.contractSearchQuery = contractSearchInput.value; render(); });
-    contractSearchInput.focus();
-    const v = contractSearchInput.value; contractSearchInput.value=''; contractSearchInput.value=v;
+    if(shouldRefocus('contractSearchInput')){ contractSearchInput.focus(); const v = contractSearchInput.value; contractSearchInput.value=''; contractSearchInput.value=v; }
   }
   const realSignInEmailInput = document.getElementById('realSignInEmailInput');
   if(realSignInEmailInput) realSignInEmailInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doSendSignInCode(); } });
@@ -7668,6 +7716,7 @@ function bindGlobal(){
     if(action==='overlay-close') return;
     switch(action){
       case 'download-backup': doDownloadBackup(); break;
+      case 'retry-roster-link': supabaseClient.auth.getSession().then(({data:{session}})=>{ if(session) linkRealSessionToRoster(session); else { S.realSignInError = null; render(); } }); break;
       case 'logout': if(S.realSession && supabaseClient) supabaseClient.auth.signOut(); S.user=null; S.realSession=null; S.realPasskeys=null; S.eventId=null; S.showNewLead=false; S.showMobileMenu=false; history.pushState(null,'',location.pathname+location.search); render(); break;
       case 'open-real-signin': S.showRealSignIn=true; S.realSignInSent=false; render(); break;
       case 'close-real-signin': S.showRealSignIn=false; S.realSignInSent=false; S.realSignInEmail=''; S.realSignInCode=''; render(); break;
