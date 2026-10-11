@@ -41,3 +41,9 @@ def test_today_helper_uses_the_local_date_in_the_evening(browser):
     got = page.evaluate(f"() => {{ {helper}; return [localISO(new Date()), new Date().toISOString().slice(0,10)]; }}")
     ctx.close()
     assert got == ["2026-10-09", "2026-10-10"], got
+
+
+def test_no_variable_shadows_the_function_it_calls():
+    # `const total = total(x)` throws ReferenceError (temporal dead zone) and blanks the whole page.
+    hits = re.findall(r"\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*\1\s*\(", SRC)
+    assert not hits, f"variables shadowing the function they call: {hits}"

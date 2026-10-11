@@ -1699,6 +1699,20 @@ function chargesTotal(ev){ return (ev.charges||[]).reduce((s,c)=>s+c.amount,0); 
 // a pure derivation (the same formula the edit-handler already used) -- there is nothing left to
 // go stale. zelleBalance(), the one place that already got this right, now composes on top of it.
 function eventBalance(ev){ return (ev.price||0) - (ev.commission||0); }
+// The standard ASP booking fee / commission. Single owner of the rate (it was a 0.15 literal in 3
+// places and "15%"/"85%" label text in 4 -- 2026-10-09 audit 3.8). Each gig still stores its own
+// ev.commission, which can differ (negotiated), so labels show the real figures, not this rate.
+const COMMISSION_RATE = 0.15;
+function standardCommission(amount){ return Math.round((Number(amount)||0) * COMMISSION_RATE); }
+// Shared chart/total helpers (were copied 3 times; one copy summed all-time under a "last 6 mo"
+// label -- audit 2.16/3.10).
+function lastNMonths(n){ const out=[]; for(let i=n-1;i>=0;i--){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-i); out.push(d); } return out; }
+function sumByMonth(events, months, valueFn){
+  return months.map(md=>events.filter(e=>{ const ed=new Date(e.date+'T00:00:00'); return ed.getMonth()===md.getMonth() && ed.getFullYear()===md.getFullYear(); }).reduce((s,e)=>s+valueFn(e),0));
+}
+// Year-to-date by the date's own year (a date-only string parsed as a Date is UTC midnight, which
+// put Jan 1 payments in the previous year in US time zones).
+function ytdPayoutOf(events){ const year = todayISO().slice(0,4); return events.filter(e=>e.balanceReceived && String(e.balanceReceivedDate||'').slice(0,4)===year).reduce((s,e)=>s+zelleBalance(e),0); }
 
 let EVID = 1000;
 
@@ -3507,7 +3521,7 @@ function renderArtistsPage(){
     ${ARTISTS.map(a=>{
       const evs = eventsFor(a.id);
       const upcoming = evs.filter(e=>!isPast(e.date) && ['booked','paid'].includes(e.status)).length;
-      const ytdPayout = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+zelleBalance(e),0);
+      const ytdPayout = ytdPayoutOf(evs);
       return `<div class="card card-pad" style="cursor:pointer;display:flex;flex-direction:column;gap:10px;" data-action="open-artist" data-id="${a.id}">
         <div style="display:flex;align-items:center;gap:10px;">
           <span class="avatar" data-slot="${a.slot}" style="width:44px;height:44px;font-size:15px;">${a.initials}</span>
@@ -3585,19 +3599,16 @@ function renderFinancialsPage(){
   const owedTotal = owedToArtists.reduce((s,e)=>s+zelleBalance(e),0);
   const paidOutTotal = payoutEligible.filter(e=>e.artistPaidOut).reduce((s,e)=>s+zelleBalance(e),0);
 
-  const months=[]; for(let i=5;i>=0;i--){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-i); months.push(d); }
-  const monthlyGross = months.map(md=>{
-    const sum = booked.filter(e=>{const ed=new Date(e.date+'T00:00:00'); return ed.getMonth()===md.getMonth()&&ed.getFullYear()===md.getFullYear();}).reduce((s,e)=>s+e.price,0);
-    return {label: md.toLocaleDateString('en-US',{month:'short'}), val:sum};
-  });
+  const months = lastNMonths(6);
+  const monthlyGross = sumByMonth(booked, months, e=>e.price).map((val,i)=>({label: months[i].toLocaleDateString('en-US',{month:'short'}), val}));
   const maxMonthly = Math.max(...monthlyGross.map(m=>m.val),1);
 
   return `
   ${renderArtistFilterRow(S.finArtistFilter, 'fin-filter')}
   <div class="grid stat-row" style="margin-bottom:20px;">
     <div class="card stat-tile"><span class="u-label">Gross Booked</span><span class="val">${money(gross)}</span><span class="sub">${booked.length} jobs</span></div>
-    <div class="card stat-tile"><span class="u-label">ASP Commission</span><span class="val">${money(commission)}</span><span class="sub">15% of gross</span></div>
-    <div class="card stat-tile"><span class="u-label">Artist Payouts</span><span class="val">${money(payouts)}</span><span class="sub">85% via Zelle</span></div>
+    <div class="card stat-tile"><span class="u-label">ASP Commission</span><span class="val">${money(commission)}</span><span class="sub">${gross? Math.round(commission/gross*100) : Math.round(COMMISSION_RATE*100)}% of gross</span></div>
+    <div class="card stat-tile"><span class="u-label">Artist Payouts</span><span class="val">${money(payouts)}</span><span class="sub">after commission, incl. charges</span></div>
     <div class="card stat-tile"><span class="u-label">Avg Job Size</span><span class="val">${money(avg)}</span><span class="sub">per booking</span></div>
   </div>
 
@@ -3640,8 +3651,8 @@ function renderFinancialsPage(){
   <div class="grid grid-3" style="margin-bottom:22px;">
     ${ARTISTS.map(a=>{
       const ae = S.events.filter(e=>e.artistId===a.id && ['booked','paid'].includes(e.status));
-      const total = ae.reduce((s,e)=>s+e.price,0);
-      const spark = months.map(md=>ae.filter(e=>{const ed=new Date(e.date+'T00:00:00'); return ed.getMonth()===md.getMonth()&&ed.getFullYear()===md.getFullYear();}).reduce((s,e)=>s+e.price,0));
+      const spark = sumByMonth(ae, months, e=>e.price);
+      const total = spark.reduce((s,v)=>s+v,0);
       const mx = Math.max(...spark,1);
       return `<div class="card card-pad">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
@@ -4259,21 +4270,18 @@ function renderArtistFinancials(artistId){
   const booked = evs.filter(e=>['booked','paid'].includes(e.status));
   const totalPayout = booked.reduce((s,e)=>s+zelleBalance(e),0);
   const avgPayout = booked.length ? Math.round(totalPayout/booked.length) : 0;
-  const ytdPayout = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+zelleBalance(e),0);
+  const ytdPayout = ytdPayoutOf(evs);
 
-  const months=[]; for(let i=5;i>=0;i--){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-i); months.push(d); }
-  const monthlyPayout = months.map(md=>{
-    const sum = booked.filter(e=>{const ed=new Date(e.date+'T00:00:00'); return ed.getMonth()===md.getMonth()&&ed.getFullYear()===md.getFullYear();}).reduce((s,e)=>s+zelleBalance(e),0);
-    return {label: md.toLocaleDateString('en-US',{month:'short'}), val:sum};
-  });
+  const months = lastNMonths(6);
+  const monthlyPayout = sumByMonth(booked, months, zelleBalance).map((val,i)=>({label: months[i].toLocaleDateString('en-US',{month:'short'}), val}));
   const maxMonthly = Math.max(...monthlyPayout.map(m=>m.val),1);
 
   return `
   <div class="grid stat-row" style="margin-bottom:20px;">
     <div class="card stat-tile"><span class="u-label">YTD Payout</span><span class="val">${money(ytdPayout)}</span><span class="sub">Received via Zelle</span></div>
-    <div class="card stat-tile"><span class="u-label">Total Booked</span><span class="val">${money(totalPayout)}</span><span class="sub">${booked.length} jobs</span></div>
+    <div class="card stat-tile"><span class="u-label">Total Payout (booked)</span><span class="val">${money(totalPayout)}</span><span class="sub">${booked.length} jobs</span></div>
     <div class="card stat-tile"><span class="u-label">Avg Payout</span><span class="val">${money(avgPayout)}</span><span class="sub">per booking</span></div>
-    <div class="card stat-tile"><span class="u-label">Commission Rate</span><span class="val">15%</span><span class="sub">Kept by ASP</span></div>
+    <div class="card stat-tile"><span class="u-label">Commission Rate</span><span class="val">${Math.round(COMMISSION_RATE*100)}%</span><span class="sub">Standard ASP rate</span></div>
   </div>
 
   <div class="card card-pad" style="margin-bottom:20px;">
@@ -6862,7 +6870,7 @@ function doSaveEditEvent(id){
     // Only auto-recompute the deposit at 15% if this same save doesn't also set an explicit
     // deposit amount -- an explicit value (below) always wins, same "manual override beats the
     // formula" convention as reminderIntervalDays (see WORKFLOWS.md §4).
-    if(f.commission===undefined) ev.commission = Math.round(ev.price*0.15);
+    if(f.commission===undefined) ev.commission = standardCommission(ev.price);
   }
   if(!ev.unpaid && f.commission!==undefined){
     const oldCommission = ev.commission;
@@ -7356,7 +7364,7 @@ function doSubmitLead(){
     toast(isInternal? 'Pick an artist and a date.' : 'Pick an artist and enter a client name and date.', 'system'); return;
   }
   const price = isInternal ? 0 : (Number(f.price)||0);
-  const commission = isInternal ? 0 : Math.round(price*0.15);
+  const commission = isInternal ? 0 : standardCommission(price);
   const typeList = isInternal ? INTERNAL_EVENT_TYPES : EVENT_TYPES;
   const resolvedType = (f.type==='Other'? (f.customType||'').trim()||'Other' : f.type)||typeList[0];
   const ev = {
@@ -7372,7 +7380,7 @@ function doSubmitLead(){
     groundTransportNeeded: !!f.groundTransportNeeded, groundTransportBooked:false, groundTransport:null,
     charges: isInternal? [] : (f.charges||[]), dressCode: isInternal? '' : (f.dressCode||''), prepSheets:[], createdAt: todayISO(),
     additionalArtists: isInternal? [] : (f.additionalArtists||[]).filter(x=>x.artistId).map(x=>{
-      const fee = Number(x.feeAmount)||0; const cut = Math.round(fee*0.15);
+      const fee = Number(x.feeAmount)||0; const cut = standardCommission(fee);
       return { artistId:x.artistId, feeAmount:fee, aspCut:cut, netAmount:fee-cut };
     }),
     band: f.type==='Wedding' ? (f.band||'').trim()||null : null,
@@ -7425,7 +7433,7 @@ function answerAskAI(q, isAdmin){
   if(!isAdmin){
     const evs = eventsFor(S.user);
     const nextGig = upcoming(evs).sort((a,b)=>a.date.localeCompare(b.date))[0];
-    const ytd = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+zelleBalance(e),0);
+    const ytd = ytdPayoutOf(evs);
     if(ql.includes('next gig') || ql.includes('next booking')) return nextGig ? `Your next gig is ${nextGig.type} for ${nextGig.clientName||'you'} on ${fmtDateShort(nextGig.date)}.` : `You don't have any upcoming gigs booked yet.`;
     if(ql.includes('this month')){ const n=new Date(); const thisMonth = upcoming(evs).filter(e=>{const d=new Date(e.date+'T00:00:00'); return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear();}); return `You have ${thisMonth.length} gig${thisMonth.length===1?'':'s'} this month.`; }
     if(ql.includes('ytd') || ql.includes('payout') || ql.includes('earn')) return `You've been paid ${money(ytd)} so far this year.`;
@@ -7439,7 +7447,7 @@ function answerAskAI(q, isAdmin){
   if(matchedArtist){
     const evs = eventsFor(matchedArtist.id);
     const up = upcoming(evs).sort((a,b)=>a.date.localeCompare(b.date));
-    const ytd = evs.filter(e=>e.balanceReceived && new Date(e.balanceReceivedDate).getFullYear()===new Date().getFullYear()).reduce((s,e)=>s+zelleBalance(e),0);
+    const ytd = ytdPayoutOf(evs);
     return `${matchedArtist.name}: ${up.length} upcoming gig${up.length===1?'':'s'}${up[0]?`, next on ${fmtDateShort(up[0].date)}`:''}. YTD payout: ${money(ytd)}.`;
   }
   if(ql.includes('conflict')) return conflictPairs.length ? `There ${conflictPairs.length===1?'is':'are'} ${conflictPairs.length} scheduling conflict${conflictPairs.length===1?'':'s'} right now — check the Dashboard for details.` : `No scheduling conflicts right now.`;
