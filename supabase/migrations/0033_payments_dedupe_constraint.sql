@@ -1,5 +1,5 @@
 -- 0033: payments can't be recorded twice for the same source event (2026-10-09 audit 2.13).
--- Applied: <date — run after 0031/0032>
+-- Applied: 2026-10-10 (Supabase Management API, verified)
 --
 -- qbo-webhook used to dedupe with select-then-insert, so two concurrent deliveries of the same
 -- Intuit notification could both insert a "received" payment. qbo-webhook now upserts on this

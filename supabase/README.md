@@ -16,10 +16,10 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | Migration | Status |
 |---|---|
 | 0001–0030 | Applied before 2026-10-09 (exact dates not recorded). 0004/0005 company scoping was reverted by 0006. |
-| 0031 | **Pending** — security hardening (file kept out of the public repo until applied). Run first. |
-| 0032_shared_events_app_doc | **Pending** — shared gig list (events.app_doc + derived columns + realtime). Run after 0031; the app's sync code ships separately. |
-| 0033_payments_dedupe_constraint | **Pending** — unique (source, source_ref) on payments; needed by the updated qbo-webhook. |
-| 0034_oauth_states | **Pending** — one-time OAuth state table used by oauth-start and the three callbacks. |
+| 0031_rls_and_security_advisor_fixes | Applied 2026-10-10 — payee/activity-log RLS, orphaned artist write policies, Security Advisor fixes (ERROR gone; remaining WARNs are the intended `authenticated` grants on the RLS helper functions). |
+| 0032_shared_events_app_doc | Applied 2026-10-10 — shared gig list storage (events.app_doc + derived columns + realtime). The app's sync code is not shipped yet. |
+| 0033_payments_dedupe_constraint | Applied 2026-10-10 — unique (source, source_ref) on payments. |
+| 0034_oauth_states | Applied 2026-10-10 — one-time OAuth state table. |
 
 ## Edge Functions (`functions/`)
 Deploy: Supabase → Edge Functions → the function → paste the file's contents → Deploy. Secrets live
@@ -40,9 +40,8 @@ in Edge Function secrets (names in `.env.example` and each `ops/*_SETUP.md`).
 | gmail-status | ON | Settings | `ops/GMAIL_SETUP.md` |
 
 **QuickBooks / Google go-live checklist** (do all of it before filling in any client ID):
-1. Apply migrations 0033 and 0034.
-2. Deploy `oauth-start` (new) and redeploy `qbo-oauth-callback`, `gcal-oauth-callback`,
-   `gmail-oauth-callback`, `qbo-webhook`, `qbo-create-invoice` from this repo.
+1. ~~Apply migrations 0033 and 0034~~ — done 2026-10-10.
+2. ~~Deploy `oauth-start` and the updated callbacks / webhook / invoice functions~~ — done 2026-10-10.
 3. In the QuickBooks sandbox, confirm invoice idempotency (`requestid`) behaves as expected and
    which webhook payload format your Intuit app receives (the function logs unknown formats).
 
@@ -54,3 +53,7 @@ Authentication → Emails → Templates → Magic Link: paste it whenever it cha
 `0001` mentions `BACKEND_SETUP.md` and `0010` mentions `ops/DATA_MIGRATION.md`; neither exists
 (they were planned docs). The plan for moving browser data into Supabase is now: CLAUDE.md
 "Where data lives" + migration 0032.
+
+## Auth settings (2026-10-10)
+Open sign-ups are OFF (`disable_signup`) — staff are created in Authentication → Add user and linked
+to their roster row by email. Leaked-password protection (HaveIBeenPwned) is ON.

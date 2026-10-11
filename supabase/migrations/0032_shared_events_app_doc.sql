@@ -1,5 +1,5 @@
 -- 0032: Shared gigs — the app's full gig record lives in events.app_doc (2026-10-09 audit 3.1, Wave 2 step 1).
--- Applied: <date — fill in when run in Supabase → SQL Editor, AFTER 0031>
+-- Applied: 2026-10-10 (Supabase Management API, verified)
 --
 -- Until now every office browser kept its own copy of the gigs in localStorage, so two staff saw
 -- different data and clearing a browser destroyed records. From this migration on, the app stores
