@@ -44,8 +44,10 @@
     or `ASP_DISABLE_EVENT_SYNC`).
   - **Office settings and pricing: `app_records` collection `settings`** (since 2026-10-11, rows
     `org` and `pricing`); the office's shared copy wins over a browser's own at first sign-in.
-  - **Still per-browser localStorage** (`asp_mock_*` keys): artist roster edits and personal
-    preferences (notification toggles). Never clear or "reset" it, never bump a storage key; back up via Settings → Back up my data.
+  - **Artist roster: Supabase `artists`** (0037) — `syncArtistRoster()` loads it at every sign-in
+    and it wins; app ids are `legacy_id` ('benny') or the row uuid. Artists added in the app are
+    inserted there. The `ARTISTS` list in asp.js is only the first paint.
+  - **Still per-browser localStorage** (`asp_mock_*` keys): personal preferences (notification toggles). Never clear or "reset" it, never bump a storage key; back up via Settings → Back up my data.
 - **Not used:** `backend/proxy.js` and `deploy/*.js` are unused starter-kit templates (never
   deployed; the frontend makes no `/api/*` calls). Ignore the generic proxy/SFTP wording below.
 - **Tests:** `test-harness/` (Python Playwright, real browser) — runs against the **production**
@@ -63,7 +65,7 @@ Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM
 | Gigs/events | Supabase `events.app_doc` (shared, live) + localStorage cache | done (2026-10-10) |
 | Contracts & versions | Supabase `app_records` (collection `contracts`, shared, live) + localStorage cache | done (2026-10-11) |
 | Payee profiles (bank, Zelle, default fee) | Supabase `app_records` (`payee_profiles`, admin-only) + seed literals | done (2026-10-11); drop seed literals |
-| Artist roster | `ARTISTS` seed + localStorage + Supabase `artists` | Supabase `artists` |
+| Artist roster | Supabase `artists` (loaded at sign-in, wins) + localStorage cache | done (2026-10-11) |
 | Admin roster | Supabase `admin_users`; session = the admin's uuid, role via `adminRoleOf()` (2026-10-11) | done; old records holding a role slug resolve through `adminById()` |
 | Event balance / artist payout | `eventBalance()` / `artistPayout()` (derived, next to each other) | same |
 | Contract money | `contractPaymentFigures()` (derived) | same |

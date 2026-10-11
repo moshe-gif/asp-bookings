@@ -86,13 +86,12 @@ const artistById = (id)=>ARTISTS.find(a=>a.id===id);
 const ARTISTS_LS_KEY = 'asp_mock_artists_v1';
 function loadArtists(){ try{ const raw = localStorage.getItem(ARTISTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
 function saveArtists(){ return persist(ARTISTS_LS_KEY, ARTISTS, 'the artist roster'); }
+// The roster's owner is Supabase `artists` (0037, audit 3.6): syncArtistRoster() loads it at
+// sign-in and it wins. The list above is only the first paint before then; localStorage is a cache.
+const SEED_ARTIST_IDS = ARTISTS.map(a=>a.id);
 { const saved = loadArtists();
-  if(saved && saved.length){
-    const canonical = {baruch:1, benny:2, moshe:3, yaakov:4, eli:7, dovie:6};
-    const canonicalRole = {dovie:'Comedian'};
-    saved.forEach(a=>{ if(canonical[a.id]) a.slot = canonical[a.id]; if(!a.role) a.role = canonicalRole[a.id]||'Singer'; });
-    ARTISTS = saved; saveArtists();
-  } else saveArtists();
+  if(saved && saved.length){ saved.forEach(a=>{ if(!a.role) a.role = 'Singer'; }); ARTISTS = saved; }
+  saveArtists();
 }
 
 /* ============ PROJECTS ============ */
@@ -2314,7 +2313,42 @@ async function linkRealSessionToRosterNow(session){
   pendingViewDirection = 'right';
   syncURL();
   render();
+  await syncArtistRoster();
   startSharedSync();
+}
+// Load the roster from Supabase (any signed-in user may read it) and let it win: names, slots,
+// roles and emails come from the table, keyed in the app by legacy_id ('benny') or the row's uuid.
+// On an admin browser's first roster sync, artists it added locally that the table doesn't have are
+// uploaded once (never the built-in list, so a removed artist can't come back). Local entries the
+// table no longer has stay only while a gig or project still points at them.
+const ROSTER_SYNCED_KEY = 'asp_sync_artists';
+async function syncArtistRoster(){
+  if(!supabaseClient || !S.realSession) return;
+  const { data: rows, error } = await supabaseClient.from('artists').select('id, legacy_id, name, slot, initials, email, role').order('created_at');
+  if(error || !rows){ if(error) console.error('roster load failed', error); return; }
+  const appIdOf = r=>r.legacy_id || r.id;
+  const onServer = new Set(rows.map(appIdOf));
+  let firstSync = false; try{ firstSync = !localStorage.getItem(ROSTER_SYNCED_KEY); }catch(e){}
+  if(firstSync && sharedSyncAllowed()){
+    for(const a of ARTISTS.filter(a=>!onServer.has(a.id) && !SEED_ARTIST_IDS.includes(a.id))){
+      const { data, error: e } = await supabaseClient.from('artists').insert(artistRowFor(a)).select('id, legacy_id, name, slot, initials, email, role').single();
+      if(e) toast(`Could not add ${a.name} to the shared roster: ${e.message}`, 'system');
+      else { rows.push(data); onServer.add(a.id); }
+    }
+  }
+  rows.forEach(r=>{
+    const fields = { name:r.name, slot:r.slot, initials:r.initials, email:r.email||'', role:r.role, dbId:r.id };
+    const a = ARTISTS.find(x=>x.id===appIdOf(r));
+    if(a) Object.assign(a, fields); else ARTISTS.push({ id:appIdOf(r), ...fields });
+  });
+  const inUse = id=>S.events.some(e=>e.artistId===id || (e.additionalArtists||[]).some(x=>x.artistId===id)) || PROJECTS.some(p=>p.artistId===id);
+  ARTISTS = ARTISTS.filter(a=>onServer.has(a.id) || inUse(a.id) || a.id===S.user);
+  if(sharedSyncAllowed()){ try{ localStorage.setItem(ROSTER_SYNCED_KEY, new Date().toISOString()); }catch(e){} }
+  saveArtists();
+  render();
+}
+function artistRowFor(a){
+  return { legacy_id:a.id, name:a.name, slot:a.slot||1, initials:a.initials||'?', role: ARTIST_ROLES.includes(a.role) ? a.role : 'Singer', email: a.email || null };
 }
 async function doSendSignInCode(){
   const email = (S.realSignInEmail||'').trim();
@@ -2465,6 +2499,7 @@ async function doRemoveRealUser(){
     toast(data.note || `${name} was removed.`, 'success');
     S.showEditRealUser = false; S.editRealUserForm = {};
     loadRealRoster();
+    if(f.kind!=='admin') syncArtistRoster();
   } catch(err){
     toast('Could not remove ' + name + ': ' + String(err), 'system');
   } finally {
@@ -2487,6 +2522,7 @@ function doEditRealUser(){
     toast(`${name} updated.`, 'success');
     S.showEditRealUser = false; S.editRealUserForm = {};
     loadRealRoster();
+    if(f.kind!=='admin') syncArtistRoster();
   });
 }
 if(supabaseClient){
@@ -7509,6 +7545,11 @@ function doAddArtist(){
   S.showAddArtist = false; S.addArtistForm = {};
   toast(`${name} added to the roster. To give them a login, add them under Settings → Users → Add Person.`, 'success');
   render();
+  // The shared roster (Supabase artists) is the owner -- write it there too.
+  if(sharedSyncAllowed()) supabaseClient.from('artists').insert(artistRowFor(artist)).select('id').single().then(({ data, error })=>{
+    if(error) toast(`${name} was added here, but not to the shared roster yet: ${error.message}`, 'system');
+    else { artist.dbId = data.id; saveArtists(); }
+  });
 }
 function logProjectEvent(p, type, text){ p.log.push({ts:new Date().toISOString(), type, text}); }
 function doAddProject(){
