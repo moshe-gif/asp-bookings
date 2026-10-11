@@ -18,7 +18,7 @@
 | Google Calendar holds | `gcal-*` Edge Functions | `ops/GOOGLE_CALENDAR_SETUP.md` | **Built, not connected**; holds also stay paused until the app passes the gig's `events` row id (gigs are shared since 2026-10-10; the hold code still checks for a uuid — audit 4.5) |
 | Gmail (Zelle notice matching) | `gmail-*` Edge Functions | `ops/GMAIL_SETUP.md` | **Built, not connected** |
 | Flight status | `flightaware-status` Edge Function (on-demand check from the event sheet / travel request) | `ops/FLIGHTAWARE_SETUP.md` | **Live when `FLIGHTAWARE_API_KEY` is set**; no automatic polling/email yet |
-| Data | Gigs: shared `events` table; contracts, payees, projects, invoices, external events, documents, travel: shared `app_records` (live sync). Pricing/org settings/roster edits: per-browser localStorage | CLAUDE.md "Where data lives" | Gigs **live** (2026-10-10); other records **live** (2026-10-11) |
+| Data | Gigs: shared `events` table; contracts, payees, projects, invoices, external events, documents, travel: shared `app_records` (live sync). office settings + pricing: shared `app_records` (`settings`). Roster edits + personal preferences: per-browser localStorage | CLAUDE.md "Where data lives" | Gigs **live** (2026-10-10); other records **live** (2026-10-11) |
 
 ---
 

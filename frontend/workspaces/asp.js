@@ -1392,7 +1392,7 @@ const adminById = (id)=>ADMIN_USERS.find(u=>u.id===id);
 // per-user getUserSettings() since this is an office-wide fact, not a personal preference.
 const ORG_SETTINGS_LS_KEY = 'asp_mock_org_settings_v1';
 function loadOrgSettings(){ try{ const raw = localStorage.getItem(ORG_SETTINGS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
-function saveOrgSettings(){ return persist(ORG_SETTINGS_LS_KEY, ORG_SETTINGS, 'office settings'); }
+function saveOrgSettings(){ const r = persist(ORG_SETTINGS_LS_KEY, ORG_SETTINGS, 'office settings'); if(SHARED) SHARED.settings.schedule(); return r; }
 let ORG_SETTINGS = loadOrgSettings();
 if(!ORG_SETTINGS) ORG_SETTINGS = { rivkyEmail:'' };
 if(ORG_SETTINGS.rivkyEmail===undefined) ORG_SETTINGS.rivkyEmail='';
@@ -1684,7 +1684,7 @@ function seedPricing(){
   return p;
 }
 function loadPricing(){ try{ const raw = localStorage.getItem(PRICING_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
-function savePricing(){ return persist(PRICING_LS_KEY, PRICING, 'pricing'); }
+function savePricing(){ const r = persist(PRICING_LS_KEY, PRICING, 'pricing'); if(SHARED) SHARED.settings.schedule(); return r; }
 let PRICING = loadPricing();
 if(!PRICING) PRICING = seedPricing();
 ARTISTS.forEach(a=>{ if(!PRICING[a.id]) PRICING[a.id] = {}; EVENT_TYPES.forEach((type,i)=>{ if(!PRICING[a.id][type]) PRICING[a.id][type] = { hourlyRate: 300 + a.slot*35 + i*15, includedHours: 2 }; }); });
@@ -2019,7 +2019,7 @@ function createSharedCollection(cfg){
         st.rowIds = new Map(rows.filter(r=>r.id).map(r=>[r.id, r.legacy_id]));
         const maxRemote = Math.max(1, ...rows.map(r=>(idNumber(r.legacy_id)||0)+1));
         if(cfg.getCounter() < maxRemote) cfg.setCounter(maxRemote);
-        st.on = true; saveMarker(); cfg.saveLocal(); subscribe(); render();
+        st.on = true; saveMarker(); cfg.saveLocal(); subscribe(); render(); schedule();
         return;
       }
       const known = marker || {};
@@ -2176,6 +2176,17 @@ function remapState(keys, map){ keys.forEach(k=>{ if(map.has(S[k])) S[k]=map.get
 // Only full timestamps can tell two records with the same id apart; a bare date (invoices, external
 // events, documents, projects) can't, so those collisions always re-number (worst case a duplicate, never a loss).
 const sameByCreated = (a,b)=>!!a.createdAt && String(a.createdAt).length>10 && a.createdAt===b.createdAt;
+// Office-wide settings documents (0036): one record each, wrapping the live objects. A browser's own
+// copy is only ever defaults or older edits, so the office's shared copy wins at first sign-in.
+function settingsDocs(){ return [{ id:'org', value:ORG_SETTINGS }, { id:'pricing', value:PRICING }]; }
+let SETTINGS_DOCS = settingsDocs();
+function adoptSettingsDocs(list){
+  const by = new Map(list.map(d=>[d.id, d]));
+  if(by.get('org') && by.get('org').value) ORG_SETTINGS = by.get('org').value;
+  if(by.get('pricing') && by.get('pricing').value) PRICING = by.get('pricing').value;
+  SETTINGS_DOCS = list.filter(d=>d.id==='org' || d.id==='pricing');
+  settingsDocs().forEach(d=>{ if(!by.has(d.id)) SETTINGS_DOCS.push(d); });
+}
 var SHARED = {
   events: createSharedCollection({ name:'events', label:'gigs', one:'gig', table:'events', markerKey:'asp_events_synced', backupKey:'asp_events_presync_backup',
     get:()=>S.events, set:v=>{ S.events = v; }, saveLocal:()=>persist(LS_KEY, S.events, 'gigs'),
@@ -2209,10 +2220,14 @@ var SHARED = {
   travel_requests: createSharedCollection({ name:'travel_requests', label:'travel requests', one:'travel request', table:'app_records', collection:'travel_requests',
     get:()=>TRAVEL_REQUESTS, set:v=>{ TRAVEL_REQUESTS = v; }, saveLocal:()=>persist(TRAVEL_REQUESTS_LS_KEY, TRAVEL_REQUESTS, 'travel requests'),
     prefix:'TRV-', getCounter:()=>TRVID, setCounter:n=>{ TRVID = n; }, sameRecord:sameByCreated, remapRefs:map=>remapState(['travelRequestDetailId'], map) }),
+  settings: createSharedCollection({ name:'settings', label:'office settings', one:'office setting', table:'app_records', collection:'settings',
+    get:()=>SETTINGS_DOCS, set:v=>adoptSettingsDocs(v), fromSeed:()=>true,
+    saveLocal:()=>{ adoptSettingsDocs(SETTINGS_DOCS); persist(ORG_SETTINGS_LS_KEY, ORG_SETTINGS, 'office settings'); persist(PRICING_LS_KEY, PRICING, 'pricing'); },
+    prefix:'SET-', getCounter:()=>1, setCounter:()=>{}, sameRecord:()=>true, remapRefs:()=>{} }),
 };
 async function startSharedSync(){
   // Payee profiles before contracts, gigs before what references them: re-numbering upstream first.
-  for(const k of ['events','payee_profiles','contracts','outside_bookings','documents','projects','invoices','travel_requests']){ await SHARED[k].start(); }
+  for(const k of ['settings','events','payee_profiles','contracts','outside_bookings','documents','projects','invoices','travel_requests']){ await SHARED[k].start(); }
 }
 function stopSharedSync(){ Object.values(SHARED).forEach(c=>c.stop()); }
 async function flushAndStopSharedSync(){ for(const c of Object.values(SHARED)) await c.flushAndStop(); }

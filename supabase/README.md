@@ -21,6 +21,7 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0033_payments_dedupe_constraint | Applied 2026-10-10 — unique (source, source_ref) on payments. |
 | 0034_oauth_states | Applied 2026-10-10 — one-time OAuth state table. |
 | 0035_app_records_shared_collections | Applied 2026-10-11 — generic admin-only `app_records` (collection, legacy_id, app_doc) + realtime; the app syncs contracts, payee profiles, projects, invoices, external events, documents and travel requests through it. The older relational `contracts`/`payee_profiles` tables are legacy snapshots nothing reads. |
+| 0036_app_records_settings | Applied 2026-10-11 — adds collection `settings` (office settings + pricing, one row each: `org`, `pricing`). |
 
 ## Edge Functions (`functions/`)
 Deploy: Supabase → Edge Functions → the function → paste the file's contents → Deploy. Secrets live

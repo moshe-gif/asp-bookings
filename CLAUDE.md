@@ -42,8 +42,10 @@
     references remapped, a browser's first admin sign-in uploads its local-only records once.
     Artists don't sync (RLS) and the test harness never does (`window.ASP_DISABLE_SHARED_SYNC`
     or `ASP_DISABLE_EVENT_SYNC`).
-  - **Still per-browser localStorage** (`asp_mock_*` keys): pricing, org settings, artist roster
-    edits. Never clear or "reset" it, never bump a storage key; back up via Settings → Back up my data.
+  - **Office settings and pricing: `app_records` collection `settings`** (since 2026-10-11, rows
+    `org` and `pricing`); the office's shared copy wins over a browser's own at first sign-in.
+  - **Still per-browser localStorage** (`asp_mock_*` keys): artist roster edits and personal
+    preferences (notification toggles). Never clear or "reset" it, never bump a storage key; back up via Settings → Back up my data.
 - **Not used:** `backend/proxy.js` and `deploy/*.js` are unused starter-kit templates (never
   deployed; the frontend makes no `/api/*` calls). Ignore the generic proxy/SFTP wording below.
 - **Tests:** `test-harness/` (Python Playwright, real browser) — runs against the **production**
