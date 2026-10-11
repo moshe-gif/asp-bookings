@@ -27,6 +27,7 @@ in Edge Function secrets (names in `.env.example` and each `ops/*_SETUP.md`).
 
 | Function | Enforce JWT verification | Called by | Setup doc |
 |---|---|---|---|
+| admin-remove-user | ON (admin-only) | Settings → Users → Edit → Remove (deletes the login; roster row too unless history references it) | this file |
 | oauth-start | ON (admin-only) | QuickBooks / Google Calendar / Gmail Connect buttons (issues the one-time OAuth state) | this file |
 | send-contract-email | ON (admin-only via `is_admin()`) | contract send, booking confirmation, reminders, travel requests | `ops/SEND_CONTRACT_SETUP.md` |
 | flightaware-status | ON | event-sheet flight card, travel-request segments | `ops/FLIGHTAWARE_SETUP.md` |

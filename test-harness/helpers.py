@@ -71,9 +71,6 @@ def dismiss_opener(page):
         opener.wait_for(state='detached', timeout=8000)
 
 
-def is_admin(user_id):
-    return user_id in ADMIN_IDS
-
 
 def login_as_real(page, email=None, password=None):
     """
