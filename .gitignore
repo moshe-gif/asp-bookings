@@ -7,3 +7,6 @@ test-harness/.venv/
 test-harness/.pytest_cache/
 test-harness/test-results/
 test-harness/__pycache__/
+
+# Personal Claude Code settings (permissions etc.) -- never commit
+.claude/settings.local.json
