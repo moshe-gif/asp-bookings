@@ -1,6 +1,6 @@
 // Receives QuickBooks' real-time webhook notifications (Phase 5 of the ops automation spec: "full
 // QuickBooks payment sync"). This is the PRIMARY signal for marking a deposit/balance received --
-// a scheduled reconciliation poll (see ops/QUICKBOOKS_WEBHOOK_SETUP.md) is the backup for anything
+// a scheduled reconciliation poll (NOT BUILT YET -- see ops/QUICKBOOKS_SETUP.md; tracked in the 2026-10-09 audit) would be the backup for anything
 // this misses (a dropped webhook, a missed signature, downtime).
 //
 // Deploy with JWT verification OFF (Intuit's webhook POST carries no Supabase auth token -- this

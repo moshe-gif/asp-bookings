@@ -1,3 +1,5 @@
+// UNUSED IN THIS REPO (ASP Bookings): starter-kit template, never deployed. The app's server side
+// is Supabase Edge Functions (supabase/functions, see supabase/README.md); deploy is GitHub Pages.
 // Deploy the frontend: SFTP frontend/index.html to the static host / server.
 // Reads connection details from ../.env (never committed). npm i ssh2-sftp-client
 const Client = require('ssh2-sftp-client');

@@ -1,3 +1,5 @@
+// UNUSED IN THIS REPO (ASP Bookings): starter-kit template, never deployed. The app's server side
+// is Supabase Edge Functions (supabase/functions, see supabase/README.md); deploy is GitHub Pages.
 // Zero-dependency Node proxy. Holds secrets server-side, gates /api/* behind verified
 // auth, encrypts sensitive state at rest. Run behind nginx+TLS via pm2. See SETUP.md.
 const http = require('http');

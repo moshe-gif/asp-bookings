@@ -45,6 +45,17 @@ playwright show-trace test-results/<failing-test-folder>/trace.zip
 That gives a full timeline replay of the failing run — DOM snapshots, network, console — usually
 enough to diagnose a failure without re-running anything interactively.
 
+## ⚠️ This harness runs against the PRODUCTION Supabase project
+There is no staging project yet (2026-10-09 audit 7.1). Every spec signs in to the live project
+with dedicated `test-*@aspmgmt.com` accounts, so:
+- **Auth rate limits are shared with real staff.** Many full runs in a short time can make sign-in
+  fail with "Failed to fetch"/401 for a few minutes — rerun the failing specs later before assuming a bug.
+- **Specs must not write real shared data.** Gig data is seeded per test browser (`seed_events`);
+  `window.ASP_DISABLE_EVENT_SYNC` will keep test gigs out of the shared gig list once that ships.
+  `test_passkey.py` registers and then removes a passkey on the test account.
+- Accounts in `ROLE_EMAILS` exist only for the 9 roles listed; the `admin_coo` role and the artist
+  `shmili` have no test accounts yet, so the sweeps don't cover them (audit 7.3).
+
 ## Real-auth test account setup
 
 Navigation/data-layer refactor, PR 18: Demo Mode is gone from the app entirely (flip-the-switch

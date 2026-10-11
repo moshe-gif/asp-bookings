@@ -1,5 +1,10 @@
 # Setup — hosting (HTTPS-first), git, naming
 
+> **Generic starter-kit guide.** For how *this* app (ASP Bookings) is actually set up — GitHub
+> Pages + Supabase (auth, database, Edge Functions), no Firebase, no server — read CLAUDE.md
+> "This repo — facts" and INTEGRATIONS.md "Status in this app". The sections below are the kit's
+> general options.
+
 ## The complete "accounts you need" list (to build a kit-style app from zero)
 1. **GitHub account** (one PER company — see §3): code home + free HTTPS hosting via Pages.
 2. **Google account** (the company's): Firebase/Firestore for data (see INTEGRATIONS.md §5

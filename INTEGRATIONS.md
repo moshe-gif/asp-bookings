@@ -2,8 +2,23 @@
 
 > How to wire ANY third-party capability into a kit-style app. Entries marked **✓ proven** have
 > been used in production by the owner and are the default choice; alternatives are listed for
-> when the default doesn't fit. Everything with a secret key goes through the proxy — never the
+> when the default doesn't fit. Everything with a secret key goes through the server side — never the
 > browser. Read the relevant section BEFORE adding an integration; the gotchas here were paid for.
+>
+> **In this app "the proxy" means Supabase Edge Functions** (`supabase/functions/*`, secrets in
+> Edge Function secrets). `backend/proxy.js` is an unused starter-kit template. Generic sections
+> below (Firestore, droplets, the proxy) describe the kit's options, not what ASP Bookings uses.
+
+## Status in this app (ASP Bookings) — keep current
+| Capability | How it's done here | Setup doc | Status (2026-10-10) |
+|---|---|---|---|
+| Sign-in | Supabase Auth: passkeys + emailed one-time code, from office@aspmgmt.com via Google SMTP | §4 below | **Live** |
+| Client email (contracts, confirmations, reminders, travel requests) | `send-contract-email` Edge Function → Google Apps Script mail relay | `ops/SEND_CONTRACT_SETUP.md` | **Live** (admin-only) |
+| QuickBooks invoices + payment webhook | `qbo-*` Edge Functions | `ops/QUICKBOOKS_SETUP.md` | **Built, not connected** (client ID empty). Complete the go-live checklist (2026-10-09 audit W2-1) before connecting |
+| Google Calendar holds | `gcal-*` Edge Functions | `ops/GOOGLE_CALENDAR_SETUP.md` | **Built, not connected**; holds paused until gigs live in the shared `events` table (audit 4.5) |
+| Gmail (Zelle notice matching) | `gmail-*` Edge Functions | `ops/GMAIL_SETUP.md` | **Built, not connected** |
+| Flight status | `flightaware-status` Edge Function (on-demand check from the event sheet / travel request) | `ops/FLIGHTAWARE_SETUP.md` | **Live when `FLIGHTAWARE_API_KEY` is set**; no automatic polling/email yet |
+| Data | Browser localStorage (per browser) + partial Supabase tables | CLAUDE.md "Where data lives" | **Moving to Supabase** (migration 0032 prepared) |
 
 ---
 
@@ -187,11 +202,10 @@ For a "enter a flight/confirmation number, get live status updates" feature (ASP
   departing/landing within the next few hours) → diff against last-known status → if changed, send
   the ASP-branded update email through the existing send mechanism (§1). Never call these APIs
   client-side — keys go through the proxy like everything else.
-- **In-app today (ASP Bookings mockup):** fully simulated — entering a flight/confirmation number
-  enables a "Check for Update" button that cycles through a fixed realistic status sequence (On
-  time → Gate assigned → Boarding → Departed → In flight → Landed) and logs a mocked branded-email
-  activity entry each time, matching the app's established "mocked send, real data" convention. No
-  real flight is ever queried. Swap the button's handler for the real poll-and-diff job above once
+- **In-app today:** real on-demand checks — the event sheet's flight card and each travel-request
+  segment call the `flightaware-status` Edge Function (FlightAware AeroAPI) for the flight on its
+  travel date; nothing is emailed. (Until 2026-10-09 a leftover mock cycled through fake statuses
+  and logged fake "emailed" updates.) Automatic polling + client/artist update emails are not built. Swap the button's handler for the real poll-and-diff job above once
   a provider key exists.
 
 ---

@@ -38,9 +38,10 @@ moves status `lead`/`negotiating` → `contract_sent`).
 **Recipient:** client.
 **Content:** the ASP contract (see the in-app Contract doc template) + a QuickBooks-generated
 invoice link for the 15% booking fee.
-**In-app today:** fully simulated — `doSendContract()` logs `"Contract + QuickBooks invoice (15%
-booking fee) emailed to {client}."` and toasts. This is the reference wording; no changes needed
-here, just wire to a real QuickBooks invoice + email send later.
+**In-app today:** real. The event sheet's contract button opens the Contract Builder; sending
+emails the contract through `send-contract-email` (optionally with a QuickBooks deposit invoice once
+QuickBooks is connected) and moves the lead to Contract Sent. A contract that went out another way
+can be marked Sent by hand in the builder. (Until 2026-10-09 the button only faked a send.)
 
 ## 3. 15% received → booking confirmed
 
@@ -126,6 +127,7 @@ transaction history).
 
 ## Open items / not yet specified
 - Real email address for Moshe's own notifications (Daily Digest, §3, §6) — office accounts today
-  are `bookings@`/`bookkeeping@`/`ilan@aspmanagement.com`; Moshe isn't one of them.
+  are `bookings@`/`bookkeeping@`/`ilan@` (aspmgmt.com). Moshe has his own admin login (role
+  `admin_coo`, migration 0030); notifications to him still need an address decision.
 - Whether the Daily Digest's WhatsApp message should also cover artist follow-ups (e.g. an artist
   who hasn't confirmed something) or stay scoped to client leads only, as asked.

@@ -1,3 +1,5 @@
+// UNUSED IN THIS REPO (ASP Bookings): starter-kit template, never deployed. The app's server side
+// is Supabase Edge Functions (supabase/functions, see supabase/README.md); deploy is GitHub Pages.
 // Deploy the backend: SFTP backend/proxy.js to the server, then restart pm2.
 // GATED: backend deploys touch live secrets/auth — run intentionally, per-time.
 // npm i ssh2-sftp-client ssh2
