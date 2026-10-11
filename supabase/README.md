@@ -23,6 +23,7 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0035_app_records_shared_collections | Applied 2026-10-11 — generic admin-only `app_records` (collection, legacy_id, app_doc) + realtime; the app syncs contracts, payee profiles, projects, invoices, external events, documents and travel requests through it. The older relational `contracts`/`payee_profiles` tables are legacy snapshots nothing reads. |
 | 0037_artists_roster_owner | Applied 2026-10-11 — `artists` is the roster's one owner (the app loads it at sign-in and it wins); email optional; Shmili Landau's row added. |
 | 0036_app_records_settings | Applied 2026-10-11 — adds collection `settings` (office settings + pricing, one row each: `org`, `pricing`). |
+| 0038_artist_portal_views | **Not yet applied** — `artist_gig_view` + `artist_finance_view` (security-barrier views scoped by `current_artist_id()`) for the artist portal. After applying, run `0038_test_artist_isolation.sql` (rolls back); every row must be ok = true. |
 
 ## Edge Functions (`functions/`)
 Deploy: Supabase → Edge Functions → the function → paste the file's contents → Deploy. Secrets live

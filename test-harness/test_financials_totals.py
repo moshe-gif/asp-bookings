@@ -15,7 +15,8 @@ JAN_1 = TODAY.replace(month=1, day=1).isoformat()
 GIGS = [
     fake_gig("EV-9301", "benny", OLD, price=5000, commission=750),
     fake_gig("EV-9302", "benny", THIS_MONTH, price=7000, commission=1050,
-             balanceReceived=True, balanceReceivedDate=JAN_1, status="paid"),
+             balanceReceived=True, balanceReceivedDate=JAN_1, status="paid",
+             artistPaidOut=True, artistPaidOutDate=JAN_1),
 ]
 
 
@@ -38,5 +39,6 @@ def test_ytd_counts_a_january_first_payment(live_server, page):
     page.goto(live_server)
     login_as(page, "benny")
     goto_nav(page, "a_financials")
-    tile = page.locator(".stat-tile", has_text="YTD Payout").first
-    assert "$5,950" in tile.inner_text(), tile.inner_text()  # 7000 - 1050 commission, received Jan 1
+    # Artist YTD = paid to the artist this year, by payout date (2026-10-11 artist portal).
+    tile = page.locator(".stat-tile", has_text="(YTD)").first
+    assert "$5,950" in tile.inner_text(), tile.inner_text()  # 7000 - 1050 commission, paid out Jan 1
