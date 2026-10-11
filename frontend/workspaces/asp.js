@@ -3695,7 +3695,7 @@ function renderTravelPage(events, opts={}){
 
   <div class="section-head"><h2>Upcoming Itineraries (${readyItineraries.length})</h2></div>
   ${!readyItineraries.length ? `<div class="card empty">Nothing here yet.</div>` : `
-  <div class="card u-scroll-x table-cards"><table>
+  <div class="card table-cards"><table>
     <thead><tr>${showArtist?'<th>Artist</th>':''}<th>Type</th><th>Date</th><th>Flight</th><th>Ground</th><th></th></tr></thead>
     <tbody>
       ${readyItineraries.map(e=>{
@@ -3808,7 +3808,7 @@ function renderCalendarPage(events, opts={}){
 // session.
 function renderEventTable(events, opts={}){
   if(!events.length) return `<div class="card empty">Nothing here yet.</div>`;
-  return `<div class="card u-scroll-x table-cards"><table>
+  return `<div class="card table-cards"><table>
     <thead><tr>
       ${opts.showArtist?'<th>Artist</th>':''}
       <th>Client</th><th>Type</th><th>Date</th><th>Location</th><th>${opts.asArtist?'Your Fee':'Price'}</th><th>Status</th>
@@ -3945,7 +3945,7 @@ function renderPricingPage(){
   return `
   <p style="font-size:12.5px;color:var(--ink-3);margin:0 0 16px;max-width:640px;">Standard hourly rates by artist and event type — the reference bookkeeping quotes from before negotiating a final flat price. Overtime is always time-and-a-half (1.5×), prorated to the minute past the included hours, not a separately set rate.</p>
   ${renderArtistFilterRow(artistId, 'pricing-artist', {noAll:true})}
-  <div class="card u-scroll-x table-cards">
+  <div class="card table-cards">
     <table>
       <thead><tr><th>Event Type</th><th>Hourly Rate</th><th>Included Hours</th><th>Overtime (1.5×/hr, prorated)</th></tr></thead>
       <tbody>
@@ -4002,7 +4002,7 @@ function renderFinancialsPage(){
   </div>
 
   <div class="section-head"><h2>Artist Payouts — Gig Breakdown (${payoutEligible.length})</h2></div>
-  ${payoutEligible.length? `<div class="card u-scroll-x table-cards" style="margin-bottom:22px;"><table>
+  ${payoutEligible.length? `<div class="card table-cards" style="margin-bottom:22px;"><table>
     <thead><tr><th>Artist</th><th>Client</th><th>Date</th><th>Fee</th><th>ASP Cut</th><th>Charges</th><th>Payout</th><th>Status</th><th></th></tr></thead>
     <tbody>${payoutEligible.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const a=artistById(e.artistId); const amt=artistPayout(e);
       return `<tr>
@@ -4046,7 +4046,7 @@ function renderFinancialsPage(){
   </div>
 
   <div class="section-head"><h2>Custom Invoices (${CUSTOM_INVOICES.length})</h2><button class="btn btn-sm btn-primary" data-action="open-new-invoice">+ New Invoice</button></div>
-  <div class="card u-scroll-x table-cards" style="margin-bottom:22px;"><table>
+  <div class="card table-cards" style="margin-bottom:22px;"><table>
     <thead><tr><th>Client</th><th>Items</th><th>Total</th><th>Date</th><th>Status</th><th></th></tr></thead>
     <tbody>${CUSTOM_INVOICES.length? CUSTOM_INVOICES.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(inv=>{
       const t = invoiceTotal(inv);
@@ -4060,7 +4060,7 @@ function renderFinancialsPage(){
     </tbody></table></div>
 
   <div class="section-head"><h2>All Jobs (${booked.length})</h2><button class="btn btn-sm" data-action="export-csv">${ICO.leads} Export CSV</button></div>
-  <div class="card u-scroll-x table-cards"><table>
+  <div class="card table-cards"><table>
     <thead><tr><th>Artist</th><th>Client</th><th>Date</th><th>Price</th><th>Commission</th><th>Payout</th><th>Status</th></tr></thead>
     <tbody>${booked.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const a=artistById(e.artistId); const sm=statusMeta(e);
       return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
@@ -4082,7 +4082,7 @@ function renderOutsideBookingsPage(){
 
   <div class="section-head"><h2>External Events (${OUTSIDE_BOOKINGS.length})</h2><button class="btn btn-sm btn-primary" data-action="open-new-outside-booking">+ New External Event</button></div>
   <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Jobs that don't involve one of our own roster artists — outside acts we coordinate or refer. Kept separate from ASP's own leads/calendar unless explicitly shown there.</p>
-  <div class="card u-scroll-x table-cards"><table>
+  <div class="card table-cards"><table>
     <thead><tr><th>Performer</th><th>Event</th><th>Client</th><th>Date</th><th>Total</th><th>ASP Cut</th><th>Payout</th><th>Reminders</th><th>Status</th><th></th></tr></thead>
     <tbody>${OUTSIDE_BOOKINGS.length? OUTSIDE_BOOKINGS.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(b=>{
       const openReminders = outsideBookingOpenReminders(b);
@@ -4214,7 +4214,7 @@ function renderDocumentsPage(){
   return `
   <div class="section-head"><h2>Documents (${DOCUMENTS.length})</h2><button class="btn btn-sm btn-primary" data-action="open-new-document">${ICO.plus} New Document</button></div>
   <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Contracts, proposals, riders — for one of our own artists, an outside act, or general use. ASP letterhead and signature throughout (or SING Entertainment's, when that's the signing party).</p>
-  ${DOCUMENTS.length? `<div class="card u-scroll-x table-cards"><table>
+  ${DOCUMENTS.length? `<div class="card table-cards"><table>
     <thead><tr><th>Title</th><th>For</th><th>Letterhead</th><th>Date</th><th>Status</th></tr></thead>
     <tbody>${DOCUMENTS.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(d=>{
       return `<tr class="row-link" data-action="open-document" data-id="${d.id}">
@@ -4253,7 +4253,7 @@ function renderContractsPage(){
   <div class="field" style="max-width:340px;margin-bottom:14px;">
     <input id="contractSearchInput" value="${esc(S.contractSearchQuery||'')}" placeholder="Search client or artist..."/>
   </div>
-  ${rows.length? `<div class="card u-scroll-x table-cards"><table>
+  ${rows.length? `<div class="card table-cards"><table>
     <thead><tr><th>Client</th><th>Artist</th><th>Date</th><th>Status</th></tr></thead>
     <tbody>${rows.map(e=>{
       const a = artistById(e.artistId); const sm = statusMeta(e);
@@ -4675,7 +4675,7 @@ function renderArtistFinancials(artistId){
   </div>
 
   <div class="section-head"><h2>My Jobs (${booked.length})</h2></div>
-  <div class="card u-scroll-x table-cards"><table>
+  <div class="card table-cards"><table>
     <thead><tr><th>Client</th><th>Date</th><th>Your Fee</th><th>Status</th></tr></thead>
     <tbody>${booked.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const sm=statusMeta(e);
       return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
@@ -5067,11 +5067,11 @@ function renderEventSheet(ev){
         </div>` : ''}
 
         <div class="card card-pad" style="display:flex;flex-direction:column;gap:9px;">
-          ${!ev.unpaid ? `<div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">${ICO.pin} Client</span><strong>${esc(ev.clientName)}</strong></div>` : ''}
-          <div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">Type</span><strong>${esc(ev.type)}</strong></div>
-          ${ev.type==='Wedding' ? `<div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">Band</span><strong style="text-align:right;">${ev.band? esc(ev.band) : `<span style="color:var(--ink-3);font-weight:500;">${isAdmin?'Not set':'TBD'}</span>`}${ev.bandSize?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(String(ev.bandSize))} piece${Number(ev.bandSize)===1?'':'s'}</span>`:''}</strong></div>` : ''}
-          <div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">${ICO.clock} Date &amp; Time</span><strong class="u-mono">${fmtDate(ev.date)} · ${fmtTimeRange(ev.time, ev.endTime)}</strong></div>
-          <div style="display:flex;justify-content:space-between;font-size:13.5px;">
+          ${!ev.unpaid ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.pin} Client</span><strong>${esc(ev.clientName)}</strong></div>` : ''}
+          <div class="kv-row"><span style="color:var(--ink-2);">Type</span><strong>${esc(ev.type)}</strong></div>
+          ${ev.type==='Wedding' ? `<div class="kv-row"><span style="color:var(--ink-2);">Band</span><strong style="text-align:right;">${ev.band? esc(ev.band) : `<span style="color:var(--ink-3);font-weight:500;">${isAdmin?'Not set':'TBD'}</span>`}${ev.bandSize?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(String(ev.bandSize))} piece${Number(ev.bandSize)===1?'':'s'}</span>`:''}</strong></div>` : ''}
+          <div class="kv-row"><span style="color:var(--ink-2);">${ICO.clock} Date &amp; Time</span><strong class="u-mono">${fmtDate(ev.date)} · ${fmtTimeRange(ev.time, ev.endTime)}</strong></div>
+          <div class="kv-row">
             <span style="color:var(--ink-2);">${ICO.pin} Venue</span>
             <span style="text-align:right;">
               <strong>${ev.venue? esc(ev.venue) : `<span style="color:var(--ink-3);font-weight:500;">TBD</span>`}${(ev.city||ev.state)?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.city)}${ev.city&&ev.state?', ':''}${esc(ev.state)}</span>`:''}</strong>
@@ -5081,15 +5081,15 @@ function renderEventSheet(ev){
               </div>`:''}
             </span>
           </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;">
+          <div class="kv-row" style="align-items:center;">
             <span style="color:var(--ink-2);">Dress Code</span>
             <span style="display:flex;align-items:center;gap:6px;">
               <strong style="text-align:right;">${ev.dressCode? esc(ev.dressCode) : `<span style="color:var(--ink-3);font-weight:500;">${isAdmin?'Not set':'TBD'}</span>`}</strong>
               ${isAdmin? `<button class="icon-btn" data-action="open-dresscode-form" style="width:20px;height:20px;" title="Edit dress code" aria-label="Edit dress code">${ICO.edit}</button>`:''}
             </span>
           </div>
-          ${isAdmin && !ev.unpaid?`<div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;">${esc(ev.clientEmail)}<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.clientPhone)}</span></strong></div>`:''}
-          ${isAdmin && !ev.unpaid && !isStandardPayment(ev) ? `<div style="display:flex;justify-content:space-between;font-size:13.5px;"><span style="color:var(--ink-2);">${ICO.money} Payment Method</span><strong style="text-align:right;color:var(--warn-ink);">${esc(paymentMethodLabel(ev))}${ev.paymentMethodNote?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.paymentMethodNote)}</span>`:''}</strong></div>` : ''}
+          ${isAdmin && !ev.unpaid?`<div class="kv-row"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;">${esc(ev.clientEmail)}<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.clientPhone)}</span></strong></div>`:''}
+          ${isAdmin && !ev.unpaid && !isStandardPayment(ev) ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.money} Payment Method</span><strong style="text-align:right;color:var(--warn-ink);">${esc(paymentMethodLabel(ev))}${ev.paymentMethodNote?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.paymentMethodNote)}</span>`:''}</strong></div>` : ''}
         </div>
 
         ${isAdmin ? renderLeadContractsCard(ev) : ''}
@@ -6084,12 +6084,12 @@ function renderContractBuilderModal(){
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--surface-2);">
           ${isContractApproved(c)
-            ? `<span class="pill pill-good">Approved for sending — ${esc(adminById(c.approvedBy)?adminById(c.approvedBy).name:'admin')}, ${fmtDateShort(c.approvedAt.slice(0,10))}</span>
+            ? `<span class="pill pill-wrap pill-good">Approved for sending — ${esc(adminById(c.approvedBy)?adminById(c.approvedBy).name:'admin')}, ${fmtDateShort(c.approvedAt.slice(0,10))}</span>
                <button class="btn btn-sm btn-ghost" data-action="revoke-contract-approval" data-id="${c.id}">Revoke</button>`
             : c.approvedAt
-            ? `<span class="pill pill-warn">Money/terms changed since approval — re-approve before sending</span>
+            ? `<span class="pill pill-wrap pill-warn">Money/terms changed since approval — re-approve before sending</span>
                <button class="btn btn-sm" data-action="approve-contract-for-sending" data-id="${c.id}">Re-approve</button>`
-            : `<span class="pill pill-neutral">Not yet approved — money/terms must be approved before this contract can be sent</span>
+            : `<span class="pill pill-wrap pill-neutral">Not yet approved — money/terms must be approved before this contract can be sent</span>
                <button class="btn btn-sm" data-action="approve-contract-for-sending" data-id="${c.id}">Approve for Sending</button>`}
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
@@ -6666,7 +6666,7 @@ function renderContractsBuilderListPage(){
       <button class="filter-chip ${statusFilter==='all'?'sel':''}" data-action="filter-contracts-status" data-status="all">All</button>
       ${['draft','sent','signed','void'].map(s=>`<button class="filter-chip ${statusFilter===s?'sel':''}" data-action="filter-contracts-status" data-status="${s}">${esc(contractStatusLabel(s))}</button>`).join('')}
     </div>
-    ${list.length? `<div class="card u-scroll-x table-cards"><table>
+    ${list.length? `<div class="card table-cards"><table>
       <thead><tr><th>Client</th><th>Performer</th><th>Template</th><th>Event Date</th><th>Status</th></tr></thead>
       <tbody>${list.map(c=>`<tr class="row-link" data-action="open-contract-builder" data-id="${c.id}">
         <td data-label="Client">${esc(c.snapshot.clientName)||'—'}</td>

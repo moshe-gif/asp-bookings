@@ -145,6 +145,9 @@ review its code (see PR Process step 5).** These are the owner's standing rules 
   micro-labels with letter-spacing for stat labels / table headers / section labels. Antialiased.
 - Data-dense but breathable; subtle ~.15–.2s transitions and tiny hover lift only.
 - Mobile = native-app feel (bottom nav, safe-area insets, bottom-sheet modals), not a shrunk desktop.
+- No sideways scrolling anywhere, modals included — wrap/stack, never clip or add a horizontal
+  scroller. Grid tracks are `minmax(0,1fr)`, not `1fr`; label/value rows use `.kv-row`; sentence-
+  length pills use `.pill-wrap`. `test-harness/test_no_horizontal_overflow.py` enforces it.
 - Avoid: loud gradients, neon glows, shadow overload, decorative emoji chrome, blobby shapes,
   comic fonts, skeuomorphism, gimmicky animation. When unsure, choose the more restrained option.
 
