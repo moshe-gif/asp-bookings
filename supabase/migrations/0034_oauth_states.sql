@@ -1,5 +1,5 @@
 -- 0034: one-time OAuth `state` values for QuickBooks / Google Calendar / Gmail connections
--- (2026-10-09 audit 1.2). Applied: <date — run after 0033>
+-- (2026-10-09 audit 1.2). Applied: 2026-10-10 (Supabase Management API, verified)
 --
 -- The oauth-start Edge Function (signed-in admins only) inserts a random nonce here; the matching
 -- *-oauth-callback deletes-and-returns it, rejecting unknown, reused, expired or wrong-provider
