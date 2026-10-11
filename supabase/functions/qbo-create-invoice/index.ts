@@ -89,13 +89,26 @@ Deno.serve(async (req) => {
   const { data: isAdmin, error: adminErr } = await supabase.rpc("is_admin");
   if (adminErr || !isAdmin) return json({ ok: false, error: "not authorized" }, 403);
 
-  let body: { clientName?: string; clientEmail?: string; amount?: number; description?: string; eventId?: string; contractId?: string };
+  let body: { clientName?: string; clientEmail?: string; amount?: number; description?: string; eventId?: string; contractId?: string; idempotencyKey?: string };
   try {
     body = await req.json();
   } catch {
     return json({ ok: false, error: "bad json" }, 400);
   }
-  const { clientName, clientEmail, amount, description, eventId, contractId } = body || {};
+  const { clientName, clientEmail, amount, description, eventId, contractId, idempotencyKey } = body || {};
+  // Idempotency (2026-10-09 audit 2.14): QuickBooks treats repeated POSTs with the same `requestid`
+  // as one request, so a double-click, a retry or a second open tab can't bill the client twice.
+  // The app sends one stable key per contract deposit invoice.
+  if (!idempotencyKey || !/^[A-Za-z0-9-]{3,60}$/.test(idempotencyKey)) {
+    return json({ ok: false, error: "missing or invalid idempotencyKey" }, 400);
+  }
+  // QuickBooks returns the cached original response for a repeated requestid WITHOUT comparing the
+  // body, so the key must cover what is being billed: the same contract + amount + recipient +
+  // description dedupes (double-click, second tab), while a corrected resend gets a new invoice.
+  // The customer key depends on the email only (one QuickBooks customer per client email).
+  const sha = async (text: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))), (b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+  const invoiceKey = await sha(`${idempotencyKey}|${amount}|${clientEmail.toLowerCase()}|${description || "Deposit"}`);
+  const customerKey = await sha(`customer|${clientEmail.toLowerCase()}`);
   if (!clientName || !clientEmail || !amount || amount <= 0) {
     return json({ ok: false, error: "missing or invalid fields (clientName, clientEmail, amount required)" }, 400);
   }
@@ -111,7 +124,7 @@ Deno.serve(async (req) => {
     let customerId = queryData?.QueryResponse?.Customer?.[0]?.Id;
 
     if (!customerId) {
-      const custResp = await qboFetch(`/customer`, {
+      const custResp = await qboFetch(`/customer?requestid=${customerKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ DisplayName: clientName, PrimaryEmailAddr: { Address: clientEmail } }),
@@ -121,7 +134,7 @@ Deno.serve(async (req) => {
       customerId = custData.Customer.Id;
     }
 
-    const invoiceResp = await qboFetch(`/invoice`, {
+    const invoiceResp = await qboFetch(`/invoice?requestid=${invoiceKey}i`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -139,7 +152,7 @@ Deno.serve(async (req) => {
     const invoiceId = invoiceData.Invoice.Id;
     const docNumber = invoiceData.Invoice.DocNumber;
 
-    const sendResp = await qboFetch(`/invoice/${invoiceId}/send?sendTo=${encodeURIComponent(clientEmail)}`, { method: "POST" });
+    const sendResp = await qboFetch(`/invoice/${invoiceId}/send?sendTo=${encodeURIComponent(clientEmail)}&requestid=${invoiceKey}s`, { method: "POST" });
     if (!sendResp.ok) {
       const sendData = await sendResp.json().catch(() => ({}));
       return json({ ok: false, error: sendData?.Fault?.Error?.[0]?.Message || "invoice created but could not be emailed", invoiceId }, 502);

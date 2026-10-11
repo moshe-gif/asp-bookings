@@ -74,18 +74,26 @@ async function verifySignature(rawBody: string, signatureHeader: string | null):
   );
   const sigBytes = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody));
   const computed = btoa(String.fromCharCode(...new Uint8Array(sigBytes)));
-  return computed === signatureHeader;
+  return timingSafeEqual(computed, signatureHeader);
 }
 
-// Records one payment notification, deduped by (source='quickbooks', source_ref=qboPaymentId) --
-// an idempotent upsert since QuickBooks can redeliver the same webhook more than once.
+// Constant-time string compare, so response timing can't be used to guess a valid signature.
+function timingSafeEqual(a: string, b: string): boolean {
+  const ea = new TextEncoder().encode(a), eb = new TextEncoder().encode(b);
+  let diff = ea.length ^ eb.length;
+  for (let i = 0; i < Math.max(ea.length, eb.length); i++) diff |= (ea[i] ?? 0) ^ (eb[i] ?? 0);
+  return diff === 0;
+}
+
+// Records one payment notification, deduped by (source='quickbooks', source_ref=qboPaymentId).
+// One atomic upsert on the unique (source, source_ref) constraint (migration 0033): QuickBooks can
+// redeliver the same webhook, and two concurrent deliveries used to both pass a select-then-insert
+// check and create duplicate "received" payments. Errors are thrown so they reach the log.
 async function upsertPayment(sb: ReturnType<typeof serviceClient>, row: Record<string, unknown>) {
-  const { data: existing } = await sb.from("payments").select("id").eq("source", "quickbooks").eq("source_ref", row.source_ref).maybeSingle();
-  if (existing) {
-    await sb.from("payments").update(row).eq("id", existing.id);
-  } else {
-    await sb.from("payments").insert(row);
-  }
+  // ignoreDuplicates: a redelivery (or a later Intuit "Update" event) must not reset a payment an
+  // admin has already reviewed back to unmatched/needs_review. The first record stands.
+  const { error } = await sb.from("payments").upsert(row, { onConflict: "source,source_ref", ignoreDuplicates: true });
+  if (error) throw new Error(`payments upsert failed: ${error.message}`);
 }
 
 async function handlePaymentEntity(sb: ReturnType<typeof serviceClient>, qboPaymentId: string) {
@@ -133,7 +141,8 @@ async function handlePaymentEntity(sb: ReturnType<typeof serviceClient>, qboPaym
   });
 
   const qbStatus = kind === "partial" ? "partially_paid" : "paid";
-  await sb.from("qbo_invoices").update({ status: qbStatus, updated_at: new Date().toISOString() }).eq("id", invoiceRow.id);
+  const { error: invErr } = await sb.from("qbo_invoices").update({ status: qbStatus, updated_at: new Date().toISOString() }).eq("id", invoiceRow.id);
+  if (invErr) throw new Error(`qbo_invoices update failed: ${invErr.message}`);
 }
 
 Deno.serve(async (req) => {
@@ -155,7 +164,17 @@ Deno.serve(async (req) => {
   }
 
   const sb = serviceClient();
+  if (!payload.eventNotifications?.length) {
+    // Unknown/new payload shape (e.g. Intuit's CloudEvents format) -- log it instead of silently dropping.
+    console.error("qbo-webhook: no eventNotifications in payload; first 300 chars:", rawBody.slice(0, 300));
+  }
+  // Only process notifications for the QuickBooks company ASP actually connected.
+  const { data: conn } = await sb.from("qbo_connection").select("realm_id").eq("id", 1).maybeSingle();
   for (const notif of payload.eventNotifications || []) {
+    if (!conn?.realm_id || notif.realmId !== conn.realm_id) {
+      console.error("qbo-webhook: ignoring notification for unexpected realm", notif.realmId);
+      continue;
+    }
     for (const entity of notif.dataChangeEvent?.entities || []) {
       if (entity.name === "Payment") {
         try {

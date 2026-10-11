@@ -12,13 +12,33 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
+// One-time OAuth `state` issued by the oauth-start function to a signed-in admin (migration 0034).
+// Consumed here before anything else: an unknown, reused, expired or wrong-provider state is
+// rejected, so nobody can complete a connect flow ASP didn't start or attach their own account
+// to ASP's connection (2026-10-09 audit 1.2).
+async function consumeOAuthState(sb: any, state: string | null, provider: string) {
+  if (!state) return null;
+  const { data, error } = await sb.from("oauth_states").delete()
+    .eq("nonce", state).eq("provider", provider).gt("expires_at", new Date().toISOString())
+    .select("user_id, mailbox_id").maybeSingle();
+  if (error) { console.error("OAuth state check failed", error); return null; }
+  return data;
+}
+
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
-  const mailboxId = url.searchParams.get("state");
   const appUrl = Deno.env.get("APP_URL") || "https://app.aspmgmt.com";
 
-  if (!code || !mailboxId) {
+  if (!code) {
+    return Response.redirect(`${appUrl}/?gmail=error#/settings`, 302);
+  }
+  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  // The mailbox comes from the consumed state row (set by oauth-start), never from the URL.
+  const st = await consumeOAuthState(sb, url.searchParams.get("state"), "gmail");
+  const mailboxId = st && st.mailbox_id;
+  if (!mailboxId) {
+    console.error("Gmail OAuth callback: missing/invalid/expired state");
     return Response.redirect(`${appUrl}/?gmail=error#/settings`, 302);
   }
 
@@ -47,14 +67,21 @@ Deno.serve(async (req) => {
   }
 
   const tokens = await tokenResp.json();
-  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
   // Confirm the mailbox row this state refers to actually exists before writing a token for it --
   // state is round-tripped by Google verbatim, but never trust it blindly.
-  const { data: mailbox } = await sb.from("gmail_mailboxes").select("id").eq("id", mailboxId).maybeSingle();
+  const { data: mailbox } = await sb.from("gmail_mailboxes").select("id, email").eq("id", mailboxId).maybeSingle();
   if (!mailbox) {
     console.error("Gmail OAuth callback: unknown mailbox id in state", mailboxId);
     return Response.redirect(`${appUrl}/?gmail=error#/settings`, 302);
+  }
+  // The Google account that consented must BE the mailbox being connected -- otherwise someone
+  // could attach a different inbox to an artist's payment-matching mailbox.
+  const profResp = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+  const profile = profResp.ok ? await profResp.json() : null;
+  if (!profile?.emailAddress || String(profile.emailAddress).toLowerCase() !== String(mailbox.email || "").toLowerCase()) {
+    console.error("Gmail OAuth callback: signed-in Google account does not match the mailbox", profile?.emailAddress, mailbox.email);
+    return Response.redirect(`${appUrl}/?gmail=mismatch#/settings`, 302);
   }
 
   const accessExpires = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
