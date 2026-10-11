@@ -17,7 +17,7 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 |---|---|
 | 0001–0030 | Applied before 2026-10-09 (exact dates not recorded). 0004/0005 company scoping was reverted by 0006. |
 | 0031_rls_and_security_advisor_fixes | Applied 2026-10-10 — payee/activity-log RLS, orphaned artist write policies, Security Advisor fixes (ERROR gone; remaining WARNs are the intended `authenticated` grants on the RLS helper functions). |
-| 0032_shared_events_app_doc | Applied 2026-10-10 — shared gig list storage (events.app_doc + derived columns + realtime). The app's sync code is not shipped yet. |
+| 0032_shared_events_app_doc | Applied 2026-10-10 — shared gig list (events.app_doc + derived columns + realtime); the app syncs gigs through it since 2026-10-10. |
 | 0033_payments_dedupe_constraint | Applied 2026-10-10 — unique (source, source_ref) on payments. |
 | 0034_oauth_states | Applied 2026-10-10 — one-time OAuth state table. |
 

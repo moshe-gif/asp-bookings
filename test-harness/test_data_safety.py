@@ -7,7 +7,7 @@
 """
 import json
 
-from helpers import login_as, goto_nav, collect_console_errors, fake_gig, seed_events, EVENTS_LS_KEY, create_lead
+from helpers import login_as, goto_nav, collect_console_errors, fake_gig, seed_events, EVENTS_LS_KEY, create_lead, no_shared_sync
 
 
 def _open_settings(page):
@@ -30,7 +30,7 @@ def test_backup_then_restore_merges_without_touching_existing(live_server, page,
     assert any(e["id"] == "EV-9201" for e in backup["data"][EVENTS_LS_KEY])
 
     # A different browser that already has its own (edited) gig.
-    ctx = browser.new_context()
+    ctx = no_shared_sync(browser.new_context())
     page2 = ctx.new_page()
     seed_events(page2, [fake_gig("EV-9202", "eli", "2027-07-02"), fake_gig("EV-9201", "benny", "2027-07-01", clientName="Edited Locally")])
     page2.goto(live_server)

@@ -1941,7 +1941,220 @@ function loadEvents(){
   try{ const raw = localStorage.getItem(LS_KEY); if(raw) return JSON.parse(raw); }catch(e){}
   return seedAll();
 }
-function saveEvents(){ return persist(LS_KEY, S.events, 'gigs'); }
+function saveEvents(){ const r = persist(LS_KEY, S.events, 'gigs'); scheduleEventSync(); return r; }
+
+/* ============ SHARED GIGS (Supabase events.app_doc — migration 0032) ============
+   The office's gigs live in the shared `events` table: app_doc = the full record this app already
+   uses, legacy_id = its "EV-…" id. This browser's localStorage is a cache / offline copy.
+   Rules (each one closes a data-loss path found in review, 2026-10-10):
+   - Comparisons use canon() (sorted keys): Postgres jsonb reorders keys, so plain JSON.stringify
+     never recognised our own saves coming back over Realtime.
+   - A gig is "dirty" when its canon differs from what the server last had (EventSync.synced).
+     Dirty local gigs always win -- over Realtime echoes, over a resync, and at the next sign-in
+     (the server's version of each synced gig is remembered across reloads as a short hash), so
+     an edit that hasn't reached the server yet is never silently replaced.
+   - Flushes send a snapshot taken before the network await, so edits made mid-upload are sent
+     next time instead of being marked as sent.
+   - New gigs are inserted with ignoreDuplicates: if another browser already took that EV id,
+     this gig is re-numbered (references in contracts/travel/projects follow) and retried --
+     never overwriting someone else's gig.
+   - First sync in a browser: local gigs not on the server are uploaded once; a local gig whose id
+     collides with a DIFFERENT shared gig is re-numbered first; a backup of the browser's gigs is
+     kept (asp_events_presync_backup). A synced, clean gig that's gone from the server was deleted
+     elsewhere and is dropped here too.
+   - Realtime reconnects / waking from sleep / coming back online trigger a resync.
+   Off for artists (RLS) and in the test harness (window.ASP_DISABLE_EVENT_SYNC). */
+const EVENTS_SYNCED_LS_KEY = 'asp_events_synced';          // { "EV-…": hash of the server's version }
+const EVENTS_PRESYNC_BACKUP_LS_KEY = 'asp_events_presync_backup';
+const EventSync = { on:false, starting:false, synced:new Map(), rowIds:new Map(), timer:null, channel:null, flushing:false, subscribedOnce:false, lastResync:0 };
+function canon(v){
+  if(Array.isArray(v)) return '['+v.map(canon).join(',')+']';
+  if(v && typeof v==='object') return '{'+Object.keys(v).sort().filter(k=>v[k]!==undefined).map(k=>JSON.stringify(k)+':'+canon(v[k])).join(',')+'}';
+  return JSON.stringify(v===undefined ? null : v);
+}
+function hashStr(str){ let h=0x811c9dc5; for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,0x01000193); } return (h>>>0).toString(36)+':'+str.length; }
+function eventSyncAllowed(){ return !!(supabaseClient && S.realSession && isAdminUser(S.user) && !window.ASP_DISABLE_EVENT_SYNC); }
+function loadSyncedMarker(){ try{ return JSON.parse(localStorage.getItem(EVENTS_SYNCED_LS_KEY)||'null'); }catch(e){ return null; } }
+function saveSyncedMarker(){ const m={}; EventSync.synced.forEach((c,id)=>{ m[id]=hashStr(c); }); try{ localStorage.setItem(EVENTS_SYNCED_LS_KEY, JSON.stringify(m)); }catch(e){ console.error('could not save sync marker', e); } }
+function isDirty(ev){ return EventSync.synced.get(ev.id)!==canon(ev); }
+function sameGig(a, b){ return a.artistId===b.artistId && a.date===b.date && (a.clientName||'')===(b.clientName||''); }
+function recomputeEVID(){ EVID = S.events.reduce((max,e)=>{ const n=parseInt(String(e.id).split('-')[1],10); return isNaN(n)? max : Math.max(max,n+1); }, 1000); }
+function nextFreeEventId(taken){ let n=EVID; while(taken.has('EV-'+n)) n++; EVID=n+1; return 'EV-'+n; }
+// Re-numbering a gig must carry every reference to it along (contracts, travel requests,
+// recording-day projects, open screens) -- otherwise they'd point at another office's gig.
+function remapEventIds(map){
+  if(!map.size) return;
+  let c=false, t=false, pr=false;
+  CONTRACTS.forEach(x=>{ if(map.has(x.leadId)){ x.leadId=map.get(x.leadId); c=true; } });
+  TRAVEL_REQUESTS.forEach(x=>{ if(map.has(x.eventId)){ x.eventId=map.get(x.eventId); t=true; } });
+  PROJECTS.forEach(x=>{ if(map.has(x.recordingEventId)){ x.recordingEventId=map.get(x.recordingEventId); pr=true; } });
+  ['eventId','contractDocEventId','gigInfoDocEventId','itineraryEventId','verifyDepositEventId'].forEach(k=>{ if(map.has(S[k])) S[k]=map.get(S[k]); });
+  if(c) saveContracts(); if(t) saveTravelRequests(); if(pr) saveProjects();
+}
+async function fetchSharedEvents(){
+  const rows=[]; const PAGE=1000;
+  for(let from=0;;from+=PAGE){
+    const { data, error } = await supabaseClient.from('events').select('id, legacy_id, app_doc').not('app_doc','is',null).order('legacy_id').range(from, from+PAGE-1);
+    if(error) return { error };
+    rows.push(...data);
+    if(data.length < PAGE) return { rows };
+  }
+}
+async function startEventSync(){
+  if(EventSync.on || EventSync.starting || !eventSyncAllowed()) return;
+  EventSync.starting = true;
+  try{
+    const { rows, error } = await fetchSharedEvents();
+    if(!eventSyncAllowed()) return; // signed out meanwhile
+    if(error){ toast('Could not load the shared gig list — working from this browser\'s copy for now. ' + (error.message||''), 'system'); return; }
+    const marker = loadSyncedMarker();
+    if(!marker && S.events.length){ try{ localStorage.setItem(EVENTS_PRESYNC_BACKUP_LS_KEY, JSON.stringify({ savedAt:new Date().toISOString(), events:S.events })); }catch(e){} }
+    const known = marker || {};
+    const remote = new Map(rows.map(r=>[r.legacy_id, r.app_doc]));
+    EventSync.synced = new Map(rows.map(r=>[r.legacy_id, canon(r.app_doc)]));
+    EventSync.rowIds = new Map(rows.map(r=>[r.id, r.legacy_id]));
+    const taken = new Set([...remote.keys(), ...S.events.map(e=>e.id)]);
+    recomputeEVID(); EVID = Math.max(EVID, ...[...remote.keys()].map(id=>parseInt(String(id).split('-')[1],10)+1).filter(n=>!isNaN(n)), 1000);
+    const byId = new Map(rows.map(r=>[r.legacy_id, r.app_doc]));
+    const remap = new Map();
+    let uploaded = 0;
+    for(const ev of S.events){
+      const shared = remote.get(ev.id);
+      const lastServerHash = known[ev.id];
+      const localHash = hashStr(canon(ev));
+      if(!shared){
+        if(lastServerHash && lastServerHash===localHash) continue;          // deleted elsewhere, no local edits → drop
+        byId.set(ev.id, ev); uploaded++; continue;                         // never synced, or edited since → keep & upload
+      }
+      if(lastServerHash){
+        if(lastServerHash!==localHash && canon(ev)!==canon(shared)) byId.set(ev.id, ev); // unsent local edits win
+        continue;
+      }
+      if(canon(ev)===canon(shared)) continue;                              // identical
+      if(sameGig(ev, shared)){ byId.set(ev.id, ev); continue; }            // same gig, this browser's version wins once (backup kept)
+      const newId = nextFreeEventId(taken); taken.add(newId);              // a DIFFERENT gig with the same id
+      remap.set(ev.id, newId); byId.set(newId, { ...ev, id:newId }); uploaded++;
+    }
+    S.events = [...byId.values()];
+    remapEventIds(remap);
+    recomputeEVID();
+    EventSync.on = true;
+    saveSyncedMarker();
+    persist(LS_KEY, S.events, 'gigs');
+    await flushEventSync();
+    if(uploaded) toast(`Shared ${uploaded} gig${uploaded===1?'':'s'} from this browser with the office.`, 'success');
+    subscribeEventChanges();
+    render();
+  } finally { EventSync.starting = false; }
+}
+function scheduleEventSync(){ if(!EventSync.on) return; clearTimeout(EventSync.timer); EventSync.timer = setTimeout(flushEventSync, 400); }
+async function upsertEventRows(rows, opts){
+  const { data, error } = await supabaseClient.from('events').upsert(rows, opts).select('id, legacy_id');
+  if(!error) return { saved:data||[] };
+  // One bad record must not block every save: retry row by row and report which gig failed.
+  const saved=[], failed=[];
+  for(const r of rows){
+    const one = await supabaseClient.from('events').upsert([r], opts).select('id, legacy_id');
+    if(one.error) failed.push({ r, message:one.error.message }); else saved.push(...(one.data||[]));
+  }
+  return { saved, failed };
+}
+async function flushEventSync(){
+  if(!EventSync.on) return;
+  if(EventSync.flushing){ scheduleEventSync(); return; }
+  EventSync.flushing = true;
+  try{
+    // Snapshot first: edits made while the request is in flight are sent next time, not lost.
+    const snap = S.events.map(e=>({ id:e.id, c:canon(e) })).filter(x=>EventSync.synced.get(x.id)!==x.c);
+    const isNew = x=>!EventSync.synced.has(x.id);
+    const failedIds = [];
+    for(const [group, opts] of [[snap.filter(isNew), { onConflict:'legacy_id', ignoreDuplicates:true }], [snap.filter(x=>!isNew(x)), { onConflict:'legacy_id' }]]){
+      if(!group.length) continue;
+      const { saved, failed=[] } = await upsertEventRows(group.map(x=>({ legacy_id:x.id, app_doc:JSON.parse(x.c) })), opts);
+      saved.forEach(r=>EventSync.rowIds.set(r.id, r.legacy_id));
+      const savedIds = new Set(saved.map(r=>r.legacy_id));
+      group.forEach(x=>{ if(savedIds.has(x.id)) EventSync.synced.set(x.id, x.c); });
+      failed.forEach(f=>failedIds.push(f.r.legacy_id+' ('+f.message+')'));
+      if(opts.ignoreDuplicates){
+        // New gigs whose id another browser took meanwhile: re-number and retry next flush.
+        const collided = group.filter(x=>!savedIds.has(x.id) && !failed.some(f=>f.r.legacy_id===x.id));
+        if(collided.length){
+          const taken = new Set([...EventSync.synced.keys(), ...S.events.map(e=>e.id)]);
+          const remap = new Map(collided.map(x=>{ const n=nextFreeEventId(taken); taken.add(n); return [x.id, n]; }));
+          S.events.forEach(e=>{ if(remap.has(e.id)) e.id = remap.get(e.id); });
+          remapEventIds(remap); persist(LS_KEY, S.events, 'gigs');
+          scheduleEventSync();
+        }
+      }
+    }
+    const current = new Set(S.events.map(e=>e.id));
+    const deletes = [...EventSync.synced.keys()].filter(id=>!current.has(id));
+    if(deletes.length){
+      const { error } = await supabaseClient.from('events').delete().in('legacy_id', deletes);
+      if(error) failedIds.push('removing '+deletes.length+' gig(s) ('+error.message+')');
+      else deletes.forEach(id=>EventSync.synced.delete(id));
+    }
+    saveSyncedMarker();
+    if(failedIds.length) toast('Some gigs could not be saved to the shared list (kept in this browser, will retry): ' + failedIds.slice(0,3).join('; '), 'system');
+  } finally { EventSync.flushing = false; }
+}
+function applyRemoteRow(row){
+  if(!row || !row.legacy_id || !row.app_doc) return false;
+  if(row.id) EventSync.rowIds.set(row.id, row.legacy_id);
+  const c = canon(row.app_doc);
+  const i = S.events.findIndex(e=>e.id===row.legacy_id);
+  if(i>=0 && isDirty(S.events[i])) return false;               // unsent local edits win (sent on next flush)
+  if(EventSync.synced.get(row.legacy_id)===c && i>=0) return false; // our own save echoing back
+  EventSync.synced.set(row.legacy_id, c);
+  if(i>=0) S.events[i] = row.app_doc; else S.events.push(row.app_doc);
+  return true;
+}
+function subscribeEventChanges(){
+  if(EventSync.channel) return;
+  EventSync.subscribedOnce = false;
+  EventSync.channel = supabaseClient.channel('shared-events')
+    .on('postgres_changes', { event:'*', schema:'public', table:'events' }, (payload)=>{
+      let changed = false;
+      if(payload.eventType==='DELETE'){
+        const old = payload.old || {};
+        const id = old.legacy_id || EventSync.rowIds.get(old.id);
+        if(id && EventSync.synced.has(id)){
+          EventSync.rowIds.delete(old.id); EventSync.synced.delete(id);
+          const ev = S.events.find(e=>e.id===id);
+          if(ev){ S.events = S.events.filter(e=>e.id!==id); changed = true; }
+        }
+      } else changed = applyRemoteRow(payload.new);
+      if(!changed) return;
+      recomputeEVID(); saveSyncedMarker(); persist(LS_KEY, S.events, 'gigs');
+      renderPreservingFocus();
+    })
+    .subscribe((status)=>{
+      if(status==='SUBSCRIBED'){ if(EventSync.subscribedOnce) resyncEvents(); EventSync.subscribedOnce = true; }
+    });
+}
+// After a reconnect / sleep / offline spell: take the server's version of every clean gig, keep
+// dirty local gigs (they're sent by the flush), and drop clean gigs deleted elsewhere.
+async function resyncEvents(){
+  if(!EventSync.on || Date.now()-EventSync.lastResync < 5000) return;
+  EventSync.lastResync = Date.now();
+  const { rows, error } = await fetchSharedEvents();
+  if(error || !EventSync.on) return;
+  const remoteIds = new Set(rows.map(r=>r.legacy_id));
+  rows.forEach(applyRemoteRow);
+  S.events = S.events.filter(e=>remoteIds.has(e.id) || !EventSync.synced.has(e.id) || isDirty(e));
+  [...EventSync.synced.keys()].forEach(id=>{ if(!remoteIds.has(id)) EventSync.synced.delete(id); });
+  recomputeEVID(); saveSyncedMarker(); persist(LS_KEY, S.events, 'gigs');
+  renderPreservingFocus();
+  flushEventSync();
+}
+window.addEventListener('online', ()=>resyncEvents());
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') resyncEvents(); });
+async function flushAndStopEventSync(){ if(EventSync.on){ clearTimeout(EventSync.timer); try{ await flushEventSync(); }catch(e){} } stopEventSync(); }
+function stopEventSync(){
+  clearTimeout(EventSync.timer);
+  if(EventSync.channel && supabaseClient) supabaseClient.removeChannel(EventSync.channel);
+  EventSync.channel = null; EventSync.on = false; EventSync.synced = new Map(); EventSync.rowIds = new Map();
+}
 S.events = loadEvents();
 EVID = S.events.reduce((max,e)=>{ const n=parseInt(String(e.id).split('-')[1],10); return isNaN(n)? max : Math.max(max,n+1); }, EVID);
 
@@ -2025,6 +2238,7 @@ async function linkRealSessionToRosterNow(session){
   pendingViewDirection = 'right';
   syncURL();
   render();
+  startEventSync();
 }
 async function doSendSignInCode(){
   const email = (S.realSignInEmail||'').trim();
@@ -2075,6 +2289,7 @@ async function doRealSignInPasskey(){
 // and a sign-out that happens elsewhere (another tab, expired session) all end in the same reset.
 // Business data in this browser's storage is deliberately kept -- it is still the only copy.
 function resetAfterSignOut(){
+  stopEventSync();
   closeAllOverlays();
   S.user = null; S.realSession = null; S.realPasskeys = null; S.realRoster = null;
   S.realSignInNotFound = false; S.realSignInError = null; S.showRealSignIn = false;
@@ -2083,6 +2298,7 @@ function resetAfterSignOut(){
   render();
 }
 async function doRealSignOut(){
+  await flushAndStopEventSync(); // send any gig edits still waiting before the session ends
   if(supabaseClient && S.realSession){ try{ await supabaseClient.auth.signOut(); }catch(e){ console.error('signOut failed', e); } }
   resetAfterSignOut();
 }

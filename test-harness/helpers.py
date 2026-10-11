@@ -254,3 +254,10 @@ def create_lead(page, client_name, date, artist_id="benny"):
     page.locator('input[data-field="clientName"]').fill(client_name)
     page.locator('input[data-field="date"]').fill(date)
     page.locator('[data-action="submit-lead"]').click()
+
+
+def no_shared_sync(context):
+    """For specs that create their own browser contexts: keep test gigs out of the real shared gig
+    list (the default `page` fixture already gets this from conftest)."""
+    context.add_init_script("window.ASP_DISABLE_EVENT_SYNC = true;")
+    return context

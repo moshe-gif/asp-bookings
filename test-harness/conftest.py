@@ -67,3 +67,13 @@ def live_server():
     yield f"http://localhost:{PORT}"
     httpd.shutdown()
     httpd.server_close()
+
+
+# Test gigs must never reach the office's real shared gig list (the harness signs in to the
+# PRODUCTION Supabase project as real test admins). The app skips its shared-gig sync when this
+# flag is set; every page in the default `page` fixture's context gets it. Specs that open their
+# own contexts call `no_shared_sync(ctx)` (helpers.py).
+@pytest.fixture(autouse=True)
+def _never_sync_test_gigs(context):
+    context.add_init_script("window.ASP_DISABLE_EVENT_SYNC = true;")
+    yield

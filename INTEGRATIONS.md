@@ -18,7 +18,7 @@
 | Google Calendar holds | `gcal-*` Edge Functions | `ops/GOOGLE_CALENDAR_SETUP.md` | **Built, not connected**; holds paused until gigs live in the shared `events` table (audit 4.5) |
 | Gmail (Zelle notice matching) | `gmail-*` Edge Functions | `ops/GMAIL_SETUP.md` | **Built, not connected** |
 | Flight status | `flightaware-status` Edge Function (on-demand check from the event sheet / travel request) | `ops/FLIGHTAWARE_SETUP.md` | **Live when `FLIGHTAWARE_API_KEY` is set**; no automatic polling/email yet |
-| Data | Browser localStorage (per browser) + partial Supabase tables | CLAUDE.md "Where data lives" | **Moving to Supabase** (migration 0032 prepared) |
+| Data | Gigs: shared Supabase `events` table (live sync). Everything else: per-browser localStorage | CLAUDE.md "Where data lives" | Gigs **live** (2026-10-10); contracts/payees/projects next |
 
 ---
 

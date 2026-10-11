@@ -30,11 +30,16 @@
   - Edge Functions: `supabase/functions/*` — deployed by pasting into the dashboard; JWT
     verification is on except for OAuth callbacks/webhooks (see each `ops/*_SETUP.md`).
     Secrets live in Edge Function secrets, never in the frontend.
-- **Where data lives today:** mostly in each browser's **localStorage** (`asp_mock_*` keys —
-  real data despite the name: events/gigs, contracts, payee profiles, projects, invoices, outside
-  bookings, documents, travel requests, pricing, org settings). Supabase tables exist for most of
-  these but are only partly written and mostly not read yet. Each office browser is its own copy:
-  never clear or "reset" localStorage, and never bump a storage key to reset data.
+- **Where data lives today:**
+  - **Gigs/events: the shared Supabase `events` table** (since 2026-10-10). Each gig is one
+    `app_doc` row keyed by `legacy_id` ("EV-…"); signed-in admins load it, every save writes
+    through, and Realtime pushes other admins' changes live. A browser's first admin sign-in
+    uploads its local-only gigs once. localStorage (`asp_mock_state_v3`) is only a cache. Artists
+    don't sync (RLS) and the test harness never does (`window.ASP_DISABLE_EVENT_SYNC`).
+  - **Everything else is still per-browser localStorage** (`asp_mock_*` keys — real data despite
+    the name: contracts, payee profiles, projects, invoices, outside bookings, documents, travel
+    requests, pricing, org settings). Never clear or "reset" it, never bump a storage key; back up
+    via Settings → Back up my data.
 - **Not used:** `backend/proxy.js` and `deploy/*.js` are unused starter-kit templates (never
   deployed; the frontend makes no `/api/*` calls). Ignore the generic proxy/SFTP wording below.
 - **Tests:** `test-harness/` (Python Playwright, real browser) — runs against the **production**
@@ -49,7 +54,7 @@ Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM
 ## Source-of-truth map (concept → owner today → target)
 | Concept | Owner today | Target |
 |---|---|---|
-| Gigs/events | localStorage per browser | Supabase `events` |
+| Gigs/events | Supabase `events.app_doc` (shared, live) + localStorage cache | done (2026-10-10) |
 | Contracts & versions | localStorage per browser | Supabase `contracts` / `contract_versions` |
 | Payee profiles (bank, Zelle, default fee) | localStorage + seed literals | Supabase `payee_profiles` (admin-only) |
 | Artist roster | `ARTISTS` seed + localStorage + Supabase `artists` | Supabase `artists` |
@@ -73,6 +78,9 @@ Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM
 - `[key,label]` registries + lookup helpers (`PAYMENT_METHODS`) instead of inline lists.
 - Idempotency markers on multi-step side effects (`qboInvoiceId`, `calendarHoldsStatus`).
 - Dated "why" comments on non-obvious decisions.
+- Shared gigs: compare documents with `canon()` (sorted keys) -- Postgres jsonb reorders keys, so
+  `JSON.stringify` comparisons never match. Unsent ("dirty") local edits always win over Realtime /
+  resync; don't bypass `saveEvents()` (it is what schedules the sync).
 
 ## Conventions being phased out (strangler-fig) — and how to live with them meanwhile
 - localStorage as the system of record → Supabase, one collection at a time. Meanwhile: never

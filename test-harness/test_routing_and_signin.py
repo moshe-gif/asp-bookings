@@ -7,7 +7,7 @@
 """
 import re
 
-from helpers import login_as, goto_nav, collect_console_errors
+from helpers import login_as, goto_nav, collect_console_errors, no_shared_sync
 
 ADMIN_LOOKUP = re.compile(r"/rest/v1/admin_users")
 
@@ -42,7 +42,7 @@ def test_cross_role_url_lands_on_home_not_blank(live_server, page):
 def test_account_lookup_outage_offers_retry(live_server, browser):
     # Service workers blocked: the app's pass-through worker relays every fetch, and Playwright
     # can't intercept requests a service worker makes.
-    ctx = browser.new_context(service_workers="block")
+    ctx = no_shared_sync(browser.new_context(service_workers="block"))
     page = ctx.new_page()
     page.goto(live_server)
     page.route(ADMIN_LOOKUP, lambda route: route.abort())
