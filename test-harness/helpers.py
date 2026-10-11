@@ -222,3 +222,29 @@ def mark_contract_sent_from_event_sheet(page):
     builder.wait_for(state='visible')
     builder.locator('[data-action="set-contract-status"][data-status="sent"]').click()
     page.locator('#contractBuilderOverlayHost [data-action="close-contract-builder"]').first.click()
+
+
+def create_project(page, title, artist_id=""):
+    """Projects board → New Project → (artist or the explicit "None" tile) → title → create.
+    Lands on the new project's detail page. Fresh browsers have no projects (no fake seeds)."""
+    goto_nav(page, "projects", mobile=False)
+    page.locator('[data-action="open-new-project"]').click()
+    modal = page.locator('[data-form="newproject"]')
+    modal.locator(f'[data-action="pick-project-artist"][data-id="{artist_id}"]').click()
+    modal.locator('input[data-field="title"]').fill(title)
+    page.locator('[data-action="confirm-add-project"]').click()
+    page.get_by_text(title).first.wait_for(state="visible")
+
+
+def create_outside_booking(page, performer="Test Harness Outside Act", client="Test Harness Venue", date="2027-05-01"):
+    """External Events (by URL — not in the menu) → New → fill → submit. Fresh browsers have none."""
+    goto_nav(page, "outside_bookings")
+    page.locator('[data-action="open-new-outside-booking"]').click()
+    modal = page.locator('.modal').last
+    modal.locator('input[data-field="performerName"]').fill(performer)
+    modal.locator('input[data-field="clientName"]').fill(client)
+    modal.locator('input[data-field="date"]').fill(date)
+    modal.locator('input[data-field="totalAmount"]').fill("3000")
+    modal.locator('input[data-field="aspCut"]').fill("400")
+    modal.locator('[data-action="submit-outside-booking"]').click()
+    page.wait_for_timeout(400)

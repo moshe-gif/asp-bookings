@@ -4,7 +4,7 @@ genuine end-to-end (real clicks, real typing, real re-render), not just "the pag
 
 All three run as admin_bookings, since these are admin-only actions today.
 """
-from helpers import login_as, goto_nav, collect_console_errors
+from helpers import login_as, goto_nav, collect_console_errors, create_project
 
 
 def test_create_lead(live_server, page):
@@ -29,11 +29,7 @@ def test_add_sticky_note_item(live_server, page):
     errors = collect_console_errors(page)
     page.goto(live_server)
     login_as(page, "admin_bookings")
-    goto_nav(page, "projects", mobile=False)
-
-    first_project = page.locator(".project-folder").first
-    assert first_project.count(), "no seeded projects to test against — check demo data"
-    first_project.click()
+    create_project(page, "Sticky Note Test Project")
 
     page.locator('[data-action="add-board-card"]').last.click()  # "Blank Card" button
     board_input = page.locator(".board-item-input").last
@@ -50,9 +46,7 @@ def test_assign_task_to_person(live_server, page):
     errors = collect_console_errors(page)
     page.goto(live_server)
     login_as(page, "admin_bookings")
-    goto_nav(page, "projects", mobile=False)
-
-    page.locator(".project-folder").first.click()
+    create_project(page, "Task Assign Test Project")
 
     # Add an internal person (defaults to Internal) so there's someone to assign to.
     page.locator(".person-refid-select").select_option("admin_ceo")

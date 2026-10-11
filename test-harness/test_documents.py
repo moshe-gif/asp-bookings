@@ -3,14 +3,14 @@ Real click-through of the general Documents builder (own nav tab, office/bookkee
 - brand swap (ASP <-> SING Entertainment) via the Outside Bookings entry point
 - "On behalf of {artist}" attribution when a document's subject is one of ASP's own artists
 """
-from helpers import login_as, goto_nav, collect_console_errors
+from helpers import login_as, goto_nav, collect_console_errors, create_outside_booking
 
 
 def test_document_brand_swap_from_outside_booking(live_server, page):
     errors = collect_console_errors(page)
     page.goto(live_server)
     login_as(page, "admin_bookings")
-    goto_nav(page, "outside_bookings", mobile=False)
+    create_outside_booking(page)
 
     page.locator('[data-action="open-outside-doc-builder"]').first.click()
 

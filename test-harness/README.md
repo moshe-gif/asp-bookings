@@ -138,6 +138,8 @@ than grepping the source to check.
 | `fake_gig(id, artist_id, date, **overrides)` | `helpers.py` | A complete event record (the app's stored shape) with obviously fictional data. Real gigs never live in the code — the repo is public. |
 | `seed_events(page, events)` | `helpers.py` | Seeds gigs into the test browser's localStorage before the app loads (only if that browser has none, so reloads/second tabs keep test changes). Storage key read from asp.js (`EVENTS_LS_KEY`). Call before `page.goto()`. |
 | `mark_contract_sent_from_event_sheet(page)` | `helpers.py` | From an open lead's event sheet: contract button → Contract Builder (Standard) → mark Sent → close. The honest path to Contract Sent (a real emailed send advances the lead the same way). |
+| `create_project(page, title, artist_id="")` | `helpers.py` | Projects board → New Project → artist (or the explicit "None" tile) → title → create; lands on its detail page. Fresh browsers have no projects (the fake seeds were removed 2026-10-09). |
+| `create_outside_booking(page, ...)` | `helpers.py` | External Events (opened by URL) → New → fill → submit. Fresh browsers have none. |
 | `ADMIN_IDS`, `ARTIST_IDS` | `helpers.py` | The 9 real test-account roles. Mirrors `frontend/workspaces/asp.js`'s `ADMIN_USERS`/`ARTISTS` role set — **update here (and `ROLE_EMAILS`, and create the matching Supabase account) if the roster changes**, there's no way to derive it without running the app. |
 | `ROLE_EMAILS` | `helpers.py` | Maps each `user_id` to its real test account's email. See "Real-auth test account setup" above. |
 | `MGMT_NAV_ITEMS`, `ARTIST_NAV_ITEMS` | `helpers.py` | All nav views per role (desktop). Mirrors `index.html`'s same-named arrays. |

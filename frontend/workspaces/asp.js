@@ -168,7 +168,9 @@ const PROJECTS_LS_KEY = 'asp_mock_projects_v1';
 function loadProjects(){ try{ const raw = localStorage.getItem(PROJECTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
 function saveProjects(){ return persist(PROJECTS_LS_KEY, PROJECTS, 'projects'); }
 let PROJECTS = loadProjects();
-if(!PROJECTS){ PROJECTS = seedProjects(); saveProjects(); }
+// Fresh browsers start EMPTY: the seeders below created made-up projects/invoices/bookings that
+// mixed into real financials (2026-10-09 audit 2.15). Kept only as reference fixtures, not called.
+if(!PROJECTS){ PROJECTS = []; saveProjects(); }
 else {
   PROJID = PROJECTS.reduce((max,p)=>{ const n=parseInt(String(p.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, PROJID);
   let migrated = false;
@@ -227,8 +229,12 @@ const INVOICES_LS_KEY = 'asp_mock_invoices_v1';
 function loadCustomInvoices(){ try{ const raw = localStorage.getItem(INVOICES_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
 function saveCustomInvoices(){ return persist(INVOICES_LS_KEY, CUSTOM_INVOICES, 'invoices'); }
 let CUSTOM_INVOICES = loadCustomInvoices();
-if(!CUSTOM_INVOICES){ CUSTOM_INVOICES = seedCustomInvoices(); saveCustomInvoices(); }
-else { INVID = CUSTOM_INVOICES.reduce((max,i)=>{ const n=parseInt(String(i.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, INVID); }
+if(!CUSTOM_INVOICES){ CUSTOM_INVOICES = []; saveCustomInvoices(); }
+else {
+  // One-time cleanup of the old fake seed invoices, matched exactly by their made-up billing emails.
+  { const fake = ['ap@continentalballroom.com','billing@merkazhall.com','sarah.klein@example.com'];
+    const kept = CUSTOM_INVOICES.filter(inv=>!fake.includes(inv.clientEmail));
+    if(kept.length!==CUSTOM_INVOICES.length){ CUSTOM_INVOICES = kept; saveCustomInvoices(); } } INVID = CUSTOM_INVOICES.reduce((max,i)=>{ const n=parseInt(String(i.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, INVID); }
 function getInvoice(id){ return CUSTOM_INVOICES.find(i=>i.id===id); }
 
 /* ============ OUTSIDE BOOKINGS (jobs that don't involve one of our own artists) ============ */
@@ -289,8 +295,12 @@ const OUTSIDE_BOOKINGS_LS_KEY = 'asp_mock_outside_bookings_v1';
 function loadOutsideBookings(){ try{ const raw = localStorage.getItem(OUTSIDE_BOOKINGS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
 function saveOutsideBookings(){ return persist(OUTSIDE_BOOKINGS_LS_KEY, OUTSIDE_BOOKINGS, 'external events'); }
 let OUTSIDE_BOOKINGS = loadOutsideBookings();
-if(!OUTSIDE_BOOKINGS){ OUTSIDE_BOOKINGS = seedOutsideBookings(); saveOutsideBookings(); }
+if(!OUTSIDE_BOOKINGS){ OUTSIDE_BOOKINGS = []; saveOutsideBookings(); }
 else {
+  // One-time cleanup of the old fake seed external events, matched exactly by their made-up emails.
+  { const fake = ['weiss.family@example.com','events@continentalballroom.com'];
+    const kept = OUTSIDE_BOOKINGS.filter(b=>!fake.includes(b.clientEmail));
+    if(kept.length!==OUTSIDE_BOOKINGS.length){ OUTSIDE_BOOKINGS = kept; saveOutsideBookings(); } }
   let anyObMigrated = false;
   OUTSIDE_BOOKINGS.forEach(b=>{ if(migrateOutsideBooking(b)) anyObMigrated = true; });
   if(anyObMigrated) saveOutsideBookings();
@@ -535,6 +545,11 @@ function migratePayeeProfiles(){
 }
 migratePayeeProfiles();
 function getPayeeProfile(id){ return PAYEE_PROFILES.find(p=>p.id===id); }
+// A contract that has gone out (sent/signed) shows the payee details it was sent with, frozen at
+// that moment -- editing or deleting the payee profile later must not rewrite what the client
+// received (2026-10-09 audit 2.10). Drafts follow the live profile.
+function freezeContractPayee(c){ if(!c.payeeSnapshot){ const pp = getPayeeProfile(c.payeeProfileId); if(pp) c.payeeSnapshot = JSON.parse(JSON.stringify(pp)); } }
+function contractPayeeProfile(c, fallback){ return (c.status!=='draft' && c.payeeSnapshot) || getPayeeProfile(c.payeeProfileId) || (fallback ? fallback() : null); }
 function housePayeeProfile(){ return PAYEE_PROFILES.find(p=>!p.artistId) || PAYEE_PROFILES[0]; }
 function defaultPayeeProfileForArtist(artistId){ return PAYEE_PROFILES.find(p=>p.artistId===artistId) || housePayeeProfile(); }
 
@@ -1153,7 +1168,7 @@ async function doMigrateContractsToSupabase(){
 // counts except bookkeeping that never reaches the client document. Canonical form (sorted keys,
 // numeric strings as numbers) so retyping the same value doesn't void it. Approvals saved before
 // this existed have no fingerprint and need one re-approval (the safe direction to fail in).
-const CONTRACT_FINGERPRINT_IGNORED = ['id','leadId','status','createdAt','updatedAt','approvedBy','approvedAt','approvedTermsFingerprint','versions','signedAt','qboInvoiceId','qboInvoiceDocNumber','calendarHoldsStatus','_supabaseId','_migratedAt','notes','schemaVersion'];
+const CONTRACT_FINGERPRINT_IGNORED = ['payeeSnapshot','id','leadId','status','createdAt','updatedAt','approvedBy','approvedAt','approvedTermsFingerprint','versions','signedAt','qboInvoiceId','qboInvoiceDocNumber','calendarHoldsStatus','_supabaseId','_migratedAt','notes','schemaVersion'];
 function contractTermsFingerprint(c){
   const canon = v => Array.isArray(v) ? v.map(canon)
     : (v && typeof v==='object') ? Object.keys(v).sort().reduce((o,k)=>{ o[k]=canon(v[k]); return o; }, {})
@@ -1236,7 +1251,7 @@ async function doSendContractEmail(){
       toast(data.error || 'Could not send the email.', 'system');
       return;
     }
-    if(c.status==='draft'){ c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); }
+    if(c.status==='draft'){ freezeContractPayee(c); c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); }
     // The real send is what moves the lead along (only forward: lead/negotiating -> contract_sent).
     advanceLeadForContract(c, `Contract ${c.id} emailed to ${to}.`);
     // Immutable snapshot of exactly what was sent (contract_versions, migration 0010) -- a contract
@@ -1267,7 +1282,10 @@ async function doSendContractEmail(){
           // real UUIDs, and qbo_invoices.event_id/contract_id are uuid FK columns: sending a
           // non-UUID string would fail the whole insert (including the qbo_invoice_id tracking
           // the webhook actually keys off), not just leave those two fields blank.
-          body: JSON.stringify({ clientName: c.snapshot.clientName||to, clientEmail: to, amount: qboAmount, description: qboDescription, contractId: c._supabaseId||null }),
+          // One stable key per contract deposit invoice: QuickBooks ignores repeats of the same key, so a
+          // retry or a second tab can't bill the client twice. Contract ids are per-browser counters, so
+          // the exact creation time is part of the key to keep two browsers' "CT-12" apart.
+          body: JSON.stringify({ clientName: c.snapshot.clientName||to, clientEmail: to, amount: qboAmount, description: qboDescription, contractId: c._supabaseId||null, idempotencyKey: `${String(c.id).replace(/[^A-Za-z0-9-]/g,'')}-${Date.parse(c.createdAt)||0}` }),
         });
         const invData = await invResp.json().catch(()=>({ ok:false, error:'Unexpected response from the server.' }));
         if(!invResp.ok || invData.ok===false){
@@ -1740,8 +1758,24 @@ const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_U
 // See ops/QUICKBOOKS_SETUP.md for the full setup.
 const QBO_CLIENT_ID = '';
 const QBO_REDIRECT_URI = SUPABASE_URL + '/functions/v1/qbo-oauth-callback';
-function qboAuthorizeUrl(){
-  const state = Math.random().toString(36).slice(2);
+// Connecting QuickBooks / Google Calendar / a Gmail mailbox: the OAuth `state` is a one-time value
+// issued server-side to a signed-in admin (oauth-start) and checked by the callback -- it used to be
+// Math.random() that nothing ever verified (2026-10-09 audit 1.2).
+async function doOAuthConnect(provider, mailboxId){
+  try{
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if(!session){ toast('Sign in again to connect this account.', 'system'); return; }
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/oauth-start`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
+      body: JSON.stringify({ provider, mailboxId: mailboxId||undefined }),
+    });
+    const data = await resp.json().catch(()=>({ ok:false, error:'Unexpected response from the server.' }));
+    if(!resp.ok || data.ok===false || !data.state){ toast('Could not start the connection: ' + (data.error||'unknown error'), 'system'); return; }
+    location.href = provider==='qbo' ? qboAuthorizeUrl(data.state) : provider==='gcal' ? gcalAuthorizeUrl(data.state) : gmailAuthorizeUrl(data.state);
+  } catch(err){ toast('Could not start the connection: ' + String(err), 'system'); }
+}
+function qboAuthorizeUrl(state){
   return `https://appcenter.intuit.com/connect/oauth2?client_id=${encodeURIComponent(QBO_CLIENT_ID)}&scope=com.intuit.quickbooks.accounting&redirect_uri=${encodeURIComponent(QBO_REDIRECT_URI)}&response_type=code&state=${state}`;
 }
 
@@ -1750,8 +1784,7 @@ function qboAuthorizeUrl(){
 // ops/GOOGLE_CALENDAR_SETUP.md for the full setup once it exists.
 const GOOGLE_CALENDAR_CLIENT_ID = '';
 const GOOGLE_CALENDAR_REDIRECT_URI = SUPABASE_URL + '/functions/v1/gcal-oauth-callback';
-function gcalAuthorizeUrl(){
-  const state = Math.random().toString(36).slice(2);
+function gcalAuthorizeUrl(state){
   const scope = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/userinfo.email';
   return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(GOOGLE_CALENDAR_CLIENT_ID)}&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(GOOGLE_CALENDAR_REDIRECT_URI)}&response_type=code&access_type=offline&prompt=consent&state=${state}`;
 }
@@ -1762,9 +1795,9 @@ function gcalAuthorizeUrl(){
 // Narrowest read-only scope, per "narrowest scope" in the spec.
 const GMAIL_CLIENT_ID = '';
 const GMAIL_REDIRECT_URI = SUPABASE_URL + '/functions/v1/gmail-oauth-callback';
-function gmailAuthorizeUrl(mailboxId){
+function gmailAuthorizeUrl(state){
   const scope = 'https://www.googleapis.com/auth/gmail.readonly';
-  return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(GMAIL_CLIENT_ID)}&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(GMAIL_REDIRECT_URI)}&response_type=code&access_type=offline&prompt=consent&state=${encodeURIComponent(mailboxId)}`;
+  return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(GMAIL_CLIENT_ID)}&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(GMAIL_REDIRECT_URI)}&response_type=code&access_type=offline&prompt=consent&state=${encodeURIComponent(state)}`;
 }
 
 /* ============ STATE ============ */
@@ -2220,6 +2253,7 @@ async function refreshGcalStatus(){
   history.replaceState(null, '', location.pathname + location.hash);
   if(gmail==='connected'){ toast('Gmail mailbox connected.', 'success'); loadGmailStatus(); }
   else if(gmail==='error'){ toast('Could not connect that Gmail mailbox -- check the setup and try again.', 'system'); }
+  else if(gmail==='mismatch'){ toast('Not connected: the Google account you signed in with is not the mailbox being connected. Sign in to Google as that mailbox and try again.', 'system'); }
 })();
 (function checkGcalRedirect(){
   const params = new URLSearchParams(location.search);
@@ -4547,7 +4581,7 @@ function zelleProfileForEvent(ev, artist){
 // has no active Zelle details. zellePayeeReason() explains a null to staff.
 function zellePayeeProfileFor(ev){
   const sent = contractsForLead(ev.id).find(c=>c.status==='sent' || c.status==='signed');
-  return (sent && getPayeeProfile(sent.payeeProfileId)) || PAYEE_PROFILES.find(p=>p.artistId===ev.artistId) || null;
+  return (sent && contractPayeeProfile(sent)) || PAYEE_PROFILES.find(p=>p.artistId===ev.artistId) || null;
 }
 function zellePayeeFor(ev){
   const profile = zellePayeeProfileFor(ev);
@@ -6041,7 +6075,7 @@ function renderContractBuilderDoc(c){
 }
 function renderStandardDoc(c){ return docChrome(standardDocContent(c), c); }
 function standardDocContent(c){
-  const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
+  const profile = contractPayeeProfile(c, housePayeeProfile);
   const brand = getBrandConfig(c.brand);
   const figures = contractPaymentFigures(c);
   const who = contractPerformerName(c);
@@ -6091,7 +6125,7 @@ function standardDocContent(c){
 }
 function renderComedianDoc(c){ return docChrome(comedianDocContent(c), c); }
 function comedianDocContent(c){
-  const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
+  const profile = contractPayeeProfile(c, housePayeeProfile);
   const brand = getBrandConfig(c.brand);
   const figures = contractPaymentFigures(c);
   const who = contractPerformerName(c);
@@ -6146,7 +6180,7 @@ function comedianDocContent(c){
 }
 function renderMultilineDoc(c){ return docChrome(multilineDocContent(c), c); }
 function multilineDocContent(c){
-  const profile = getPayeeProfile(c.payeeProfileId) || housePayeeProfile();
+  const profile = contractPayeeProfile(c, housePayeeProfile);
   const brand = getBrandConfig(c.brand);
   const figures = contractPaymentFigures(c);
   const boilerplate = contractBoilerplateLines(c);
@@ -6198,7 +6232,7 @@ function multilineDocContent(c){
 }
 function renderCreativeDoc(c){ return docChrome(creativeDocContent(c), c); }
 function creativeDocContent(c){
-  const profile = getPayeeProfile(c.payeeProfileId) || airschnitzPayeeProfile();
+  const profile = contractPayeeProfile(c, airschnitzPayeeProfile);
   const brand = getBrandConfig(c.brand);
   const figures = contractPaymentFigures(c);
   const contactLine = contractClientContactLine(c);
@@ -6342,11 +6376,11 @@ function renderQuickBooksCard(){
           <span class="pill pill-good">Connected</span>
           <div><p style="margin:0;">Company ID ${esc(st.realmId||'')}${st.connectedAt?` &middot; connected ${fmtDateShort(st.connectedAt.slice(0,10))}`:''}</p></div>
         </div>
-        <a href="${qboAuthorizeUrl()}" class="btn btn-sm btn-ghost">Reconnect</a>
+        <button class="btn btn-sm btn-ghost" data-action="oauth-connect" data-provider="qbo">Reconnect</button>
       </div>
       <p style="font-size:11.5px;color:var(--ink-3);margin:8px 0 0;">Sending a contract can also create and email a QuickBooks invoice for the deposit, payable by credit card.</p>`
     : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">Not connected yet. Connecting lets Send Contract also create and email a real QuickBooks invoice for the deposit.</p>
-      <a href="${qboAuthorizeUrl()}" class="btn btn-sm btn-primary">Connect QuickBooks</a>`}
+      <button class="btn btn-sm btn-primary" data-action="oauth-connect" data-provider="qbo">Connect QuickBooks</button>`}
   </div>`;
 }
 function renderTravelSettingsCard(){
@@ -6368,11 +6402,11 @@ function renderGoogleCalendarSyncCard(){
           <span class="pill pill-good">Connected</span>
           <div><p style="margin:0;">${esc(st.email||'')}${st.connectedAt?` &middot; connected ${fmtDateShort(st.connectedAt.slice(0,10))}`:''}</p></div>
         </div>
-        <a href="${gcalAuthorizeUrl()}" class="btn btn-sm btn-ghost">Reconnect</a>
+        <button class="btn btn-sm btn-ghost" data-action="oauth-connect" data-provider="gcal">Reconnect</button>
       </div>
       <p style="font-size:11.5px;color:var(--ink-3);margin:8px 0 0;">Sending a contract can also create/update a HOLD on ASP's main calendar and each selected artist's calendar, moving to CONFIRMED once the deposit is received.</p>`
     : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">Not connected yet. This is separate from the per-user "Connected Accounts" toggle above -- that's a one-way, no-auth "Add to Google Calendar" link; this is the real server-side sync that creates/updates events by exact calendar + event ID.</p>
-      <a href="${gcalAuthorizeUrl()}" class="btn btn-sm btn-primary">Connect Google Calendar</a>`}
+      <button class="btn btn-sm btn-primary" data-action="oauth-connect" data-provider="gcal">Connect Google Calendar</button>`}
     ${renderCalendarMappingSection()}
   </div>`;
 }
@@ -6423,7 +6457,7 @@ function renderGmailMailboxesCard(){
     : `<div style="display:flex;flex-direction:column;gap:8px;">
         ${boxes.map(m=>{ const a = m.artist_id ? artistById(m.artist_id) : null; return `<div class="settings-row">
           <div><h4>${esc(a?a.name:'ASP Sending')}</h4><p>${esc(m.email)}</p></div>
-          ${m.connected? `<span class="pill pill-good">Connected</span>` : configured? `<a href="${gmailAuthorizeUrl(m.id)}" class="btn btn-sm btn-primary">Connect</a>` : `<span class="pill">Not connected</span>`}
+          ${m.connected? `<span class="pill pill-good">Connected</span>` : configured? `<button class="btn btn-sm btn-primary" data-action="oauth-connect" data-provider="gmail" data-id="${esc(m.id)}">Connect</button>` : `<span class="pill">Not connected</span>`}
         </div>`; }).join('')}
         <button class="btn btn-sm btn-ghost" style="align-self:flex-start;" data-action="check-gmail-mailboxes">Refresh</button>
       </div>`}
@@ -7724,6 +7758,7 @@ function bindGlobal(){
     if(action==='overlay-close') return;
     switch(action){
       case 'download-backup': doDownloadBackup(); break;
+      case 'oauth-connect': doOAuthConnect(t.getAttribute('data-provider'), id); break;
       case 'retry-roster-link': supabaseClient.auth.getSession().then(({data:{session}})=>{ if(session) linkRealSessionToRoster(session); else { S.realSignInError = null; render(); } }); break;
       case 'logout': if(S.realSession && supabaseClient) supabaseClient.auth.signOut(); S.user=null; S.realSession=null; S.realPasskeys=null; S.eventId=null; S.showNewLead=false; S.showMobileMenu=false; history.pushState(null,'',location.pathname+location.search); render(); break;
       case 'open-real-signin': S.showRealSignIn=true; S.realSignInSent=false; render(); break;
@@ -7867,7 +7902,7 @@ function bindGlobal(){
       case 'contractbuilder-overlay-close': if(e.target===t){ S.showContractBuilder=false; S.contractBuilderId=null; render(); } break;
       case 'contract-refresh-from-lead': doRefreshContractFromLead(S.contractBuilderId); break;
       case 'delete-contract': doDeleteContract(S.contractBuilderId); break;
-      case 'set-contract-status': { const c=getContract(S.contractBuilderId); if(c){ c.status=t.getAttribute('data-status'); if(c.status==='signed' && !c.signedAt) c.signedAt=new Date().toISOString(); c.updatedAt=new Date().toISOString(); saveContracts(); if(c.status==='sent' || c.status==='signed') advanceLeadForContract(c, `Contract ${c.id} marked ${c.status} by hand (sent outside the app).`); } render(); break; }
+      case 'set-contract-status': { const c=getContract(S.contractBuilderId); if(c){ c.status=t.getAttribute('data-status'); if(c.status==='sent' || c.status==='signed') freezeContractPayee(c); if(c.status==='signed' && !c.signedAt) c.signedAt=new Date().toISOString(); c.updatedAt=new Date().toISOString(); saveContracts(); if(c.status==='sent' || c.status==='signed') advanceLeadForContract(c, `Contract ${c.id} marked ${c.status} by hand (sent outside the app).`); } render(); break; }
       case 'approve-contract-for-sending': doApproveContractForSending(id); break;
       case 'revoke-contract-approval': doRevokeContractApproval(id); break;
       case 'pick-contract-overtime-interval': { const c=getContract(S.contractBuilderId); if(c){ c.overtime.interval=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }

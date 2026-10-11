@@ -434,3 +434,28 @@ def test_approval_is_voided_by_refresh_from_lead_date_change(live_server, page):
     host.locator('[data-action="contract-refresh-from-lead"]').click()
     assert "changed since approval" in page.locator('#contractBuilderOverlayHost').inner_text()
     assert not errors, f"console errors: {errors}"
+
+
+def test_sent_contract_keeps_the_payee_it_was_sent_with(live_server, page):
+    # Audit 2.10: contract documents re-read the payee profile live, so editing/deleting a profile
+    # rewrote contracts that had already gone out. Sent/signed contracts now use a frozen copy.
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    create_lead(page, "Frozen Payee Client", "2027-10-20", artist_id="benny")
+    builder = create_contract_from_lead(page, "standard")
+    builder.locator('[data-action="set-contract-status"][data-status="sent"]').click()
+    c = page.evaluate("""() => JSON.parse(localStorage.getItem('asp_mock_contracts_v1')).find(x => x.snapshot.clientName === 'Frozen Payee Client')""")
+    assert c["payeeSnapshot"], "no payee snapshot frozen at send"
+    original = c["payeeSnapshot"]["entityName"]
+    page.evaluate("""(id) => { const k='asp_mock_payee_profiles_v1'; const l=JSON.parse(localStorage.getItem(k)); l.find(p=>p.id===id).entityName='CHANGED AFTER SENDING LLC'; localStorage.setItem(k, JSON.stringify(l)); }""", c["payeeProfileId"])
+    page.reload()
+    login_as(page, "admin_bookings")
+    goto_nav(page, "contract_builder")
+    page.locator('[data-action="open-contract-builder"]', has_text="Frozen Payee Client").first.click()
+    page.locator('#contractBuilderOverlayHost [data-action="view-contract-builder-doc"]').click()
+    doc = page.locator('#contractBuilderPrintHost .doc')
+    doc.wait_for(state='visible')
+    text = doc.inner_text()
+    assert original in text and "CHANGED AFTER SENDING LLC" not in text, "sent contract was rewritten by a later payee edit"
+    assert not errors, f"console errors: {errors}"
