@@ -3342,7 +3342,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.1.0'; // v1.1.0: ASP workspace extracted into its own module (parent-app Phase 1a)
+const APP_VERSION = 'v1.2.0'; // bump on every release so a phone can tell it has updated. v1.2.0: artist portal on real data (0038/0039)
 const OVERTIME_PER_HALF_HOUR = 250;
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);

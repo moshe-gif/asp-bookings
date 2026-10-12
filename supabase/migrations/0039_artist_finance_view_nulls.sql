@@ -1,5 +1,5 @@
 -- 0039: Fix artist_finance_view NULL handling (0038 follow-up).
--- Applied: (not yet)
+-- Applied: 2026-10-12 (Supabase Management API; 0038 isolation check ALL OK afterwards)
 --
 -- The 0038 isolation check (0038_test_artist_isolation.sql) failed on two real bugs, both in money:
 --   1. is_shared was NULL, not false, for a gig with no app_doc.additionalArtists

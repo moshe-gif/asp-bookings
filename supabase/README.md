@@ -24,7 +24,7 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0037_artists_roster_owner | Applied 2026-10-11 — `artists` is the roster's one owner (the app loads it at sign-in and it wins); email optional; Shmili Landau's row added. |
 | 0036_app_records_settings | Applied 2026-10-11 — adds collection `settings` (office settings + pricing, one row each: `org`, `pricing`). |
 | 0038_artist_portal_views | Applied 2026-10-12 — `artist_gig_view` + `artist_finance_view` (security-barrier views scoped by `current_artist_id()`) for the artist portal. Check: `0038_test_artist_isolation.sql` (rolls back; must say ALL OK). |
-| 0039_artist_finance_view_nulls | **Not yet applied** — fixes two NULL bugs in `artist_finance_view` found by the 0038 isolation check (solo gigs had no money; shared gigs showed $0 instead of nothing). |
+| 0039_artist_finance_view_nulls | Applied 2026-10-12 (isolation check ALL OK) — fixes two NULL bugs in `artist_finance_view` found by the 0038 isolation check (solo gigs had no money; shared gigs showed $0 instead of nothing). |
 
 ## Edge Functions (`functions/`)
 Deploy: Supabase → Edge Functions → the function → paste the file's contents → Deploy. Secrets live
