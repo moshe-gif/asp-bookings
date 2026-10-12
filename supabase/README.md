@@ -4,7 +4,7 @@ Project: `psgpxbkncuavlnpplykf` (Supabase dashboard). There is no Supabase CLI s
 here is applied **by hand in the dashboard**, so this file is the record of what is live.
 
 ## Migrations (`migrations/`)
-- Apply in Supabase → **SQL Editor**: paste the whole file, Run. **Strictly in number order.**
+- Apply with `supabase/run-sql.sh <file>` (or Supabase → **SQL Editor**: paste the whole file, Run). **Strictly in number order.**
 - Each file is one transaction where possible (`begin; … commit;`) so a failure changes nothing.
 - When you run one, fill in its `-- Applied: <date>` header line, and update the ledger below in the
   same commit.
