@@ -27,6 +27,8 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0039_artist_finance_view_nulls | Applied 2026-10-12 (isolation check ALL OK) — fixes two NULL bugs in `artist_finance_view` found by the 0038 isolation check (solo gigs had no money; shared gigs showed $0 instead of nothing). |
 | 0040_email_sends_and_brand_email | Applied 2026-10-12 — `email_sends` (send log + 60/hour/admin limit for send-contract-email); ASP brand office email filled in. |
 | 0041_gmail_tables_service_role | Applied 2026-10-12 — service_role grants on `gmail_mailboxes` / `gmail_oauth_tokens` (the Gmail functions were failing with permission denied). |
+| 0042_artist_commission_pct | Applied 2026-10-12 — `artists.commission_pct` (default 15, Dovie 10); prefills each gig's commission. |
+| 0043_artist_finance_package_scope | Applied 2026-10-12 — a client-package `priceScope` counts as shared in `artist_finance_view` (isolation check ALL OK). |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in

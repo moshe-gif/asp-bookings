@@ -33,7 +33,10 @@
     verification is on except for OAuth callbacks/webhooks (see each `ops/*_SETUP.md`).
     Secrets live in Edge Function secrets, never in the frontend.
 - **Where data lives today:**
-  - **Gigs/events: the shared Supabase `events` table** (since 2026-10-10). Each gig is one
+  - **Gigs/events: the shared Supabase `events` table** (since 2026-10-10). Loaded 2026-10-12 from
+    the office's "ASP future gigs" workbook (173 gigs, `app_doc.importRef` = workbook row; unclear
+    rows flagged `needsReview` with the workbook notes in `importNotes`). The older 2026-10-09
+    calendar-export JSON is superseded -- never restore it. Each gig is one
     `app_doc` row keyed by `legacy_id` ("EV-…"); signed-in admins load it, every save writes
     through, and Realtime pushes other admins' changes live. localStorage (`asp_mock_state_v3`)
     is only a cache.
