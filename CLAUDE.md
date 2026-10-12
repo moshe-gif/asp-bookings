@@ -36,7 +36,10 @@
   - **Gigs/events: the shared Supabase `events` table** (since 2026-10-10). Loaded 2026-10-12 from
     the office's "ASP future gigs" workbook (173 gigs, `app_doc.importRef` = workbook row; unclear
     rows flagged `needsReview` with the workbook notes in `importNotes`). The older 2026-10-09
-    calendar-export JSON is superseded -- never restore it. Each gig is one
+    calendar-export JSON is superseded -- never restore it.
+    74 of their contracts were rebuilt the same day in the app's own Contract Builder (CT-5001+,
+    `importRef`; signed/sent/draft per the workbook, payee frozen, overtime left blank) -- the
+    signed wording lives in the original Google Docs linked in each contract's notes. Each gig is one
     `app_doc` row keyed by `legacy_id` ("EV-…"); signed-in admins load it, every save writes
     through, and Realtime pushes other admins' changes live. localStorage (`asp_mock_state_v3`)
     is only a cache.
