@@ -1,5 +1,5 @@
--- 0038: Artist portal on real data (draft for review - NOT applied).
--- Applied: (not yet)
+-- 0038: Artist portal on real data.
+-- Applied: 2026-10-12 (Supabase Management API). artist_finance_view is superseded by 0039 (NULL fixes).
 --
 -- Why: migration 0026 removed every artist SELECT policy on events (correct: RLS cannot hide
 -- columns), and the app never switched the artist portal to artist_booking_view, so a signed-in

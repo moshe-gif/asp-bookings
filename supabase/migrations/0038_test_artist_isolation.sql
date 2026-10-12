@@ -1,4 +1,4 @@
--- 0038 isolation test. Run in Supabase SQL editor AFTER 0038_artist_portal_views.sql.
+-- 0038 isolation test. Run in Supabase SQL editor AFTER 0038_artist_portal_views.sql and 0039.
 -- Not a migration: a check you run by hand. Applied: n/a (writes nothing).
 --
 -- The whole test is ONE statement (a DO block) that always ends by raising an exception, so
