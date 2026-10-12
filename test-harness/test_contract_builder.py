@@ -264,10 +264,25 @@ def test_overtime_auto_suggest_and_travel_sentence(live_server, page):
     create_lead(page, "Overtime Client", "2027-05-01", artist_id="eli")
     builder = create_contract_from_lead(page, "standard")
 
+    # Owner rule (2026-10-12): each extra half hour costs a full pro-rated hour (fee / booked hours),
+    # filled in automatically and kept in step until someone types a rate; clearing it goes back to auto.
+    rate = builder.locator('input[data-contract-field="overtime.rate"]')
+    hours = builder.locator('input[data-contract-field="top.hoursOfEngagement"]')
+    hours.fill("5 hours"); hours.blur()
     fee = builder.locator('input[data-contract-field="fee.amount"]')
-    fee.fill("6500"); fee.blur()
-    # Standing rule: $6,500 fee -> $650/half hour, auto-suggested only while the rate is unset.
-    assert builder.locator('input[data-contract-field="overtime.rate"]').input_value() == "650"
+    fee.fill("10000"); fee.blur()
+    assert rate.input_value() == "2000", "a $10,000 / 5-hour gig should default to $2,000 per half hour"
+    hours.fill("4 hours"); hours.blur()
+    assert rate.input_value() == "2500", "auto overtime didn't follow the hours"
+    rate.fill("1800"); rate.blur()
+    fee.fill("12000"); fee.blur()
+    assert rate.input_value() == "1800", "a typed overtime rate was overwritten"
+    rate.fill(""); rate.blur()
+    assert rate.input_value() == "3000", "clearing the rate didn't go back to the automatic one"
+    builder.locator('[data-action="view-contract-builder-doc"]').click()
+    doc = page.locator("#contractBuilderPrintHost .doc")
+    assert "$3,000 per half hour" in doc.inner_text(), "contract doesn't print the overtime rate"
+    page.locator('[data-action="close-contract-builder-doc"]').first.click()
 
     flights = builder.locator('input[data-contract-field="travel.flightsCount"]')
     flights.fill("1"); flights.blur()

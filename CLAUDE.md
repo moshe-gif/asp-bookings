@@ -71,7 +71,8 @@ Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM
 | Admin roster | Supabase `admin_users`; session = the admin's uuid, role via `adminRoleOf()` (2026-10-11) | done; old records holding a role slug resolve through `adminById()` |
 | Event balance / artist payout | `eventBalance()` / `artistPayout()` (derived, next to each other) | same |
 | Contract money | `contractPaymentFigures()` (derived) | same |
-| Commission rate | literal `0.15` in 3 places | one `COMMISSION_RATE` |
+| Commission rate | `artists.commission_pct` (0042; 15%, Dovie 10%) via `commissionRateFor()`; prefills each gig's own `commission` | done (2026-10-12) |
+| Overtime | `suggestedOvertimeRate()`: fee ÷ booked hours per half hour, auto until typed (`overtime.manual`) | done (2026-10-12) |
 | Event statuses | `EVENT_PIPELINE` + `STATUS_GROUPS` (+ `statusMeta()` labels); contracts `CONTRACT_STATUSES`; `ev.bookingStatus` no longer written | done (2026-10-12) |
 | Views / nav | nav arrays + `pageTitle` + `renderView` + CSS hide-list | one `VIEWS` registry |
 | Brand / sender | Supabase `brand_config`: app via `getBrandConfig()`, email via `_shared/config.ts brandFor()` | done (2026-10-12) |

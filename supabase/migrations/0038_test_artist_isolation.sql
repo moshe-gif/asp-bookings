@@ -1,4 +1,4 @@
--- 0038 isolation test. Run in Supabase SQL editor AFTER 0038_artist_portal_views.sql and 0039.
+-- 0038 isolation test. Run in Supabase SQL editor AFTER 0038_artist_portal_views.sql, 0039 and 0043.
 -- Not a migration: a check you run by hand. Applied: n/a (writes nothing).
 --
 -- The whole test is ONE statement (a DO block) that always ends by raising an exception, so
@@ -25,6 +25,7 @@
 --   EV-ISO-3  benny, lead                                        -> nobody
 --   EV-ISO-4  eli solo, paid, $8,000                             -> eli only
 --   EV-ISO-5  benny primary + an outside act with no artists row -> benny: shared, no money
+--   EV-ISO-6  benny alone, but priceScope 'Client package' (0043)  -> benny: no money
 -- Inserting into events also queues the axis_sync_events webhook, but pg_net only sends after
 -- COMMIT, and this statement never commits.
 
@@ -44,7 +45,8 @@ begin
     ('{"id":"EV-ISO-2","artistId":"benny","additionalArtists":[{"artistId":"eli","feeAmount":9000}],"status":"booked","type":"Wedding","date":"2099-01-02","time":"18:00","price":20000,"commission":3000,"clientName":"Isolation Client Two","artistPaidOut":true,"artistPaidOutDate":"2099-01-03","flightNeeded":true,"flightBooked":true,"flight":{"airline":"Iso Air","confirmation":"ISO123"}}'),
     ('{"id":"EV-ISO-3","artistId":"benny","status":"lead","type":"Bar Mitzvah","date":"2099-01-03","price":5000,"commission":750,"clientName":"Isolation Lead"}'),
     ('{"id":"EV-ISO-4","artistId":"eli","status":"paid","type":"Concert","date":"2099-01-04","price":8000,"commission":800,"clientName":"Isolation Client Four"}'),
-    ('{"id":"EV-ISO-5","artistId":"benny","additionalArtists":[{"artistId":"outside-act-not-on-roster","feeAmount":4000}],"status":"booked","type":"Wedding","date":"2099-01-05","price":15000,"commission":2250,"clientName":"Isolation Client Five"}');
+    ('{"id":"EV-ISO-5","artistId":"benny","additionalArtists":[{"artistId":"outside-act-not-on-roster","feeAmount":4000}],"status":"booked","type":"Wedding","date":"2099-01-05","price":15000,"commission":2250,"clientName":"Isolation Client Five"}'),
+    ('{"id":"EV-ISO-6","artistId":"benny","priceScope":"Client package","status":"booked","type":"Concert","date":"2099-01-06","price":59000,"commission":0,"clientName":"Isolation Client Six"}');
   if eli_id is not null then
     insert into event_artists (event_id, artist_id, role, fee_amount, asp_cut, net_amount)
     select id, eli_id, 'Harmony', 9000, 900, 8100 from events where legacy_id = 'EV-ISO-2';
@@ -105,8 +107,8 @@ begin
     if a.legacy_id = 'benny' then
       n := (select count(*) from artist_finance_view where legacy_id = 'EV-ISO-1' and gross_amount = 10000 and asp_cut = 1000 and asp_cut_pct = 10 and net_amount = 9000 and not money_pending);
       all_ok := all_ok and n = 1; res := res || format(E'\n%s | %s | fixture: solo gig money + 10%% | rows=%s', case when n = 1 then 'ok  ' else 'FAIL' end, a.name, n);
-      n := (select count(*) from artist_finance_view where legacy_id in ('EV-ISO-2','EV-ISO-5') and is_shared and money_pending and gross_amount is null and net_amount is null);
-      all_ok := all_ok and n = 2; res := res || format(E'\n%s | %s | fixture: no package money (incl. outside act) | rows=%s', case when n = 2 then 'ok  ' else 'FAIL' end, a.name, n);
+      n := (select count(*) from artist_finance_view where legacy_id in ('EV-ISO-2','EV-ISO-5','EV-ISO-6') and is_shared and money_pending and gross_amount is null and net_amount is null);
+      all_ok := all_ok and n = 3; res := res || format(E'\n%s | %s | fixture: no package money (incl. outside act, package scope) | rows=%s', case when n = 3 then 'ok  ' else 'FAIL' end, a.name, n);
       n := (select count(*) from artist_gig_view where legacy_id = 'EV-ISO-2' and is_primary and flight is not null
               and co_performers = (select jsonb_build_array(jsonb_build_object('name', x.name, 'role', 'Harmony')) from artists x where x.legacy_id = 'eli'));
       all_ok := all_ok and n = 1; res := res || format(E'\n%s | %s | fixture: primary gets travel + co-performer name/role | rows=%s', case when n = 1 then 'ok  ' else 'FAIL' end, a.name, n);

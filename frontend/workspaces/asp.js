@@ -619,6 +619,8 @@ function migrateContract(c){
   if(!c.fee){ c.fee = { amount:0, note:'' }; migrated = true; }
   if(!c.deposit){ c.deposit = { amount:0, percent:0, nonRefundable:false }; migrated = true; }
   if(!c.overtime){ c.overtime = { rate:0, interval:'half_hour' }; migrated = true; }
+  // A rate already on a contract was typed or agreed: keep it. Only an empty one is auto (2026-10-12).
+  if(c.overtime.manual===undefined){ c.overtime.manual = !!Number(c.overtime.rate); migrated = true; }
   if(!c.cancellationPolicy){ c.cancellationPolicy = { type:'flat_percent', flatPercent:80, tiers:[], creditWindowMonths:0 }; migrated = true; }
   if(!c.boilerplate){ c.boilerplate = blankBoilerplateDefaults(); migrated = true; }
   if(!c.clientProvides){ c.clientProvides = []; migrated = true; }
@@ -698,7 +700,26 @@ function contractPerformerName(c){
 const OVERTIME_INTERVAL_LABELS = { half_hour:'half hour', '15_min':'15 minutes', hour:'hour', not_applicable:'N/A' };
 function overtimeIntervalLabel(interval){ return OVERTIME_INTERVAL_LABELS[interval] || 'half hour'; }
 // Standing rule confirmed with Moshe: $6,500 fee -> $650 per half hour, i.e. fee/10.
-function suggestedOvertimeRate(fee){ return Math.round((Number(fee)||0) / 10); }
+// Overtime (owner decision 2026-10-12, replacing $250 / 1.5x / fee-10 -- audit 2.9): each extra half
+// hour costs a full pro-rated hour, fee / booked hours, scaled to the contract's interval
+// (15 min = half that, an hour = double). Filled in automatically and kept in step with the fee,
+// hours and interval until someone types a rate (c.overtime.manual); clearing it goes back to auto.
+const OVERTIME_HALF_HOURS_PER_INTERVAL = { half_hour:1, '15_min':0.5, hour:2 };
+function hoursFromText(text){ const m = String(text||'').match(/\d+(\.\d+)?/); return m ? Number(m[0]) : 0; }
+function suggestedOvertimeRate(fee, hoursText, interval){
+  const hours = hoursFromText(hoursText), factor = OVERTIME_HALF_HOURS_PER_INTERVAL[interval||'half_hour'];
+  return hours && factor ? Math.round((Number(fee)||0) / hours * factor) : 0;
+}
+function refreshAutoOvertime(c){
+  if(!c.overtime || c.overtime.manual || c.overtime.interval==='not_applicable') return;
+  c.overtime.rate = suggestedOvertimeRate(c.fee && c.fee.amount, c.hoursOfEngagement, c.overtime.interval);
+}
+// The contract's overtime sentence, the same on every template that has a booked duration.
+function contractOvertimeHtml(c){
+  if(c.overtime.interval==='not_applicable') return `<p style="font-size:12.5px;margin:4px 0 0;">Overtime: Not applicable.</p>`;
+  if(!Number(c.overtime.rate)) return '';
+  return `<p style="font-size:12.5px;margin:4px 0 0;">If the Artist is asked to stay beyond the agreed upon time, a ${money(Number(c.overtime.rate))} per ${esc(overtimeIntervalLabel(c.overtime.interval))} charge shall be paid in overtime fees.</p>`;
+}
 // "plus 1 business-class flight, hotel, food, and Shabbos accommodation" -- real-contract phrasing
 // (Chabad of Bondi / Toronto examples), appended after the fee. Returns '' when nothing is set.
 function contractTravelSentence(tc){
@@ -842,7 +863,7 @@ function doCreateContractFromLead(eventId, template){
     deposit: depositPercent ? { amount:0, percent:depositPercent, nonRefundable:false }
       : depositAmount ? { amount:depositAmount, percent:0, nonRefundable:false }
       : { amount:0, percent:15, nonRefundable:false },
-    overtime: { rate:0, interval: payeeProfile ? payeeProfile.defaultOvertimeInterval : 'half_hour' },
+    overtime: { rate:0, interval: payeeProfile ? payeeProfile.defaultOvertimeInterval : 'half_hour', manual:false },
     cancellationPolicy: { type:'flat_percent', flatPercent:80, tiers:[], creditWindowMonths:6, withinDays:40, ...(payeeProfile&&payeeProfile.defaultCancellation||{}) },
     boilerplate: payeeProfile ? { ...payeeProfile.defaultBoilerplate, notBindingUntilDeposit:true } : { ...blankBoilerplateDefaults(), notBindingUntilDeposit:true },
     clientProvides: [],
@@ -893,6 +914,7 @@ function doCreateContractFromLead(eventId, template){
       contract.fee.amount = contractLineItemsTotal(contract);
     }
   }
+  refreshAutoOvertime(contract);
   CONTRACTS.unshift(contract); saveContracts();
   S.showContractBuilder = true; S.contractBuilderId = contract.id;
   render();
@@ -903,6 +925,7 @@ function doRefreshContractFromLead(id){
   c.snapshot = { clientName: ev.clientName||'', clientEmail: ev.clientEmail||'', clientPhone: ev.clientPhone||'', eventName: c.snapshot.eventName||'', eventDate: ev.date||'', venue: ev.venue||'', city: ev.city||'', state: ev.state||'', occasion: c.snapshot.occasion || ev.type||'' };
   // The lead's negotiated price wins; otherwise keep the fee already on the contract (typed or prefilled); the profile default only fills a blank.
   if(c.template!=='multiline'){ const profile = getPayeeProfile(c.payeeProfileId); c.fee.amount = ev.price || Number(c.fee.amount) || (profile && profile.defaultFee) || 0; }
+  refreshAutoOvertime(c);
   c.updatedAt = new Date().toISOString();
   saveContracts();
   toast('Refreshed from lead.', 'success');
@@ -925,6 +948,7 @@ function doSetContractPerformer(contractId, artistId){
     c.payeeProfileId = profile.id;
     c.boilerplate = { ...c.boilerplate, ...profile.defaultBoilerplate };
     c.overtime.interval = profile.defaultOvertimeInterval;
+    refreshAutoOvertime(c);
     if(profile.defaultTravelClause) c.travelClause = { ...profile.defaultTravelClause };
     if(profile.defaultCancellation) c.cancellationPolicy = { ...c.cancellationPolicy, ...profile.defaultCancellation };
   }
@@ -993,15 +1017,17 @@ function setContractFieldByPath(c, path, value){
   if(kind==='snapshot') c.snapshot[parts[1]] = value;
   else if(kind==='fee'){
     c.fee[parts[1]] = value;
-    if(parts[1]==='amount' && !Number(c.overtime.rate) && c.overtime.interval!=='not_applicable') c.overtime.rate = suggestedOvertimeRate(value);
   }
   else if(kind==='deposit') c.deposit[parts[1]] = value;
-  else if(kind==='overtime') c.overtime[parts[1]] = value;
+  else if(kind==='overtime'){
+    c.overtime[parts[1]] = value;
+    if(parts[1]==='rate') c.overtime.manual = String(value).trim()!=='';
+  }
   else if(kind==='cancellation') c.cancellationPolicy[parts[1]] = value;
   else if(kind==='tier'){ const t=c.cancellationPolicy.tiers.find(x=>x.id===parts[1]); if(t) t[parts[2]] = value; }
   else if(kind==='boilerplate') c.boilerplate[parts[1]] = value;
-  else if(kind==='lineitem'){ const li=c.lineItems.find(x=>x.id===parts[1]); if(li){ li[parts[2]] = value; c.fee.amount = contractLineItemsTotal(c); if(!Number(c.overtime.rate) && c.overtime.interval!=='not_applicable') c.overtime.rate = suggestedOvertimeRate(c.fee.amount); } }
-  else if(kind==='addon'){ const a=c.addOns.find(x=>x.id===parts[1]); if(a){ a[parts[2]] = value; c.fee.amount = contractLineItemsTotal(c); if(!Number(c.overtime.rate) && c.overtime.interval!=='not_applicable') c.overtime.rate = suggestedOvertimeRate(c.fee.amount); } }
+  else if(kind==='lineitem'){ const li=c.lineItems.find(x=>x.id===parts[1]); if(li){ li[parts[2]] = value; c.fee.amount = contractLineItemsTotal(c); } }
+  else if(kind==='addon'){ const a=c.addOns.find(x=>x.id===parts[1]); if(a){ a[parts[2]] = value; c.fee.amount = contractLineItemsTotal(c); } }
   else if(kind==='customclause'){ const cc=c.customClauses.find(x=>x.id===parts[1]); if(cc) cc[parts[2]] = value; }
   else if(kind==='performerLabel') c.performerLabel = value;
   else if(kind==='notes') c.notes = value;
@@ -1011,6 +1037,7 @@ function setContractFieldByPath(c, path, value){
   else if(kind==='discount') c.discount[parts[1]] = value;
   else if(kind==='creative') c.creative[parts[1]] = value;
   else if(kind==='top') c[parts[1]] = value;
+  refreshAutoOvertime(c);
 }
 // Re-render while preserving focus/caret on the field the user is actively typing in -- used for
 // fields that must recompute something live (fee/deposit/balance figures); every other
@@ -1670,7 +1697,6 @@ function doDeleteTravelRequest(id){
 
 /* ============ PRICING ============ */
 const PRICING_LS_KEY = 'asp_mock_pricing_v1';
-const OVERTIME_MULTIPLIER = 1.5; // time-and-a-half, prorated to the minute past included hours
 function seedPricing(){
   const p = {};
   ARTISTS.forEach(a=>{
@@ -1727,7 +1753,14 @@ function artistPayout(ev){ return eventBalance(ev) + chargesTotal(ev); }
 // places and "15%"/"85%" label text in 4 -- 2026-10-09 audit 3.8). Each gig still stores its own
 // ev.commission, which can differ (negotiated), so labels show the real figures, not this rate.
 const COMMISSION_RATE = 0.15;
-function standardCommission(amount){ return Math.round((Number(amount)||0) * COMMISSION_RATE); }
+// The artist's own rate when the roster has one (artists.commission_pct, migration 0042 -- owner
+// decision 2026-10-12: 15%, Dovie 10%), else the standard rate. Prefills a gig's commission only.
+function commissionRateFor(artistId){
+  const a = artistId && artistById(artistId);
+  const pct = a && Number(a.commissionPct);
+  return (pct || pct===0) && !Number.isNaN(pct) ? pct/100 : COMMISSION_RATE;
+}
+function standardCommission(amount, artistId){ return Math.round((Number(amount)||0) * commissionRateFor(artistId)); }
 // Shared chart/total helpers (were copied 3 times; one copy summed all-time under a "last 6 mo"
 // label -- audit 2.16/3.10).
 function lastNMonths(n){ const out=[]; for(let i=n-1;i>=0;i--){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-i); out.push(d); } return out; }
@@ -2423,7 +2456,7 @@ async function linkRealSessionToRosterNow(session){
 const ROSTER_SYNCED_KEY = 'asp_sync_artists';
 async function syncArtistRoster(){
   if(!supabaseClient || !S.realSession) return;
-  const { data: rows, error } = await supabaseClient.from('artists').select('id, legacy_id, name, slot, initials, email, role').order('created_at');
+  const { data: rows, error } = await supabaseClient.from('artists').select('id, legacy_id, name, slot, initials, email, role, commission_pct').order('created_at');
   if(error || !rows){ if(error) console.error('roster load failed', error); return; }
   const appIdOf = r=>r.legacy_id || r.id;
   const onServer = new Set(rows.map(appIdOf));
@@ -2436,7 +2469,8 @@ async function syncArtistRoster(){
     }
   }
   rows.forEach(r=>{
-    const fields = { name:r.name, slot:r.slot, initials:r.initials, email:r.email||'', role:r.role, dbId:r.id };
+    const fields = { name:r.name, slot:r.slot, initials:r.initials, email:r.email||'', role:r.role, dbId:r.id,
+      ...(r.commission_pct!==undefined && r.commission_pct!==null ? { commissionPct: Number(r.commission_pct) } : {}) };
     const a = ARTISTS.find(x=>x.id===appIdOf(r));
     if(a) Object.assign(a, fields); else ARTISTS.push({ id:appIdOf(r), ...fields });
   });
@@ -2614,9 +2648,11 @@ function doEditRealUser(){
   const parts = name.split(/\s+/);
   const initials = (parts[0][0] + (parts[1]? parts[1][0] : '')).toUpperCase();
   const table = f.kind==='admin' ? 'admin_users' : 'artists';
+  const pct = Number(f.commissionPct);
+  if(f.kind!=='admin' && (f.commissionPct==='' || Number.isNaN(pct) || pct<0 || pct>100)){ toast('Enter a commission between 0 and 100%.', 'system'); return; }
   const patch = f.kind==='admin'
     ? { name, email, initials, role: f.adminRole }
-    : { name, email, initials, role: f.artistRole };
+    : { name, email, initials, role: f.artistRole, commission_pct: pct };
   supabaseClient.from(table).update(patch).eq('id', f.id).then(({error})=>{
     if(error){ toast('Could not save that account: ' + error.message, 'system'); return; }
     toast(`${name} updated.`, 'success');
@@ -3347,7 +3383,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.5.0'; // bump on every release so a phone can tell it has updated. v1.5.0: one status field, no half-applied saves (audit 3.9/3.15)
+const APP_VERSION = 'v1.6.0'; // bump on every release so a phone can tell it has updated. v1.6.0: per-artist commission, overtime = fee / hours per half hour
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -3549,7 +3585,9 @@ function renderEditRealUserModal(){
         <div class="field"><label>Real Email</label><input type="email" data-field="email" value="${esc(f.email||'')}" placeholder="them@realdomain.com"/></div>
         ${kind==='artist' ? `<div class="field"><label>Role</label>
           <div class="chip-row">${ARTIST_ROLES.map(r=>`<button class="filter-chip ${artistRole===r?'sel':''}" data-action="pick-edit-artist-role" data-role="${r}">${r}</button>`).join('')}</div>
-        </div>` : `<div class="field"><label>Desk</label>
+        </div>
+        <div class="field"><label>ASP Commission (%)</label><input type="number" min="0" max="100" step="0.5" data-field="commissionPct" value="${esc(String(f.commissionPct ?? ''))}"/>
+          <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Prefills the commission on this artist's new gigs. Existing gigs keep theirs.</p></div>` : `<div class="field"><label>Desk</label>
           <div class="chip-row">${Object.entries(ADMIN_ROLE_LABELS).map(([k,l])=>`<button class="filter-chip ${adminRole===k?'sel':''}" data-action="pick-edit-admin-role" data-role="${k}">${l}</button>`).join('')}</div>
         </div>`}
         ${f.email!==f.originalEmail? `<p style="font-size:11px;color:var(--ink-3);margin:0;">Changing the email does not move their existing sign-in -- they'll still sign in with the old address until this one is updated to match a real account.</p>` : ''}
@@ -4106,11 +4144,11 @@ function renderPricingPage(){
   const artistId = S.pricingArtist || ARTISTS[0].id;
   const artist = artistById(artistId);
   return `
-  <p style="font-size:12.5px;color:var(--ink-3);margin:0 0 16px;max-width:640px;">Standard hourly rates by artist and event type — the reference bookkeeping quotes from before negotiating a final flat price. Overtime is always time-and-a-half (1.5×), prorated to the minute past the included hours, not a separately set rate.</p>
+  <p style="font-size:12.5px;color:var(--ink-3);margin:0 0 16px;max-width:640px;">Standard hourly rates by artist and event type — the reference bookkeeping quotes from before negotiating a final flat price. Overtime: each extra half hour costs a full hour at the gig's rate (the fee ÷ booked hours) — contracts fill it in automatically and it stays editable.</p>
   ${renderArtistFilterRow(artistId, 'pricing-artist', {noAll:true})}
   <div class="card table-cards">
     <table>
-      <thead><tr><th>Event Type</th><th>Hourly Rate</th><th>Included Hours</th><th>Overtime (1.5×/hr, prorated)</th></tr></thead>
+      <thead><tr><th>Event Type</th><th>Hourly Rate</th><th>Included Hours</th><th>Overtime (per ½ hour)</th></tr></thead>
       <tbody>
         ${EVENT_TYPES.map(type=>{
           const p = getPricing(artistId, type);
@@ -4118,7 +4156,7 @@ function renderPricingPage(){
             <td data-label="Event Type">${esc(type)}</td>
             <td data-label="Hourly Rate"><span class="u-mono" style="margin-right:2px;">$</span><input type="number" min="0" step="25" value="${p.hourlyRate}" data-action="set-hourly-rate" data-artist="${artistId}" data-type="${esc(type)}" style="width:90px;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-family:var(--font-mono);"/></td>
             <td data-label="Included Hours"><input type="number" min="0" step="0.5" value="${p.includedHours}" data-action="set-included-hours" data-artist="${artistId}" data-type="${esc(type)}" style="width:70px;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-family:var(--font-mono);"/></td>
-            <td data-label="Overtime" class="u-mono">${money(p.hourlyRate*OVERTIME_MULTIPLIER)}/hr</td>
+            <td data-label="Overtime" class="u-mono">${money(p.hourlyRate)}/½ hr</td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -6241,7 +6279,7 @@ function renderContractBuilderModal(){
           <div class="field"><label>State</label><input data-contract-field="snapshot.state" value="${esc(c.snapshot.state||'')}"/></div>
           ${!isCreative? `<div class="field"><label>Occasion</label><input data-contract-field="snapshot.occasion" value="${esc(c.snapshot.occasion||'')}" placeholder="e.g. Wedding, Purim Party, Bar Mitzvah"/></div>` : ''}
         </div>
-        ${!isCreative? `<div class="field"><label>Hours of Engagement</label><input data-contract-field="top.hoursOfEngagement" value="${esc(c.hoursOfEngagement||'')}" placeholder="e.g. 5 hours"/></div>` : ''}
+        ${!isCreative? `<div class="field"><label>Hours of Engagement</label><input data-contract-field="top.hoursOfEngagement" data-focus-key="top.hoursOfEngagement" data-live value="${esc(c.hoursOfEngagement||'')}" placeholder="e.g. 5 hours"/></div>` : ''}
 
         ${isCreative? renderCreativeFieldsSection(c) : renderContractPerformerSection(c)}
         ${c.template==='multiline' ? renderContractLineItemsSection(c) : ''}
@@ -6350,7 +6388,7 @@ function renderContractFeeSection(c){
       <div class="field"><label>Discount Label</label><input data-contract-field="discount.label" value="${esc(c.discount.label||'')}" placeholder="e.g. repeat customer price"/></div>
     </div>
     ${!isCreative? `<div class="field-row">
-      <div class="field"><label>Overtime Rate ($)</label><input type="number" data-contract-field="overtime.rate" value="${c.overtime.rate||0}" ${c.overtime.interval==='not_applicable'?'disabled':''}/></div>
+      <div class="field"><label>Overtime Rate ($)${c.overtime.manual||c.overtime.interval==='not_applicable'?'':' · auto'}</label><input type="number" data-contract-field="overtime.rate" data-render-on-change value="${c.overtime.manual||Number(c.overtime.rate)? esc(String(c.overtime.rate)) : ''}" placeholder="fee ÷ hours, per half hour" ${c.overtime.interval==='not_applicable'?'disabled':''}/></div>
       <div class="field"><label>Per</label>
         <div class="chip-row">
           ${['half_hour','15_min','hour','not_applicable'].map(iv=>`<button class="filter-chip ${c.overtime.interval===iv?'sel':''}" data-action="pick-contract-overtime-interval" data-value="${iv}">${iv==='not_applicable'?'Not applicable':overtimeIntervalLabel(iv)}</button>`).join('')}
@@ -6575,7 +6613,7 @@ function standardDocContent(c){
         <div class="ledger-row total"><span>Balance Due</span><span class="amt">${money(figures.balance)}</span></div>
       </div>
       <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
-      ${c.overtime.interval==='not_applicable'? `<p style="font-size:12.5px;margin:4px 0 0;">Overtime: Not applicable.</p>` : c.overtime.rate? `<p style="font-size:12.5px;margin:4px 0 0;">If the Artist is asked to stay beyond the agreed upon time, a $${esc(String(c.overtime.rate))} per ${esc(overtimeIntervalLabel(c.overtime.interval))} charge shall be paid in overtime fees.</p>` : ''}
+      ${contractOvertimeHtml(c)}
     </div>
     ${boilerplate.length? `<div class="doc-section"><h3>Terms &amp; Conditions</h3><ul class="doc-terms">${boilerplate.map(l=>`<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}
     ${c.boilerplate.acceptanceClause? `<div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractAcceptanceText(c))}</p></div>` : ''}
@@ -6623,6 +6661,7 @@ function comedianDocContent(c){
       </div>
       <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
       <p style="font-size:12.5px;margin:4px 0 0;">Additional Expenses: ${esc(c.additionalExpenses||'N/A')}</p>
+      ${contractOvertimeHtml(c)}
     </div>
     ${c.clientProvides.length? `<div class="doc-section"><h3>2. Client Responsibilities</h3><ul class="doc-terms">${c.clientProvides.map(l=>`<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}
     ${c.boilerplate.ipVideoClause? `<div class="doc-section"><h3>3. Intellectual Property</h3><ul class="doc-terms"><li>${esc(contractIpClauseText())}</li></ul></div>` : ''}
@@ -6680,7 +6719,7 @@ function multilineDocContent(c){
         <div class="ledger-row total"><span>Balance Due</span><span class="amt">${money(figures.balance)}</span></div>
       </div>
       <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
-      ${c.overtime.interval==='not_applicable'? `<p style="font-size:12.5px;margin:4px 0 0;">Overtime: Not applicable.</p>` : ''}
+      ${contractOvertimeHtml(c)}
     </div>
     ${boilerplate.length? `<div class="doc-section"><h3>Terms &amp; Conditions</h3><ul class="doc-terms">${boilerplate.map(l=>`<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}
     ${c.boilerplate.acceptanceClause? `<div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractAcceptanceText(c))}</p></div>` : ''}
@@ -7362,7 +7401,7 @@ function doSaveEditEvent(id){
     // Only auto-recompute the deposit at 15% if this same save doesn't also set an explicit
     // deposit amount -- an explicit value (below) always wins, same "manual override beats the
     // formula" convention as reminderIntervalDays (see WORKFLOWS.md §4).
-    if(f.commission===undefined) p.commission = standardCommission(p.price);
+    if(f.commission===undefined) p.commission = standardCommission(p.price, ev.artistId);
   }
   if(!ev.unpaid && f.commission!==undefined){
     p.commission = Math.max(0, Number(f.commission)||0);
@@ -7860,7 +7899,7 @@ function doSubmitLead(){
     toast(isInternal? 'Pick an artist and a date.' : 'Pick an artist and enter a client name and date.', 'system'); return;
   }
   const price = isInternal ? 0 : (Number(f.price)||0);
-  const commission = isInternal ? 0 : standardCommission(price);
+  const commission = isInternal ? 0 : standardCommission(price, f.artistId);
   const typeList = isInternal ? INTERNAL_EVENT_TYPES : EVENT_TYPES;
   const resolvedType = (f.type==='Other'? (f.customType||'').trim()||'Other' : f.type)||typeList[0];
   const ev = {
@@ -7876,7 +7915,7 @@ function doSubmitLead(){
     groundTransportNeeded: !!f.groundTransportNeeded, groundTransportBooked:false, groundTransport:null,
     charges: isInternal? [] : (f.charges||[]), dressCode: isInternal? '' : (f.dressCode||''), prepSheets:[], createdAt: todayISO(),
     additionalArtists: isInternal? [] : (f.additionalArtists||[]).filter(x=>x.artistId).map(x=>{
-      const fee = Number(x.feeAmount)||0; const cut = standardCommission(fee);
+      const fee = Number(x.feeAmount)||0; const cut = standardCommission(fee, x.artistId);
       return { artistId:x.artistId, feeAmount:fee, aspCut:cut, netAmount:fee-cut };
     }),
     band: f.type==='Wedding' ? (f.band||'').trim()||null : null,
@@ -8140,6 +8179,8 @@ function bindGlobal(){
       saveContracts();
       if(el.dataset.live!==undefined) renderPreservingFocus();
     });
+    // Re-render once the user leaves the field (e.g. a cleared overtime rate shows the automatic one).
+    if(el.dataset.renderOnChange!==undefined) el.addEventListener('change', ()=>render());
   });
   document.querySelectorAll('[data-outside-field]').forEach(el=>{
     const evt = (el.tagName==='SELECT' || el.type==='checkbox') ? 'change' : 'input';
@@ -8375,7 +8416,7 @@ function bindGlobal(){
       case 'set-contract-status': { const c=getContract(S.contractBuilderId); if(c){ c.status=t.getAttribute('data-status'); if(c.status==='sent' || c.status==='signed') freezeContractPayee(c); if(c.status==='signed' && !c.signedAt) c.signedAt=new Date().toISOString(); c.updatedAt=new Date().toISOString(); saveContracts(); if(c.status==='sent' || c.status==='signed') advanceLeadForContract(c, `Contract ${c.id} marked ${c.status} by hand (sent outside the app).`); } render(); break; }
       case 'approve-contract-for-sending': doApproveContractForSending(id); break;
       case 'revoke-contract-approval': doRevokeContractApproval(id); break;
-      case 'pick-contract-overtime-interval': { const c=getContract(S.contractBuilderId); if(c){ c.overtime.interval=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
+      case 'pick-contract-overtime-interval': { const c=getContract(S.contractBuilderId); if(c){ c.overtime.interval=t.getAttribute('data-value'); refreshAutoOvertime(c); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'pick-cancellation-type': { const c=getContract(S.contractBuilderId); if(c){ c.cancellationPolicy.type=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'pick-balance-due-timing': { const c=getContract(S.contractBuilderId); if(c){ c.balanceDueTiming=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'pick-contract-brand': { const c=getContract(S.contractBuilderId); if(c){ c.brand=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
@@ -8540,7 +8581,8 @@ function bindGlobal(){
         const kind = t.getAttribute('data-kind');
         const row = (kind==='admin'? S.realRoster.admins : S.realRoster.artists).find(r=>r.id===id);
         if(!row) break;
-        S.editRealUserForm = { kind, id: row.id, name: row.name, email: row.email, originalEmail: row.email, adminRole: row.role, artistRole: row.role };
+        S.editRealUserForm = { kind, id: row.id, name: row.name, email: row.email, originalEmail: row.email, adminRole: row.role, artistRole: row.role,
+          commissionPct: row.commission_pct ?? Math.round(COMMISSION_RATE*100) };
         S.showEditRealUser = true; render(); break;
       }
       case 'close-edit-real-user': S.showEditRealUser=false; render(); break;
