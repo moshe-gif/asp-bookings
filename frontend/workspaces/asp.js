@@ -1741,6 +1741,32 @@ function lastNMonths(n){ const out=[]; for(let i=n-1;i>=0;i--){ const d=new Date
 function sumByMonth(events, months, valueFn){
   return months.map(md=>events.filter(e=>{ const ed=new Date(e.date+'T00:00:00'); return ed.getMonth()===md.getMonth() && ed.getFullYear()===md.getFullYear(); }).reduce((s,e)=>s+valueFn(e),0));
 }
+// What an artist sees about their own money on a gig (owner decision 2026-10-11): the gig amount,
+// ASP's fee with that gig's own percentage (it varies by artist -- never COMMISSION_RATE), and what
+// they receive. Never an "owes" state: nothing negative, no receivables. Artist-portal rows carry
+// the figures from artist_finance_view; a local gig derives them the same way the view does. A
+// shared gig without the artist's own money row is "being confirmed" -- no numbers at all.
+function artistMoney(ev){
+  if(ev.moneyPending || (!ev.fromArtistPortal && (ev.additionalArtists||[]).length)) return { pending:true };
+  const gross = Number(ev.price)||0, cut = Number(ev.commission)||0;
+  const pct = ev.aspCutPct!=null ? ev.aspCutPct : (gross>0 ? Math.round(cut/gross*10000)/100 : null);
+  const net = ev.fromArtistPortal ? Number(ev.netAmount)||0 : gross - cut;
+  return { pending:false, gross, cut, pct, net: Math.max(0, net) };
+}
+function fmtPct(p){ return `${Number(Number(p).toFixed(2))}%`; }
+// Artist-facing status: about the artist's money, never what a client still owes.
+function artistGigStatus(ev){
+  if(ev.artistPaidOut) return { label: ev.artistPaidOutDate ? `Paid to you ${fmtDateShort(ev.artistPaidOutDate)}` : 'Paid to you', cls:'pill-good' };
+  if(ev.balanceReceived) return { label:'Client balance received', cls:'pill-good' };
+  if(artistMoney(ev).pending) return { label:'Amount being confirmed', cls:'pill-neutral' };
+  return { label: isPast(ev.date) ? 'Completed' : 'Booked', cls: isPast(ev.date) ? 'pill-neutral' : 'pill-accent' };
+}
+// Paid to the artist this calendar year (by the payout date).
+function artistPaidYtd(events){
+  const year = todayISO().slice(0,4);
+  return events.filter(e=>e.artistPaidOut && String(e.artistPaidOutDate||'').slice(0,4)===year)
+    .reduce((s,e)=>{ const m = artistMoney(e); return s + (m.pending ? 0 : m.net); }, 0);
+}
 // Year-to-date by the date's own year (a date-only string parsed as a Date is UTC midnight, which
 // put Jan 1 payments in the previous year in US time zones).
 function ytdPayoutOf(events){ const year = todayISO().slice(0,4); return events.filter(e=>e.balanceReceived && String(e.balanceReceivedDate||'').slice(0,4)===year).reduce((s,e)=>s+artistPayout(e),0); }
@@ -1951,7 +1977,12 @@ function loadEvents(){
   try{ const raw = localStorage.getItem(LS_KEY); if(raw) return JSON.parse(raw); }catch(e){}
   return seedAll();
 }
-function saveEvents(){ const r = persist(LS_KEY, S.events, 'gigs'); if(SHARED) SHARED.events.schedule(); return r; }
+function saveEvents(){
+  // An artist session is read-only: its S.events are view rows held in memory (ARTIST PORTAL below),
+  // never this browser's gigs cache.
+  if(artistReadOnly()) return { ok:false, error:'read_only' };
+  const r = persist(LS_KEY, S.events, 'gigs'); if(SHARED) SHARED.events.schedule(); return r;
+}
 
 /* ============ SHARED RECORDS (Supabase — migrations 0032 events, 0035 app_records) ============
    The office's records are shared: gigs in `events` (app_doc + legacy_id, with derived columns),
@@ -2238,6 +2269,81 @@ function stopSharedSync(){ Object.values(SHARED).forEach(c=>c.stop()); }
 async function flushAndStopSharedSync(){ for(const c of Object.values(SHARED)) await c.flushAndStop(); }
 window.addEventListener('online', ()=>Object.values(SHARED).forEach(c=>c.resync()));
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') Object.values(SHARED).forEach(c=>c.resync()); });
+
+/* ============ ARTIST PORTAL (Supabase views, migration 0038) ============
+   Artists can't read the shared events table (admin-only RLS since 0026) and never sync. Their gigs
+   and money come from two views scoped to the signed-in artist: artist_gig_view (gig, client, venue,
+   logistics, co-performer names) and artist_finance_view (their own money; a shared gig's money only
+   from their own event_artists row, otherwise "being confirmed"). Rows become event-shaped objects in
+   S.events IN MEMORY ONLY: an artist session is read-only (saveEvents/updateEvent refuse), this
+   browser's gigs cache is never written, and sign-out restores it. Refreshed on focus and every 5 min.
+   The harness seeds local gigs instead (ASP_DISABLE_EVENT_SYNC), except the live-data spec. */
+S.artistPortal = { on:false, loading:false, error:null, loadedAt:null };
+let artistPortalTimer = null;
+const ARTIST_PORTAL_REFRESH_MS = 5*60*1000;
+function artistReadOnly(){ return !!(S.realSession && S.user && !isAdminUser(S.user)); }
+function startArtistPortal(){
+  if(!supabaseClient || !artistReadOnly() || window.ASP_DISABLE_EVENT_SYNC) return;
+  S.artistPortal.on = true; S.artistPortal.error = null; S.artistPortal.loadedAt = null;
+  S.events = []; // never show an artist this browser's cached office gigs, even for a moment
+  clearInterval(artistPortalTimer);
+  artistPortalTimer = setInterval(loadArtistPortalData, ARTIST_PORTAL_REFRESH_MS);
+  loadArtistPortalData();
+}
+function stopArtistPortal(){
+  if(!S.artistPortal.on) return;
+  clearInterval(artistPortalTimer); artistPortalTimer = null;
+  S.artistPortal = { on:false, loading:false, error:null, loadedAt:null };
+  S.events = loadEvents(); // this browser's own cache, untouched during the artist session
+}
+async function loadArtistPortalData(){
+  if(!S.artistPortal.on || S.artistPortal.loading) return;
+  S.artistPortal.loading = true;
+  const user = S.user;
+  try{
+    const [g, f] = await Promise.all([
+      supabaseClient.from('artist_gig_view').select('*'),
+      supabaseClient.from('artist_finance_view').select('*'),
+    ]);
+    if(g.error || f.error) throw new Error((g.error || f.error).message);
+    if(!S.artistPortal.on || S.user!==user) return; // signed out meanwhile
+    const moneyByEvent = new Map((f.data||[]).map(r=>[r.event_id, r]));
+    S.events = (g.data||[]).map(r=>artistPortalEvent(r, moneyByEvent.get(r.event_id), user));
+    S.artistPortal.error = null; S.artistPortal.loadedAt = Date.now();
+  }catch(err){
+    console.error('artist portal load failed', err);
+    S.artistPortal.error = String(err && err.message || err);
+  }finally{
+    S.artistPortal.loading = false;
+    if(S.artistPortal.on) render();
+  }
+}
+// One view row pair -> the event shape the existing renderers use. No finance row = "being confirmed".
+function artistPortalEvent(g, m, artistId){
+  const day = d=>d ? String(d).slice(0,10) : null;
+  const pending = !m || !!m.money_pending;
+  const num = v=>(v===null || v===undefined || pending) ? 0 : Number(v)||0;
+  return {
+    id: g.legacy_id || g.event_id, artistId, fromArtistPortal: true,
+    type: g.type || 'Other', status: g.status, date: day(g.date), time: g.time || '', endTime: g.end_time || null,
+    clientName: g.client_name || '', clientPhone: g.client_phone || '', clientEmail: g.client_email || '',
+    venue: g.venue || '', address: g.address || '', city: g.city || '', state: g.state || '', mapQuery: g.map_query || '',
+    dressCode: g.dress_code || '', band: g.band || null, bandSize: g.band_size || null,
+    isPrimary: !!g.is_primary,
+    flightNeeded: !!g.flight_needed, flightBooked: !!(g.flight_booked && g.flight), flight: g.flight || null,
+    groundTransportNeeded: !!g.ground_transport_needed, groundTransportBooked: !!(g.ground_transport_booked && g.ground_transport), groundTransport: g.ground_transport || null,
+    coPerformers: Array.isArray(g.co_performers) ? g.co_performers : [],
+    moneyPending: pending,
+    price: num(m && m.gross_amount), commission: num(m && m.asp_cut), netAmount: num(m && m.net_amount),
+    aspCutPct: (pending || !m || m.asp_cut_pct===null) ? null : Number(m.asp_cut_pct),
+    depositReceived: !!(m && m.deposit_received), depositReceivedDate: day(m && m.deposit_received_date),
+    balanceReceived: !!(m && m.balance_received), balanceReceivedDate: day(m && m.balance_received_date),
+    artistPaidOut: !!(m && m.paid_to_you), artistPaidOutDate: day(m && m.paid_to_you_date),
+    charges: [], log: [],
+  };
+}
+window.addEventListener('focus', ()=>{ if(S.artistPortal.on) loadArtistPortalData(); });
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && S.artistPortal.on) loadArtistPortalData(); });
 S.events = loadEvents();
 EVID = S.events.reduce((max,e)=>{ const n=parseInt(String(e.id).split('-')[1],10); return isNaN(n)? max : Math.max(max,n+1); }, EVID);
 
@@ -2312,6 +2418,7 @@ async function linkRealSessionToRosterNow(session){
   pendingViewTransition = true;
   pendingViewDirection = 'right';
   syncURL();
+  if(!adminRow) startArtistPortal(); // before the first paint, so no cached office gig ever shows
   render();
   await syncArtistRoster();
   startSharedSync();
@@ -2400,6 +2507,7 @@ async function doRealSignInPasskey(){
 // Business data in this browser's storage is deliberately kept -- it is still the only copy.
 function resetAfterSignOut(){
   stopSharedSync();
+  stopArtistPortal();
   closeAllOverlays();
   S.user = null; S.realSession = null; S.realPasskeys = null; S.realRoster = null;
   S.realSignInNotFound = false; S.realSignInError = null; S.showRealSignIn = false;
@@ -2708,6 +2816,7 @@ function getEvent(id){ return S.events.find(e=>e.id===id); }
    never been through updateEvent() and so have no updatedAt yet at all -- that first-ever write
    is exactly the common case this needs to protect, not just the second and later ones. */
 function updateEvent(id, patch, opts={}){
+  if(artistReadOnly()) return { ok:false, error:'read_only' };
   const ev = getEvent(id);
   if(!ev) return { ok:false, error:'not_found' };
   if(!opts.force){
@@ -2727,7 +2836,8 @@ function updateEvent(id, patch, opts={}){
 // success (nothing shown) so callers can write `if(!reportEventSave(result, '...')) return;`.
 function reportEventSave(result, actionLabel){
   if(result.ok) return true;
-  toast(result.error==='conflict' ? `This gig changed elsewhere since you loaded it — reload before ${actionLabel}.` : 'Could not save.', 'system');
+  toast(result.error==='conflict' ? `This gig changed elsewhere since you loaded it — reload before ${actionLabel}.`
+    : result.error==='read_only' ? 'Only the office can change gig details.' : 'Could not save.', 'system');
   return false;
 }
 function fmtDate(iso){ const d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-US',{weekday:'short', month:'short', day:'numeric', year:'numeric'}); }
@@ -2758,9 +2868,25 @@ function fullLocation(ev){
   const parts = [ev.venue, ev.city, ev.state].filter(Boolean);
   return parts.length? parts.join(', ') : 'Location TBD';
 }
-function hasLocation(ev){ return !!(ev.venue || ev.city || ev.state); }
-function gmapsUrl(ev){ return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullLocation(ev))}`; }
-function wazeUrl(ev){ return `https://waze.com/ul?q=${encodeURIComponent(fullLocation(ev))}&navigate=yes`; }
+function hasLocation(ev){ return !!(ev.venue || ev.address || ev.city || ev.state); }
+// Navigation links for a gig's venue. Artist-portal rows carry the view's map_query; local gigs
+// join the same parts.
+function mapLinks(ev){
+  const mapQuery = ev.mapQuery || [ev.venue, ev.address, ev.city, ev.state].filter(Boolean).join(', ');
+  return {
+    waze: 'https://waze.com/ul?q=' + encodeURIComponent(mapQuery) + '&navigate=yes',
+    google: 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(mapQuery),
+  };
+}
+function gmapsUrl(ev){ return mapLinks(ev).google; }
+function wazeUrl(ev){ return mapLinks(ev).waze; }
+// data-action="external-link" keeps a click on the link from also opening the row it sits in.
+function renderMapLinks(ev){
+  if(!hasLocation(ev)) return '';
+  const l = mapLinks(ev);
+  const a = (href, text)=>`<a href="${esc(href)}" target="_blank" rel="noopener" data-action="external-link" style="font-size:11px;font-weight:700;color:var(--accent);text-decoration:none;">${text}</a>`;
+  return `<span style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;">${a(l.waze, 'Navigate (Waze)')}${a(l.google, 'Google Maps')}</span>`;
+}
 const US_STATES = new Set(['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC']);
 function isInternational(ev){ const s=(ev.state||'').trim().toUpperCase(); return s.length>0 && !US_STATES.has(s); }
 function eventTravelDates(ev){
@@ -2925,23 +3051,26 @@ function openEvent(id){ closeAllOverlays(); S.eventId=id; render(); }
 function closeSheet(){ closeAllOverlays(); render(); }
 
 /* ============ GOOGLE CAL / ICS ============ */
-function gcalUrl(ev){
-  const artist = artistById(ev.artistId);
-  const start = ev.date.replace(/-/g,'')+'T'+ev.time.replace(':','')+'00';
+// A gig with no time yet (imported gigs) goes in as an all-day entry.
+function calendarSpan(ev){
+  const day = ev.date.replace(/-/g,'');
+  if(!ev.time){ const next = new Date(ev.date+'T00:00:00'); next.setDate(next.getDate()+1); return { start: day, end: localISO(next).replace(/-/g,''), allDay:true }; }
+  const start = day+'T'+ev.time.replace(':','')+'00';
   const endDate = ev.endTime ? new Date(ev.date+'T'+ev.endTime+':00') : new Date(ev.date+'T'+ev.time+':00');
   if(!ev.endTime) endDate.setHours(endDate.getHours()+3);
-  const end = endDate.toISOString().slice(0,19).replace(/[-:]/g,'').replace('T','T');
+  return { start, end: endDate.toISOString().slice(0,19).replace(/[-:]/g,''), allDay:false };
+}
+function gcalUrl(ev){
+  const artist = artistById(ev.artistId);
+  const { start, end } = calendarSpan(ev);
   const details = `${ev.type} for ${artist.name}.${ev.clientName ? ` Client: ${ev.clientName}.` : ''} Booked via ASP.`;
   const params = new URLSearchParams({action:'TEMPLATE', text:`${artist.name} — ${ev.type}`, dates:`${start}/${end}`, details, location:fullLocation(ev)});
   return 'https://calendar.google.com/calendar/render?'+params.toString();
 }
 function downloadIcs(ev){
   const artist = artistById(ev.artistId);
-  const start = ev.date.replace(/-/g,'')+'T'+ev.time.replace(':','')+'00';
-  const endDate = ev.endTime ? new Date(ev.date+'T'+ev.endTime+':00') : new Date(ev.date+'T'+ev.time+':00');
-  if(!ev.endTime) endDate.setHours(endDate.getHours()+3);
-  const end = endDate.toISOString().slice(0,19).replace(/[-:]/g,'');
-  const ics = ['BEGIN:VCALENDAR','VERSION:2.0','BEGIN:VEVENT',`UID:${ev.id}@asp-bookings`,`DTSTART:${start}`,`DTEND:${end}`,`SUMMARY:${artist.name} — ${ev.type}`,`LOCATION:${fullLocation(ev)}`,`DESCRIPTION:${ev.clientName ? `Client ${ev.clientName}. ` : ''}Booked via ASP.`,'END:VEVENT','END:VCALENDAR'].join('\r\n');
+  const { start, end, allDay } = calendarSpan(ev);
+  const ics = ['BEGIN:VCALENDAR','VERSION:2.0','BEGIN:VEVENT',`UID:${ev.id}@asp-bookings`,allDay?`DTSTART;VALUE=DATE:${start}`:`DTSTART:${start}`,allDay?`DTEND;VALUE=DATE:${end}`:`DTEND:${end}`,`SUMMARY:${artist.name} — ${ev.type}`,`LOCATION:${fullLocation(ev)}`,`DESCRIPTION:${ev.clientName ? `Client ${ev.clientName}. ` : ''}Booked via ASP.`,'END:VEVENT','END:VCALENDAR'].join('\r\n');
   const blob = new Blob([ics], {type:'text/calendar'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${artist.name.replace(/\s/g,'_')}_${ev.date}.ics`; a.click();
 }
@@ -3108,7 +3237,7 @@ function render(){
 }
 
 function renderDayEventRow(e, isAdmin, action, opts={}){
-  const a = artistById(e.artistId); const sm = statusMeta(e);
+  const a = artistById(e.artistId); const sm = isAdminUser(S.user) ? statusMeta(e) : artistGigStatus(e);
   const timeLabel = !e.time ? 'Time TBD' : e.time==='00:00'?'All day':fmtTime(e.time);
   let primary, secondary;
   if(opts.showDate){
@@ -3213,7 +3342,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.1.0'; // v1.1.0: ASP workspace extracted into its own module (parent-app Phase 1a)
+const APP_VERSION = 'v1.2.0'; // bump on every release so a phone can tell it has updated. v1.2.0: artist portal on real data (0038/0039)
 const OVERTIME_PER_HALF_HOUR = 250;
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
@@ -3766,7 +3895,7 @@ function renderCalendarPage(events, opts={}){
         <strong style="font-family:var(--font-display);font-size:1.05rem;min-width:150px;text-align:center;">${label}</strong>
         <button class="icon-btn" data-action="cal-next" aria-label="Next">${ICO.chev('r')}</button>
         <button class="btn btn-sm btn-ghost" data-action="cal-today">Today</button>
-        ${opts.showBlockButton ? `<button class="btn btn-sm" data-action="open-block-time">${ICO.clock} Block Time</button>` : ''}
+        ${opts.showBlockButton && !artistReadOnly() ? `<button class="btn btn-sm" data-action="open-block-time">${ICO.clock} Block Time</button>` : ''}
         ${modeToggle}
       </div>
       ${opts.showFilter ? `<div class="chip-row">${ARTISTS.map(a=>`<button class="filter-chip ${S.calArtistFilter.includes(a.id)?'sel':''}" data-action="cal-filter" data-id="${a.id}"><span class="dot" data-slot="${a.slot}"></span>${a.name.split(' ')[0]}</button>`).join('')}</div>`:''}
@@ -3835,28 +3964,22 @@ function renderCalendarPage(events, opts={}){
 }
 
 /* ============ LEADS TABLE ============ */
-// opts.asArtist (navigation/data-layer refactor PR 15): the artist-facing "My Gigs" table reused
-// this unchanged, including the office "Price" column -- e.unpaid? '-' : money(e.price) -- which
-// is the full CLIENT package price, not the artist's own fee. An artist should see their own net
-// (what artistPayout() already computes correctly for Financials), never another number labeled
-// ambiguously as just "Price". Office call sites (showArtist:true dashboard/leads tables, the
-// admin's per-artist detail page) are unaffected -- only pass asArtist:true for an artist's own
-// session.
+// Office tables. An artist's own My Gigs list is renderArtistGigTable (their money, map links).
 function renderEventTable(events, opts={}){
   if(!events.length) return `<div class="card empty">Nothing here yet.</div>`;
   return `<div class="card table-cards"><table>
     <thead><tr>
       ${opts.showArtist?'<th>Artist</th>':''}
-      <th>Client</th><th>Type</th><th>Date</th><th>Location</th><th>${opts.asArtist?'Your Fee':'Price'}</th><th>Status</th>
+      <th>Client</th><th>Type</th><th>Date</th><th>Location</th><th>Price</th><th>Status</th>
     </tr></thead>
     <tbody>
       ${events.map(e=>{
         const a = artistById(e.artistId); const sm = statusMeta(e);
-        const amountCell = e.unpaid? '—' : money(opts.asArtist? artistPayout(e) : e.price);
+        const amountCell = e.unpaid? '—' : money(e.price);
         return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
           ${opts.showArtist?`<td data-label="Artist"><span style="display:flex;align-items:center;gap:7px;"><span class="avatar" data-slot="${a.slot}" style="width:22px;height:22px;font-size:9px;">${esc(a.initials)}</span>${esc(a.name)}</span></td>`:''}
           <td data-label="Client">${e.clientName? esc(e.clientName) : '—'}${e.needsReview? ` <span class="pill pill-warn" title="Imported from calendar -- not yet confirmed">Needs Review</span>` : ''}</td><td data-label="Type">${esc(e.type)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
-          <td data-label="Location">${esc(e.venue)||'—'}</td><td data-label="${opts.asArtist?'Your Fee':'Price'}" class="u-mono">${amountCell}</td>
+          <td data-label="Location">${esc(e.venue)||'—'}</td><td data-label="Price" class="u-mono">${amountCell}</td>
           <td data-label="Status"><span class="pill ${sm.cls}">${esc(sm.label)}</span></td>
         </tr>`;
       }).join('')}
@@ -4667,69 +4790,102 @@ function renderArtistDashboard(artistId){
   const todayGig = evs.find(e=>e.date===todayISO() && isConfirmed(e));
   return `
   ${renderWelcomeHeader(a.name.split(' ')[0])}
+  ${renderArtistPortalStatus()}
   ${todayGig? `<div class="card card-pad" style="margin-bottom:20px;border-color:var(--accent);background:var(--accent-wash);">
     <div style="display:flex;align-items:center;gap:8px;color:var(--accent-ink);font-weight:700;font-size:13px;margin-bottom:10px;">${MIC_PHOTO_ICON} Today's Gig</div>
     <div style="font-family:var(--font-display);font-size:1.15rem;font-weight:600;margin-bottom:4px;cursor:pointer;" data-action="open-event" data-id="${todayGig.id}">${esc(todayGig.type)}${todayGig.clientName?` — ${esc(todayGig.clientName)}`:''}</div>
     <div style="font-size:13px;color:var(--ink-2);margin-bottom:2px;">${fmtTimeRange(todayGig.time, todayGig.endTime)}</div>
     <div style="font-size:13px;color:${hasLocation(todayGig)?'var(--ink-2)':'var(--ink-3)'};margin-bottom:14px;">${hasLocation(todayGig)? esc(fullLocation(todayGig)) : 'Location TBD'}</div>
     ${hasLocation(todayGig)? `<div style="display:flex;gap:8px;">
-      <a href="${gmapsUrl(todayGig)}" target="_blank" rel="noopener" class="btn btn-primary" style="flex:1;">${ICO.pin} Maps</a>
-      <a href="${wazeUrl(todayGig)}" target="_blank" rel="noopener" class="btn" style="flex:1;background:var(--surface);">${ICO.pin} Waze</a>
+      <a href="${esc(wazeUrl(todayGig))}" target="_blank" rel="noopener" data-action="external-link" class="btn btn-primary" style="flex:1;">${ICO.pin} Navigate (Waze)</a>
+      <a href="${esc(gmapsUrl(todayGig))}" target="_blank" rel="noopener" data-action="external-link" class="btn" style="flex:1;background:var(--surface);">${ICO.pin} Google Maps</a>
     </div>` : ''}
   </div>` : ''}
   ${renderUpcomingGigsCard(evs, {days:7, showArtist:false})}
   `;
 }
+// Shown above the artist's pages while their gigs load from the artist views, or when that failed.
+function renderArtistPortalStatus(){
+  if(!S.artistPortal.on) return '';
+  if(S.artistPortal.error) return `<div class="card card-pad" role="alert" style="border-color:var(--crit);background:var(--crit-wash);margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+    <div style="font-size:13px;color:var(--crit-ink);min-width:0;"><strong>Couldn't load your gigs.</strong> ${S.artistPortal.loadedAt ? 'Showing what loaded earlier. ' : ''}${esc(S.artistPortal.error)}</div>
+    <button class="btn btn-sm" data-action="retry-artist-portal">Try again</button>
+  </div>`;
+  if(!S.artistPortal.loadedAt) return `<div class="card card-pad" style="margin-bottom:16px;font-size:13px;color:var(--ink-2);">Loading your gigs…</div>`;
+  return '';
+}
 function renderArtistFinancials(artistId){
-  const evs = eventsFor(artistId);
-  const booked = evs.filter(e=>isConfirmed(e));
-  const totalPayout = booked.reduce((s,e)=>s+artistPayout(e),0);
-  const avgPayout = booked.length ? Math.round(totalPayout/booked.length) : 0;
-  const ytdPayout = ytdPayoutOf(evs);
+  const jobs = eventsFor(artistId).filter(e=>isConfirmed(e)).sort((a,b)=>b.date.localeCompare(a.date));
+  const priced = jobs.filter(e=>!artistMoney(e).pending);
+  const pendingCount = jobs.length - priced.length;
+  const paidYtd = artistPaidYtd(jobs);
+  const expected = priced.filter(e=>!e.artistPaidOut).reduce((s,e)=>s+artistMoney(e).net, 0);
+  const pcts = [...new Set(priced.map(e=>artistMoney(e).pct).filter(p=>p!=null))].sort((a,b)=>a-b);
+  const pctLabel = !pcts.length ? '—' : pcts.length===1 ? fmtPct(pcts[0]) : `${fmtPct(pcts[0])}–${fmtPct(pcts[pcts.length-1])}`;
 
   const months = lastNMonths(6);
-  const monthlyPayout = sumByMonth(booked, months, artistPayout).map((val,i)=>({label: months[i].toLocaleDateString('en-US',{month:'short'}), val}));
-  const maxMonthly = Math.max(...monthlyPayout.map(m=>m.val),1);
+  const monthly = sumByMonth(priced, months, e=>artistMoney(e).net).map((val,i)=>({label: months[i].toLocaleDateString('en-US',{month:'short'}), val}));
+  const maxMonthly = Math.max(...monthly.map(m=>m.val),1);
 
   return `
+  ${renderArtistPortalStatus()}
   <div class="grid stat-row" style="margin-bottom:20px;">
-    <div class="card stat-tile"><span class="u-label">YTD Payout</span><span class="val">${money(ytdPayout)}</span><span class="sub">Received via Zelle</span></div>
-    <div class="card stat-tile"><span class="u-label">Total Payout (booked)</span><span class="val">${money(totalPayout)}</span><span class="sub">${booked.length} jobs</span></div>
-    <div class="card stat-tile"><span class="u-label">Avg Payout</span><span class="val">${money(avgPayout)}</span><span class="sub">per booking</span></div>
-    <div class="card stat-tile"><span class="u-label">Commission Rate</span><span class="val">${Math.round(COMMISSION_RATE*100)}%</span><span class="sub">Standard ASP rate</span></div>
+    <div class="card stat-tile"><span class="u-label">Paid to You (YTD)</span><span class="val">${money(paidYtd)}</span><span class="sub">Paid out this year</span></div>
+    <div class="card stat-tile"><span class="u-label">Expected</span><span class="val">${money(expected)}</span><span class="sub">Booked, not yet paid out</span></div>
+    <div class="card stat-tile"><span class="u-label">Gigs</span><span class="val">${jobs.length}</span><span class="sub">${pendingCount ? `${pendingCount} amount${pendingCount===1?'':'s'} being confirmed` : 'Booked'}</span></div>
+    <div class="card stat-tile"><span class="u-label">ASP Fee</span><span class="val">${esc(pctLabel)}</span><span class="sub">Per gig, shown on each job</span></div>
   </div>
 
   <div class="card card-pad" style="margin-bottom:20px;">
-    <div class="section-head"><h2>Monthly Payout</h2></div>
+    <div class="section-head"><h2>You Receive, by Month</h2></div>
     <div class="fin-chart" style="display:flex;gap:14px;align-items:flex-end;height:120px;">
-      ${monthlyPayout.map(m=>`<div style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end;">
+      ${monthly.map(m=>`<div style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end;">
         <span class="u-mono" style="font-size:11px;color:var(--ink-2);">${m.val?money(m.val):''}</span>
         <div style="width:100%;max-width:46px;height:${Math.max(4,(m.val/maxMonthly)*80)}px;background:var(--accent);border-radius:4px 4px 0 0;opacity:.85;"></div>
-        <span class="u-label">${m.label}</span>
+        <span class="u-label">${esc(m.label)}</span>
       </div>`).join('')}
     </div>
   </div>
 
-  <div class="section-head"><h2>My Jobs (${booked.length})</h2></div>
-  <div class="card table-cards"><table>
-    <thead><tr><th>Client</th><th>Date</th><th>Your Fee</th><th>Status</th></tr></thead>
-    <tbody>${booked.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const sm=statusMeta(e);
-      return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
-        <td data-label="Client">${esc(e.clientName)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
-        <td data-label="Your Fee" class="u-mono">${money(artistPayout(e))}</td>
-        <td data-label="Status"><span class="pill ${sm.cls}">${esc(sm.label)}</span></td></tr>`;}).join('')}
-    </tbody></table></div>
+  <div class="section-head"><h2>My Jobs (${jobs.length})</h2></div>
+  ${jobs.length ? `<div class="card table-cards"><table>
+    <thead><tr><th>Client</th><th>Date</th><th>Gig Amount</th><th>ASP Fee</th><th>You Receive</th><th>Status</th></tr></thead>
+    <tbody>${jobs.map(e=>{ const m = artistMoney(e); const st = artistGigStatus(e);
+      return `<tr class="row-link" data-action="open-event" data-id="${esc(e.id)}">
+        <td data-label="Client">${e.clientName ? esc(e.clientName) : '—'}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
+        ${m.pending ? `<td data-label="Money" colspan="3">Amount being confirmed</td>` : `
+        <td data-label="Gig Amount" class="u-mono">${money(m.gross)}</td>
+        <td data-label="ASP Fee" class="u-mono">${m.pct!=null ? `${esc(fmtPct(m.pct))} · ` : ''}${money(m.cut)}</td>
+        <td data-label="You Receive" class="u-mono">${money(m.net)}</td>`}
+        <td data-label="Status"><span class="pill ${st.cls}">${esc(st.label)}</span></td></tr>`; }).join('')}
+    </tbody></table></div>` : `<div class="card empty">No booked gigs yet.</div>`}
   `;
+}
+function renderArtistGigTable(events){
+  if(!events.length) return `<div class="card empty">Nothing here yet.</div>`;
+  return `<div class="card table-cards"><table>
+    <thead><tr><th>Client</th><th>Type</th><th>Date &amp; Time</th><th>Location</th><th>You Receive</th><th>Status</th></tr></thead>
+    <tbody>${events.map(e=>{ const m = artistMoney(e); const st = artistGigStatus(e);
+      return `<tr class="row-link" data-action="open-event" data-id="${esc(e.id)}">
+        <td data-label="Client">${e.clientName ? esc(e.clientName) : '—'}</td>
+        <td data-label="Type">${esc(e.type)}</td>
+        <td data-label="Date &amp; Time" class="u-mono">${fmtDateShort(e.date)} · ${esc(fmtTimeRange(e.time, e.endTime))}</td>
+        <td data-label="Location"><span style="display:block;min-width:0;">${e.venue ? esc(e.venue) : (hasLocation(e) ? esc(fullLocation(e)) : '—')}${renderMapLinks(e)}</span></td>
+        <td data-label="You Receive" class="u-mono">${m.pending ? 'Being confirmed' : money(m.net)}</td>
+        <td data-label="Status"><span class="pill ${st.cls}">${esc(st.label)}</span></td>
+      </tr>`; }).join('')}
+    </tbody></table></div>`;
 }
 function renderArtistGigs(artistId){
   const evs = eventsFor(artistId).sort((a,b)=>a.date.localeCompare(b.date));
   const upcoming = evs.filter(e=>!isPast(e.date));
   const past = evs.filter(e=>isPast(e.date));
   return `
+    ${renderArtistPortalStatus()}
     <div class="section-head"><h2>Upcoming</h2></div>
-    ${renderEventTable(upcoming, {asArtist:true})}
+    ${renderArtistGigTable(upcoming)}
     <div class="section-head" style="margin-top:26px;"><h2>Past</h2></div>
-    ${renderEventTable(past, {asArtist:true})}
+    ${renderArtistGigTable(past)}
   `;
 }
 
@@ -5072,7 +5228,7 @@ function renderEventSheet(ev){
   if(!ev) return '';
   const a = artistById(ev.artistId);
   const isAdmin = isAdminUser(S.user);
-  const sm = statusMeta(ev);
+  const sm = isAdmin ? statusMeta(ev) : artistGigStatus(ev);
   const steps = EVENT_PIPELINE.map(p=>({ key:p.key, label:p.step }));
   const curIdx = EVENT_PIPELINE.findIndex(p=>p.key===ev.status);
 
@@ -5090,7 +5246,7 @@ function renderEventSheet(ev){
           <button class="icon-btn" data-action="toggle-event-menu" aria-label="Toggle event menu">${ICO.kebab}</button>
           ${S.showEventMenu? `<div class="kebab-dropdown">
             <button class="kebab-item" data-action="share-event" data-id="${ev.id}">${ICO.share} Share</button>
-            <button class="kebab-item danger" data-action="delete-event" data-id="${ev.id}">${ICO.trash} Delete ${ev.unpaid?'Internal Day':ev.status==='lead'?'Lead':'Gig'}</button>
+            ${isAdmin? `<button class="kebab-item danger" data-action="delete-event" data-id="${ev.id}">${ICO.trash} Delete ${ev.unpaid?'Internal Day':ev.status==='lead'?'Lead':'Gig'}</button>` : ''}
           </div>`:''}
           <button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button>
         </div>
@@ -5110,8 +5266,8 @@ function renderEventSheet(ev){
           <div class="kv-row">
             <span style="color:var(--ink-2);">${ICO.pin} Venue</span>
             <span style="text-align:right;">
-              <strong>${ev.venue? esc(ev.venue) : `<span style="color:var(--ink-3);font-weight:500;">TBD</span>`}${(ev.city||ev.state)?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.city)}${ev.city&&ev.state?', ':''}${esc(ev.state)}</span>`:''}</strong>
-              ${hasLocation(ev)? `<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px;">
+              <strong>${ev.venue? esc(ev.venue) : `<span style="color:var(--ink-3);font-weight:500;">TBD</span>`}${!isAdmin && ev.address?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.address)}</span>`:''}${(ev.city||ev.state)?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.city)}${ev.city&&ev.state?', ':''}${esc(ev.state)}</span>`:''}</strong>
+              ${!isAdmin ? `<span style="display:flex;justify-content:flex-end;">${renderMapLinks(ev)}</span>` : hasLocation(ev)? `<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px;">
                 <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="font-size:11px;font-weight:700;color:var(--accent);text-decoration:none;">Maps</a>
                 <a href="${wazeUrl(ev)}" target="_blank" rel="noopener" style="font-size:11px;font-weight:700;color:var(--accent);text-decoration:none;">Waze</a>
               </div>`:''}
@@ -5125,6 +5281,8 @@ function renderEventSheet(ev){
             </span>
           </div>
           ${isAdmin && !ev.unpaid?`<div class="kv-row"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;">${esc(ev.clientEmail)}<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.clientPhone)}</span></strong></div>`:''}
+          ${!isAdmin && !ev.unpaid && (ev.clientPhone || ev.clientEmail) ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;">${ev.clientPhone?`<a href="tel:${esc(telHref(ev.clientPhone))}" style="color:var(--accent);text-decoration:none;">${esc(ev.clientPhone)}</a>`:''}${ev.clientPhone&&ev.clientEmail?'<br/>':''}${ev.clientEmail?`<a href="mailto:${esc(ev.clientEmail)}" style="color:var(--accent);text-decoration:none;font-weight:500;">${esc(ev.clientEmail)}</a>`:''}</strong></div>` : ''}
+          ${!isAdmin && (ev.coPerformers||[]).length ? `<div class="kv-row"><span style="color:var(--ink-2);">Performing with</span><strong style="text-align:right;">${ev.coPerformers.map(c=>`${esc(c.name)}${c.role?` <span style="font-weight:500;color:var(--ink-2);">(${esc(c.role)})</span>`:''}`).join('<br/>')}</strong></div>` : ''}
           ${isAdmin && !ev.unpaid && !isStandardPayment(ev) ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.money} Payment Method</span><strong style="text-align:right;color:var(--warn-ink);">${esc(paymentMethodLabel(ev))}${ev.paymentMethodNote?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.paymentMethodNote)}</span>`:''}</strong></div>` : ''}
         </div>
 
@@ -5156,16 +5314,16 @@ function renderEventSheet(ev){
         ${isAdmin ? renderAdminActions(ev) : ''}
 
         ${isAdmin && (ev.additionalArtists||[]).length ? renderAdditionalArtistsRoster(ev) : ''}
-        ${!ev.unpaid ? `<button class="btn btn-sm btn-ghost" data-action="view-contract" data-id="${ev.id}" style="justify-content:flex-start;color:var(--ink-2);">${ICO.leads} ${ev.status==='lead'?'Preview Draft Contract':'View Contract'}</button>` : ''}
-        ${!ev.unpaid ? renderLedger(ev, isAdmin, {compact:true}) : ''}
+        ${isAdmin && !ev.unpaid ? `<button class="btn btn-sm btn-ghost" data-action="view-contract" data-id="${ev.id}" style="justify-content:flex-start;color:var(--ink-2);">${ICO.leads} ${ev.status==='lead'?'Preview Draft Contract':'View Contract'}</button>` : ''}
+        ${!ev.unpaid ? (isAdmin ? renderLedger(ev, {compact:true}) : renderArtistMoneyCard(ev)) : ''}
 
-        <div>
+        ${isAdmin ? `<div>
           <div class="section-head" style="margin-bottom:8px;"><h2 style="font-size:1rem;">Activity</h2></div>
           <div class="log">${ev.log.slice().reverse().map(l=>`<div class="log-item">
             <span class="log-ico ${l.type==='warning'?'warn':''}">${l.type==='email'?ICO.mail:l.type==='sms'?ICO.sms:l.type==='success'?ICO.check:l.type==='warning'?ICO.alert:ICO.bell}</span>
             <span><div>${esc(l.text)}</div><div class="log-time">${new Date(l.ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</div></span>
           </div>`).join('')}</div>
-        </div>
+        </div>` : ''}
       </div>
     </div>
   </div>`;
@@ -5222,7 +5380,7 @@ function renderFlightBlock(ev, isAdmin){
           <span class="u-label">Flight Tracking</span>
           ${f.trackingStatus? `<span class="pill pill-good">${esc(f.trackingStatus)}</span>` : `<span class="pill pill-neutral">Not checked yet</span>`}
         </div>
-        <button class="btn btn-sm" data-action="check-flight-status" data-id="${ev.id}" ${checking?'disabled':''} style="min-width:118px;justify-content:center;">${checking? markLoader(12) : 'Check for Update'}</button>
+        ${isAdmin? `<button class="btn btn-sm" data-action="check-flight-status" data-id="${ev.id}" ${checking?'disabled':''} style="min-width:118px;justify-content:center;">${checking? markLoader(12) : 'Check for Update'}</button>` : ''}
       </div>
       ${f.trackingStatusAt? `<div style="font-size:11px;color:var(--ink-3);margin-top:6px;">Last checked ${new Date(f.trackingStatusAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})} — emailed to ${artistById(ev.artistId).name} in an ASP-branded update.</div>` : ''}
     </div>` : ''}
@@ -5266,7 +5424,8 @@ function renderAdditionalArtistsRoster(ev){
     <p style="font-size:11px;color:var(--ink-3);margin:2px 0 0;">Not yet visible on their own gig lists -- pending the events-to-Supabase migration.</p>
   </div>`;
 }
-function renderLedger(ev, isAdmin, opts={}){
+// Office price breakdown. Artists see renderArtistMoneyCard instead.
+function renderLedger(ev, opts={}){
   const extras = ev.charges||[];
   const extrasSum = chargesTotal(ev);
   const total = ev.price + extrasSum;
@@ -5275,19 +5434,35 @@ function renderLedger(ev, isAdmin, opts={}){
   return `<div class="card card-pad" style="${compact?'padding:12px 14px;':''}">
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
       <div class="u-label">Price Breakdown</div>
-      ${isAdmin? `<button class="btn btn-sm btn-ghost" data-action="toggle-add-charge" data-id="${ev.id}" style="padding:2px 6px;">${S.showAddCharge?'Cancel':'+ Add Charge'}</button>`:''}
+      <button class="btn btn-sm btn-ghost" data-action="toggle-add-charge" data-id="${ev.id}" style="padding:2px 6px;">${S.showAddCharge?'Cancel':'+ Add Charge'}</button>
     </div>
     <div class="ledger" style="${compact?'font-size:11.5px;':''}">
-      ${isAdmin? `<div class="ledger-row"><span>Performance Fee</span><span class="amt">${money(ev.price)}</span></div>` : ''}
-      ${extras.map(c=>`<div class="ledger-row"><span>${esc(c.label)}${c.addedAfterSigning?` <span class="pill pill-warn" style="padding:1px 6px;font-size:9px;vertical-align:1px;">notify client</span>`:''}${isAdmin?` <a href="#" data-action="remove-charge" data-id="${ev.id}" data-chargeid="${c.id}" style="color:var(--crit);text-decoration:none;margin-left:4px;">×</a>`:''}</span><span class="amt">${money(c.amount)}</span></div>`).join('')}
+      <div class="ledger-row"><span>Performance Fee</span><span class="amt">${money(ev.price)}</span></div>
+      ${extras.map(c=>`<div class="ledger-row"><span>${esc(c.label)}${c.addedAfterSigning?` <span class="pill pill-warn" style="padding:1px 6px;font-size:9px;vertical-align:1px;">notify client</span>`:''} <a href="#" data-action="remove-charge" data-id="${ev.id}" data-chargeid="${c.id}" style="color:var(--crit);text-decoration:none;margin-left:4px;">×</a></span><span class="amt">${money(c.amount)}</span></div>`).join('')}
       ${S.showAddCharge? renderAddChargeRow(ev) : ''}
-      ${isAdmin? `<div class="ledger-row"><span>Total charged to client</span><span class="amt">${money(total)}</span></div>` : ''}
+      <div class="ledger-row"><span>Total charged to client</span><span class="amt">${money(total)}</span></div>
       <div class="ledger-row"><span>ASP booking fee ${ev.depositReceived?'· received':`· due via ${esc(paymentMethodLabel(ev))}`}</span><span class="amt">${money(ev.commission)}</span></div>
-      <div class="ledger-row total"><span>${isAdmin?'Artist payout (85% + charges, via Zelle)':'You walk away with'}</span><span class="amt">${money(artistTotal)}</span></div>
+      <div class="ledger-row total"><span>Artist payout (85% + charges, via Zelle)</span><span class="amt">${money(artistTotal)}</span></div>
       <div class="ledger-row"><span>Balance status</span><span class="amt">${ev.balanceReceived? `Received ${fmtDateShort(ev.balanceReceivedDate)}` : (ev.depositReceived? (isStandardPayment(ev)?'Pending — reminders active':'Pending — follow up directly'):'—')}</span></div>
     </div>
   </div>`;
 }
+
+// The artist's own money on a gig: gig amount, ASP fee at this gig's percentage, what they receive.
+function renderArtistMoneyCard(ev){
+  const m = artistMoney(ev);
+  return `<div class="card card-pad" style="padding:12px 14px;">
+    <div class="u-label" style="margin-bottom:6px;">Your Money</div>
+    ${m.pending ? `<p style="font-size:12.5px;color:var(--ink-2);margin:0;">Amount being confirmed — the office is finalizing your share for this gig.</p>` : `<div class="ledger" style="font-size:11.5px;">
+      <div class="ledger-row"><span>Gig amount</span><span class="amt">${money(m.gross)}</span></div>
+      <div class="ledger-row"><span>ASP fee${m.pct!=null ? ` ${esc(fmtPct(m.pct))}` : ''}</span><span class="amt">${money(m.cut)}</span></div>
+      <div class="ledger-row total"><span>You receive</span><span class="amt">${money(m.net)}</span></div>
+      <div class="ledger-row"><span>Status</span><span class="amt">${esc(artistGigStatus(ev).label)}</span></div>
+    </div>`}
+  </div>`;
+}
+// tel: links take digits and a leading + only (an "ext. 12" suffix is dropped).
+function telHref(phone){ return String(phone||'').split(/ext|x|#/i)[0].replace(/[^\d+]/g,''); }
 
 function renderAddChargeRow(ev){
   const f = S.addChargeForm;
@@ -7515,6 +7690,7 @@ function doCopyDailyDigest(){
   }
 }
 function doDeleteEvent(id){
+  if(artistReadOnly()) return;
   const ev = getEvent(id);
   const what = ev.unpaid ? `this ${ev.type} for ${artistById(ev.artistId).name}` : `this ${ev.status==='lead'?'lead':'gig'} for ${ev.clientName} (${artistById(ev.artistId).name})`;
   if(!confirm(`Delete ${what}? This can't be undone.`)) return;
@@ -7802,6 +7978,7 @@ function doSubmitLead(){
   S.showNewLead=false; S.newLeadForm={}; openEvent(ev.id);
 }
 function doSubmitBlockTime(){
+  if(artistReadOnly()) return; // blocks would only live in memory; artists can't write gigs (0038)
   const f = S.blockTimeForm;
   if(!f.date){ toast('Pick a date.', 'system'); return; }
   const allDay = f.allDay!==false;
@@ -7842,7 +8019,7 @@ function answerAskAI(q, isAdmin){
   if(!isAdmin){
     const evs = eventsFor(S.user);
     const nextGig = upcoming(evs).sort((a,b)=>a.date.localeCompare(b.date))[0];
-    const ytd = ytdPayoutOf(evs);
+    const ytd = artistPaidYtd(evs);
     if(ql.includes('next gig') || ql.includes('next booking')) return nextGig ? `Your next gig is ${nextGig.type} for ${nextGig.clientName||'you'} on ${fmtDateShort(nextGig.date)}.` : `You don't have any upcoming gigs booked yet.`;
     if(ql.includes('this month')){ const n=new Date(); const thisMonth = upcoming(evs).filter(e=>{const d=new Date(e.date+'T00:00:00'); return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear();}); return `You have ${thisMonth.length} gig${thisMonth.length===1?'':'s'} this month.`; }
     if(ql.includes('ytd') || ql.includes('payout') || ql.includes('earn')) return `You've been paid ${money(ytd)} so far this year.`;
@@ -7890,6 +8067,8 @@ function registerAction(name, fn){
   ACTIONS[name] = fn;
 }
 registerAction('download-backup', ()=>doDownloadBackup());
+registerAction('external-link', ()=>{}); // the browser follows the link; nothing else happens
+registerAction('retry-artist-portal', ()=>loadArtistPortalData());
 registerAction('oauth-connect', ({ id, t })=>doOAuthConnect(t.getAttribute('data-provider'), id));
 registerAction('remove-real-user', ()=>doRemoveRealUser());
 registerAction('retry-roster-link', ()=>{ supabaseClient.auth.getSession().then(({data:{session}})=>{ if(session) linkRealSessionToRoster(session); else { S.realSignInError = null; render(); } }); });
