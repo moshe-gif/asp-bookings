@@ -1,7 +1,7 @@
 """
 Contract Builder v2: real-template contracts (Standard / Comedian / Multi-Performer) reached from
-a lead's detail sheet, replacing the earlier generic clause-library version. Separate from the
-existing simple per-event auto-doc "Contracts" page, which this feature does not touch. Covers a
+a lead's detail sheet, replacing the earlier generic clause-library version. Since 2026-10-12 these
+are the only contracts (the old per-event auto-doc is gone; see test_one_contract_system.py). Covers a
 template picked at creation (locked after), per-artist payee-profile autofill (entity + default
 boilerplate + overtime interval), a Standard contract with Baruch-Levine-style boilerplate, a
 Comedian contract with the No-Recording/credit-future cancellation defaults, a Multiline contract

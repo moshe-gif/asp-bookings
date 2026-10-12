@@ -55,13 +55,13 @@ OPENERS = [
     "open-event", "open-artist", "open-add-artist", "open-payee-profile-form", "open-new-project", "open-project",
     "open-new-invoice", "view-invoice", "open-new-outside-booking", "open-outside-booking-detail",
     "open-outside-doc-builder", "open-new-document", "open-document", "open-add-real-user", "open-edit-real-user",
-    "open-contract-from-list", "open-contract-builder", "open-travel-request",
+    "open-contract-doc", "open-contract-builder", "open-travel-request",
 ]
 # Second level: controls inside an open event sheet / New Lead modal.
 NESTED = {
     "open-event": ["toggle-event-menu", "open-edit-event", "open-flight-form", "open-transport-form",
                    "open-dresscode-form", "open-giginfo-form", "view-giginfo", "view-itinerary", "create-contract",
-                   "view-contract", "open-send-contract", "open-verify-deposit", "preview-reminder",
+                   "open-send-contract", "open-verify-deposit", "preview-reminder",
                    "toggle-add-charge", "view-contract-builder-doc", "open-travel-request"],
     "open-new-lead": ["toggle-additional-artist", "add-lead-charge", "pick-booking-kind"],
     "open-contract-builder": ["view-contract-builder-doc"],

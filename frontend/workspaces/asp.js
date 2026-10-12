@@ -1873,7 +1873,6 @@ let S = {
   showGigInfoDoc:false,
   gigInfoDocEventId:null,
   contractSearchQuery:'',
-  contractDocEventId:null,
   showNewInvoice:false,
   newInvoiceForm:{},
   showNewOutsideBooking:false,
@@ -1889,7 +1888,6 @@ let S = {
   showAskAI:false,
   askAIForm:{},
   askAIHistory:[],
-  showContract:false,
   showAddCharge:false,
   addChargeForm:{},
   dayListDate:null,
@@ -2221,7 +2219,7 @@ var SHARED = {
     prefix:'EV-', getCounter:()=>EVID, setCounter:n=>{ EVID = n; },
     sameRecord:(a,b)=>a.artistId===b.artistId && a.date===b.date && (a.clientName||'')===(b.clientName||''),
     remapRefs:map=>{ if(remapIn(CONTRACTS,'leadId',map)) saveContracts(); if(remapIn(TRAVEL_REQUESTS,'eventId',map)) saveTravelRequests(); if(remapIn(PROJECTS,'recordingEventId',map)) saveProjects();
-      remapState(['eventId','contractDocEventId','gigInfoDocEventId','itineraryEventId','verifyDepositEventId','templatePickerLeadId'], map); } }),
+      remapState(['eventId','gigInfoDocEventId','itineraryEventId','verifyDepositEventId','templatePickerLeadId'], map); } }),
   contracts: createSharedCollection({ name:'contracts', label:'contracts', one:'contract', table:'app_records', collection:'contracts',
     get:()=>CONTRACTS, set:v=>{ CONTRACTS = v; }, saveLocal:()=>persist(CONTRACTS_LS_KEY, CONTRACTS, 'contracts'),
     prefix:'CT-', getCounter:()=>CTID, setCounter:n=>{ CTID = n; },
@@ -2976,7 +2974,7 @@ S.showInstallBanner = shouldShowInstallBanner();
 
 function closeAllOverlays(){
   S.eventId=null; S.projectId=null; S.showNewLead=false; S.showAddArtist=false; S.newArtistWelcome=null;
-  S.dayListDate=null; S.showNewProject=false; S.showFlightForm=false; S.showContract=false; S.contractDocEventId=null;
+  S.dayListDate=null; S.showNewProject=false; S.showFlightForm=false;
   S.showTransportForm=false; S.showItinerary=false; S.itineraryEventId=null; S.showBlockTime=false; S.showAskAI=false; S.showDressCodeForm=false;
   S.showEditEvent=false;
   S.showGigInfoForm=false; S.gigInfoForm={}; S.newGigContactForm={}; S.showGigInfoDoc=false; S.gigInfoDocEventId=null;
@@ -3334,8 +3332,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.3.0'; // bump on every release so a phone can tell it has updated. v1.3.0: brand/sender from brand_config, one email helper
-const OVERTIME_PER_HALF_HOUR = 250;
+const APP_VERSION = 'v1.4.0'; // bump on every release so a phone can tell it has updated. v1.4.0: one contract system (audit 2.11)
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -4381,41 +4378,52 @@ function renderDocumentsPage(){
 }
 
 /* ============ CONTRACTS (searchable) ============ */
-// Every booking's contract is generated live from its own event data (renderContractDoc, reused
-// unchanged here) -- this page is a find-it-fast index, not a second copy of contract content,
-// so there's nothing here that can drift out of sync with the real event. Scoped to events that
-// actually have a real (non-draft) contract out -- contract_sent/booked/paid -- since a lead
-// still being negotiated doesn't have one yet.
+// One contract system (2026-10-09 audit 2.11): the Contract Builder's records (CONTRACTS) are the
+// contracts. This page is the read-first index of them -- a row opens the real contract document,
+// exactly what was (or will be) sent. The old per-booking document generated straight from the gig
+// (its own terms, "booking fee" = deposit, a hardcoded overtime line) is gone. Bookings that are
+// contracted but have no contract record yet are listed underneath so none drops off the index.
 function contractedEvents(){
   return S.events.filter(e=>!e.unpaid && ['contract_sent','booked','paid'].includes(e.status));
 }
 function renderContractsPage(){
   const q = (S.contractSearchQuery||'').trim().toLowerCase();
-  const rows = contractedEvents()
-    .filter(e=>{
-      if(!q) return true;
-      const a = artistById(e.artistId);
-      return (e.clientName||'').toLowerCase().includes(q) || a.name.toLowerCase().includes(q);
-    })
+  const matches = (...texts)=>!q || texts.some(t=>String(t||'').toLowerCase().includes(q));
+  const live = CONTRACTS.filter(c=>c.status!=='void')
+    .filter(c=>matches(c.snapshot.clientName, contractPerformerName(c)))
+    .sort((a,b)=>String(b.snapshot.eventDate||'').localeCompare(String(a.snapshot.eventDate||'')));
+  const withContract = new Set(CONTRACTS.map(c=>c.leadId));
+  const missing = contractedEvents().filter(e=>!withContract.has(e.id))
+    .filter(e=>matches(e.clientName, (artistById(e.artistId)||{}).name))
     .sort((a,b)=>b.date.localeCompare(a.date));
   return `
-  <div class="section-head"><h2>Contracts (${rows.length})</h2></div>
-  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Every booking with a contract out, searchable by client or artist — find one without digging through the gig itself.</p>
+  <div class="section-head"><h2>Contracts (${live.length})</h2></div>
+  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Every contract, searchable by client or artist. Open one to see the exact document; edit it from the gig or the Contract Builder.</p>
   <div class="field" style="max-width:340px;margin-bottom:14px;">
     <input id="contractSearchInput" value="${esc(S.contractSearchQuery||'')}" placeholder="Search client or artist..."/>
   </div>
-  ${rows.length? `<div class="card table-cards"><table>
-    <thead><tr><th>Client</th><th>Artist</th><th>Date</th><th>Status</th></tr></thead>
-    <tbody>${rows.map(e=>{
-      const a = artistById(e.artistId); const sm = statusMeta(e);
-      return `<tr class="row-link" data-action="open-contract-from-list" data-id="${e.id}">
+  ${live.length? `<div class="card table-cards"><table>
+    <thead><tr><th>Client</th><th>Artist</th><th>Template</th><th>Event Date</th><th>Status</th></tr></thead>
+    <tbody>${live.map(c=>`<tr class="row-link" data-action="open-contract-doc" data-id="${esc(c.id)}">
+        <td data-label="Client">${esc(c.snapshot.clientName)||'—'}</td>
+        <td data-label="Artist">${esc(contractPerformerName(c))}</td>
+        <td data-label="Template">${esc(contractTemplateLabel(c.template))}</td>
+        <td data-label="Event Date" class="u-mono">${c.snapshot.eventDate? fmtDateShort(c.snapshot.eventDate) : '—'}</td>
+        <td data-label="Status"><span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span></td>
+      </tr>`).join('')}
+    </tbody></table></div>` : `<div class="card empty">${q? 'No contracts match that search.' : 'No contracts yet — create one from a gig.'}</div>`}
+  ${missing.length? `
+  <div class="section-head" style="margin-top:26px;"><h2>Booked Without a Contract (${missing.length})</h2></div>
+  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Contracted or booked gigs with no contract record in the app (e.g. imported, or signed outside it).</p>
+  <div class="card table-cards"><table>
+    <thead><tr><th>Client</th><th>Artist</th><th>Date</th><th>Contract</th></tr></thead>
+    <tbody>${missing.map(e=>`<tr class="row-link" data-action="open-event" data-id="${esc(e.id)}">
         <td data-label="Client">${esc(e.clientName||e.type)}</td>
-        <td data-label="Artist">${esc(a.name)}</td>
+        <td data-label="Artist">${esc((artistById(e.artistId)||{}).name||'—')}</td>
         <td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
-        <td data-label="Status"><span class="pill ${sm.cls||'pill-neutral'}">${esc(sm.label)}</span></td>
-      </tr>`;
-    }).join('')}
-    </tbody></table></div>` : `<div class="card empty">${q? 'No contracts match that search.' : 'No contracts sent yet.'}</div>`}
+        <td data-label="Contract"><button class="btn btn-sm" data-action="create-contract" data-id="${esc(e.id)}">${ICO.plus} Create Contract</button></td>
+      </tr>`).join('')}
+    </tbody></table></div>` : ''}
   `;
 }
 
@@ -5306,7 +5314,6 @@ function renderEventSheet(ev){
         ${isAdmin ? renderAdminActions(ev) : ''}
 
         ${isAdmin && (ev.additionalArtists||[]).length ? renderAdditionalArtistsRoster(ev) : ''}
-        ${isAdmin && !ev.unpaid ? `<button class="btn btn-sm btn-ghost" data-action="view-contract" data-id="${ev.id}" style="justify-content:flex-start;color:var(--ink-2);">${ICO.leads} ${ev.status==='lead'?'Preview Draft Contract':'View Contract'}</button>` : ''}
         ${!ev.unpaid ? (isAdmin ? renderLedger(ev, {compact:true}) : renderArtistMoneyCard(ev)) : ''}
 
         ${isAdmin ? `<div>
@@ -5997,104 +6004,6 @@ function renderInvoiceDoc(){
   </div>`;
 }
 
-function renderContractDoc(){
-  // contractDocEventId lets the Contracts list open a contract without touching S.eventId --
-  // S.eventId truthy is what makes the full event sheet render (see render()), so reusing it
-  // here would silently pop that open behind the doc too (the exact bug the Travel-page
-  // itinerary shortcut hit before -- see S.itineraryEventId for the same fix).
-  const ev = getEvent(S.contractDocEventId || S.eventId); if(!ev) return '';
-  const artist = artistById(ev.artistId);
-  const isComedian = artist.role==='Comedian';
-  const signed = ev.depositReceived;
-  const draft = ev.status==='lead';
-  return `<div class="overlay center" data-action="contract-overlay-close">
-    <div class="doc" data-stop>
-      <div class="sheet-head">
-        <h2 style="font-size:1.1rem;">${draft?'Draft Contract Preview':'Performance Agreement'}</h2>
-        <div style="display:flex;gap:6px;">
-          <button class="icon-btn" data-action="print-contract" title="Print / Save as PDF" aria-label="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
-          <button class="icon-btn" data-action="close-contract" aria-label="Close">${ICO.x}</button>
-        </div>
-      </div>
-      <div class="doc-body" id="contractDocBody">
-        <div class="doc-letterhead">
-          <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
-          <span class="pill ${signed?'pill-good':'pill-neutral'}">${draft? 'Draft — not yet sent' : signed? 'Signed & Booking Fee Received' : 'Awaiting Signature'}</span>
-        </div>
-        <div class="doc-title">${esc(artist.name.toUpperCase())}<br/><span style="font-size:.62em;letter-spacing:.06em;">ARTIST AGREEMENT</span></div>
-        <div class="doc-sub">Agreement ${esc(ev.id)} &middot; Prepared ${fmtDate(ev.createdAt)}</div>
-
-        <p style="font-size:13px;line-height:1.6;">This contractual agreement is made on ${fmtDate(ev.createdAt)}, between
-          <strong>${esc(artist.name)}</strong>, hereafter referred to as &ldquo;the Artist&rdquo;, and <strong>${esc(ev.clientName)}</strong>,
-          hereafter referred to as &ldquo;the Client&rdquo;. It is mutually agreed between the parties, as follows: the Client hereby
-          engages the Artist, and the Artist hereby agrees to perform the engagement, the terms and conditions of which are set forth herein.</p>
-
-        <div class="doc-parties">
-          <div class="doc-party"><h4>Performer</h4><p><strong>${esc(artist.name)}</strong><br/>Represented by ASP Artist Management</p></div>
-          <div class="doc-party"><h4>Client / Buyer</h4><p><strong>${esc(ev.clientName)}</strong><br/>${esc(ev.clientEmail)}<br/>${esc(ev.clientPhone)}</p></div>
-        </div>
-
-        <div class="doc-section"><h3>Event Details</h3>
-          <div class="doc-facts">
-            <div><span class="k">1. Place of engagement</span><span>${esc(ev.venue)||'TBD'}${(ev.city||ev.state)? `, ${esc(ev.city)}${ev.city&&ev.state?', ':''}${esc(ev.state)}` : ''}</span></div>
-            <div><span class="k">2. Date of engagement</span><span>${fmtDate(ev.date)}</span></div>
-            <div><span class="k">3. Hours of engagement</span><span>${hoursBetween(ev.time, ev.endTime) ? hoursBetween(ev.time, ev.endTime)+' hours ('+fmtTimeRange(ev.time, ev.endTime)+')' : fmtTimeRange(ev.time, ev.endTime)}</span></div>
-            <div><span class="k">4. Payment for engagement</span><span>${money(ev.price)}</span></div>
-            <div><span class="k">5. Terms of engagement</span><span>${esc(artist.name)} as performer for the engagement</span></div>
-          </div>
-        </div>
-
-        <div class="doc-section">
-          <p style="font-size:13px;margin:0 0 4px;"><strong>Artist shall provide:</strong><br/>${artist.role==='Comedian'?'Live Comedy Performance':artist.role==='DJ'?'DJ Performance':'Live Vocal Performance'}${hoursBetween(ev.time,ev.endTime)? ` for up to ${hoursBetween(ev.time,ev.endTime)} hours`:''}</p>
-          <p style="font-size:13px;margin:0;"><strong>Client shall provide:</strong><br/>Payment</p>
-        </div>
-
-        <div class="doc-section"><h3>Compensation</h3>
-          <div class="ledger" style="margin-bottom:20px;">
-            <div class="ledger-row total"><span>Total Fee</span><span class="amt">${money(ev.price + chargesTotal(ev))}</span></div>
-          </div>
-        </div>
-
-        <div class="doc-section"><h3>Terms</h3>
-          <ul class="doc-terms">
-            <li>Contract is not binding until the deposit is received.</li>
-            <li>Should the Artist be canceled within 40 days prior to the event, full payment is required.</li>
-            <li>In the event that the Artist is unable to perform, the Client will be paid back in full.</li>
-            <li>A non-refundable deposit of ${money(ev.commission)} must be paid upon signing the contract${isStandardPayment(ev)?' via QuickBooks invoice':` (${esc(paymentMethodLabel(ev))})`}. The rest of the balance must be paid prior to the event.</li>
-            ${isComedian? `
-            <li>No waitstaff, bar staff, or venue personnel should walk through the performance area or serve food/drinks during the performance, in order to maintain audience focus and preserve the show.</li>
-            <li>Video or audio recording of the performance may not be taken or disseminated in any way without the express written consent of the Artist.</li>
-            <li>The Client grants the Artist approval rights over any and all advertisements, promotional materials, and graphics referencing the performance.</li>
-            ` : `
-            <li>A Mechitzah is required at all events with dancing.</li>
-            <li>The Artist may refuse to sing any non-Jewish or secular songs at his discretion.</li>
-            `}
-            <li>If the Artist is asked to stay beyond the agreed upon time, a ${money(OVERTIME_PER_HALF_HOUR)} per half hour charge shall be paid in overtime fees.</li>
-            <li>If the event is cancelled due to weather or travel issues, the Artist agrees to return the deposit.</li>
-            <li>Any and all changes to this agreement must be approved and initiated by both Client and Artist.</li>
-            <li>${ev.flightNeeded? 'Air travel for the Performer is arranged and confirmed separately by ASP; details are provided once booked.' : 'This engagement does not include Performer travel arrangements.'}</li>
-          </ul>
-        </div>
-
-        <div class="doc-sign">
-          <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc(ev.clientName)}</span><br/>Signed electronically &middot; ${fmtDateShort(ev.depositReceivedDate)}` : `<strong>&nbsp;</strong>Client Signature &middot; Date`}</div>
-          <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc(artist.name)}</span><br/>` : `<strong>${esc(getBrandConfig('asp').label)}</strong>`}For ${esc(artist.name)}</div>
-        </div>
-
-        <div class="doc-section"><h3>Payment</h3>
-          <p style="font-size:12.5px;line-height:1.7;margin:0;">
-            <strong>Booking Fee</strong> (${money(ev.commission)}) — emailed as a QuickBooks invoice upon signing; pay by card or ACH directly from the invoice.<br/>
-            <strong>Balance</strong> (${money(artistPayout(ev))}) — ${(zellePayeeFor(ev)||{}).identifier ? `Zelle to <span class="u-mono">${esc(zellePayeeFor(ev).identifier)}</span>` : 'by Zelle (the office will send the Zelle details)'}, due no later than the day of the event.<br/>
-            Prefer to pay by check? Contact <span class="u-mono">${esc(getBrandConfig('asp').email)}</span> to arrange.
-          </p>
-        </div>
-
-        <div class="doc-foot">Payment link and Zelle details are sent with the live email.</div>
-      </div>
-    </div>
-  </div>`;
-}
-
 /* ============ CONTRACT BUILDER UI ============ */
 function renderLeadContractsCard(ev){
   if(ev.unpaid) return ''; // internal days never get contracts
@@ -6590,7 +6499,7 @@ function renderPayeeBlock(profile){
   if(profile.zelle) lines.push('IMPORTANT: Payments sent via Zelle must include event date/details in description. Otherwise, we cannot guarantee your deposit will be applied to your event.');
   return lines.length? `<div class="doc-section"><h3>Payment</h3><p style="font-size:12.5px;line-height:1.8;margin:0;">${lines.join('<br/>')}</p></div>` : '';
 }
-// Electronic signature: matches the app's existing convention (see renderContractDoc/renderDocumentDoc)
+// Electronic signature: matches the app's existing convention (see renderDocumentDoc)
 // of rendering a typed name in a cursive script once accepted, rather than a blank line -- also the
 // real-world behavior every "Acceptance" boilerplate clause already describes (deposit payment has
 // "the same effect as a signature"). Triggered by marking the contract Signed.
@@ -6863,7 +6772,7 @@ function renderContractsBuilderListPage(){
   if(statusFilter!=='all') list = list.filter(c=>c.status===statusFilter);
   if(q) list = list.filter(c=>(c.snapshot.clientName||'').toLowerCase().includes(q) || contractPerformerName(c).toLowerCase().includes(q) || contractTemplateLabel(c.template).toLowerCase().includes(q));
   return `<div class="section-head"><h2>Contract Builder (${CONTRACTS.length})</h2></div>
-    <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Every persisted contract across every lead. The <a href="#" data-action="nav" data-view="contracts" style="color:var(--accent);">Contracts</a> page's quick per-booking document is separate and unaffected.</p>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Every contract across every lead, to edit, approve and send. The <a href="#" data-action="nav" data-view="contracts" style="color:var(--accent);">Contracts</a> page lists the same contracts read-first.</p>
     <input id="contractsSearchInput" value="${esc(S.contractsSearchQuery||'')}" placeholder="Search client, performer, or template..." style="width:100%;max-width:360px;padding:9px 12px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:14px;margin-bottom:10px;"/>
     <div class="chip-row" style="margin-bottom:14px;">
       <button class="filter-chip ${statusFilter==='all'?'sel':''}" data-action="filter-contracts-status" data-status="all">All</button>
@@ -8061,6 +7970,7 @@ function registerAction(name, fn){
 registerAction('download-backup', ()=>doDownloadBackup());
 registerAction('external-link', ()=>{}); // the browser follows the link; nothing else happens
 registerAction('retry-artist-portal', ()=>loadArtistPortalData());
+registerAction('open-contract-doc', ({ id })=>{ S.contractBuilderId = id; S.showContractBuilderDoc = true; render(); });
 registerAction('oauth-connect', ({ id, t })=>doOAuthConnect(t.getAttribute('data-provider'), id));
 registerAction('remove-real-user', ()=>doRemoveRealUser());
 registerAction('retry-roster-link', ()=>{ supabaseClient.auth.getSession().then(({data:{session}})=>{ if(session) linkRealSessionToRoster(session); else { S.realSignInError = null; render(); } }); });
@@ -8153,14 +8063,6 @@ function bindGlobal(){
     const holder = document.createElement('div');
     holder.id = 'gigInfoPrintHost';
     holder.innerHTML = renderGigInfoDoc();
-    document.body.appendChild(holder);
-  }
-  const staleContract = document.getElementById('contractPrintHost');
-  if(staleContract) staleContract.remove();
-  if(S.showContract){
-    const holder = document.createElement('div');
-    holder.id = 'contractPrintHost';
-    holder.innerHTML = renderContractDoc();
     document.body.appendChild(holder);
   }
   const staleItinerary = document.getElementById('itineraryPrintHost');
@@ -8451,11 +8353,6 @@ function bindGlobal(){
       case 'confirm-add-charge': doAddCharge(id); break;
       case 'remove-charge': doRemoveCharge(id, t.getAttribute('data-chargeid')); break;
       case 'remove-prep': doRemovePrep(id, t.getAttribute('data-prepid')); break;
-      case 'view-contract': S.showContract=true; render(); break;
-      case 'open-contract-from-list': S.contractDocEventId=id; S.showContract=true; render(); break;
-      case 'close-contract': S.showContract=false; S.contractDocEventId=null; render(); break;
-      case 'contract-overlay-close': if(e.target===t) { S.showContract=false; S.contractDocEventId=null; render(); } break;
-      case 'print-contract': window.print(); break;
       case 'create-contract': S.showTemplatePicker=true; S.templatePickerLeadId=id; render(); break;
       case 'close-template-picker': S.showTemplatePicker=false; S.templatePickerLeadId=null; render(); break;
       case 'templatepicker-overlay-close': if(e.target===t){ S.showTemplatePicker=false; S.templatePickerLeadId=null; render(); } break;
