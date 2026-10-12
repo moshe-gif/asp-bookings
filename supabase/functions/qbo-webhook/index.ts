@@ -17,53 +17,8 @@
 // is connected, not as already-proven-correct code. The payment-vs-invoice-amount classification
 // below (deposit/partial/overpayment) is a best-effort structural read, not something QuickBooks
 // states directly -- re-check it against a handful of real payloads before trusting it blindly.
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-function serviceClient() {
-  return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-}
-
-function apiBase() {
-  return (Deno.env.get("QBO_ENVIRONMENT") === "sandbox")
-    ? "https://sandbox-quickbooks.api.intuit.com"
-    : "https://quickbooks.api.intuit.com";
-}
-
-const QBO_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
-
-async function getValidAccessToken(): Promise<{ accessToken: string; realmId: string }> {
-  const sb = serviceClient();
-  const { data: row, error } = await sb.from("qbo_connection").select("*").eq("id", 1).maybeSingle();
-  if (error || !row) throw new Error("QuickBooks is not connected.");
-
-  const msLeft = new Date(row.access_token_expires_at).getTime() - Date.now();
-  if (msLeft > 60_000) return { accessToken: row.access_token, realmId: row.realm_id };
-
-  const clientId = Deno.env.get("QBO_CLIENT_ID")!;
-  const clientSecret = Deno.env.get("QBO_CLIENT_SECRET")!;
-  const basicAuth = btoa(`${clientId}:${clientSecret}`);
-  const resp = await fetch(QBO_TOKEN_URL, {
-    method: "POST",
-    headers: { "Authorization": `Basic ${basicAuth}`, "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
-    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: row.refresh_token }),
-  });
-  if (!resp.ok) throw new Error("Could not refresh the QuickBooks connection.");
-  const tokens = await resp.json();
-  await sb.from("qbo_connection").update({
-    access_token: tokens.access_token, refresh_token: tokens.refresh_token,
-    access_token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
-    refresh_token_expires_at: new Date(Date.now() + tokens.x_refresh_token_expires_in * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  }).eq("id", 1);
-  return { accessToken: tokens.access_token, realmId: row.realm_id };
-}
-
-async function qboFetch(path: string) {
-  const { accessToken, realmId } = await getValidAccessToken();
-  return fetch(`${apiBase()}/v3/company/${realmId}${path}`, {
-    headers: { "Authorization": `Bearer ${accessToken}`, "Accept": "application/json" },
-  });
-}
+import { serviceClient } from "../_shared/auth.ts";
+import { qboFetch } from "../_shared/qbo.ts";
 
 async function verifySignature(rawBody: string, signatureHeader: string | null): Promise<boolean> {
   const verifierToken = Deno.env.get("QBO_WEBHOOK_VERIFIER_TOKEN");

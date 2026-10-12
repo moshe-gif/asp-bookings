@@ -8,33 +8,23 @@
 // Function Secrets needed: GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET,
 // GOOGLE_CALENDAR_REDIRECT_URI (must exactly match what's registered in Google Cloud Console),
 // APP_URL (e.g. https://app.aspmgmt.com).
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { serviceClient } from "../_shared/auth.ts";
+import { appUrl as configuredAppUrl } from "../_shared/config.ts";
+import { consumeOAuthState } from "../_shared/oauth.ts";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
 
-// One-time OAuth `state` issued by the oauth-start function to a signed-in admin (migration 0034).
-// Consumed here before anything else: an unknown, reused, expired or wrong-provider state is
-// rejected, so nobody can complete a connect flow ASP didn't start or attach their own account
-// to ASP's connection (2026-10-09 audit 1.2).
-async function consumeOAuthState(sb: any, state: string | null, provider: string) {
-  if (!state) return null;
-  const { data, error } = await sb.from("oauth_states").delete()
-    .eq("nonce", state).eq("provider", provider).gt("expires_at", new Date().toISOString())
-    .select("user_id, mailbox_id").maybeSingle();
-  if (error) { console.error("OAuth state check failed", error); return null; }
-  return data;
-}
 
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
-  const appUrl = Deno.env.get("APP_URL") || "https://app.aspmgmt.com";
+  const appUrl = configuredAppUrl();
 
   if (!code) {
     return Response.redirect(`${appUrl}/?gcal=error#/settings`, 302);
   }
-  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const sb = serviceClient();
   if (!(await consumeOAuthState(sb, url.searchParams.get("state"), "gcal"))) {
     console.error("Google Calendar OAuth callback: missing/invalid/expired state");
     return Response.redirect(`${appUrl}/?gcal=error#/settings`, 302);

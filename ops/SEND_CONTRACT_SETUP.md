@@ -38,14 +38,14 @@ admin, then forwards to the relay from Part 1.
 1. Log in to the Supabase dashboard for the **asp-bookings** project.
 2. Left sidebar → **Edge Functions** → **Deploy a new function**.
 3. Name it exactly: `send-contract-email`
-4. Paste in the contents of `supabase/functions/send-contract-email/index.ts` (from this repo)
-   as the function code, then **Deploy**.
+4. Deploy it from this repo: `supabase/deploy-function.sh send-contract-email` (it imports the
+   shared modules in `supabase/functions/_shared/`, so pasting the single file no longer works).
 5. Still on that function's page, go to **Secrets** (or Project Settings → Edge Functions →
    Secrets, depending on dashboard version) and add:
    - `RELAY_URL` = the Web app URL from Part 1, step 8
    - `RELAY_SECRET` = the `SHARED_SECRET` value from Part 1, step 5
-   - `REPLY_TO` = `billing@aspmgmt.com` (or whichever office address replies should land at --
-     optional, but recommended so client replies don't go to a personal Gmail)
+   - Sender name and reply-to come from the `brand_config` table (per brand: `sender_name`,
+     `reply_to`), the same row the app prints on documents. `REPLY_TO` is only a fallback.
 6. Save. No redeploy needed for secret changes.
 
 ## Done

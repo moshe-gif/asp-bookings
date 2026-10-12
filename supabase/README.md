@@ -25,10 +25,15 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0036_app_records_settings | Applied 2026-10-11 — adds collection `settings` (office settings + pricing, one row each: `org`, `pricing`). |
 | 0038_artist_portal_views | Applied 2026-10-12 — `artist_gig_view` + `artist_finance_view` (security-barrier views scoped by `current_artist_id()`) for the artist portal. Check: `0038_test_artist_isolation.sql` (rolls back; must say ALL OK). |
 | 0039_artist_finance_view_nulls | Applied 2026-10-12 (isolation check ALL OK) — fixes two NULL bugs in `artist_finance_view` found by the 0038 isolation check (solo gigs had no money; shared gigs showed $0 instead of nothing). |
+| 0040_email_sends_and_brand_email | Applied 2026-10-12 — `email_sends` (send log + 60/hour/admin limit for send-contract-email); ASP brand office email filled in. |
+| 0041_gmail_tables_service_role | Applied 2026-10-12 — service_role grants on `gmail_mailboxes` / `gmail_oauth_tokens` (the Gmail functions were failing with permission denied). |
 
 ## Edge Functions (`functions/`)
-Deploy: Supabase → Edge Functions → the function → paste the file's contents → Deploy. Secrets live
-in Edge Function secrets (names in `.env.example` and each `ops/*_SETUP.md`).
+Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in
+`functions/_shared/` (CORS locked to the app's origin, admin check, service client, app URL + brand,
+OAuth state, QuickBooks token, pinned supabase-js), so pasting one file into the dashboard no longer
+works. Secrets live in Edge Function secrets (names in `.env.example` and each `ops/*_SETUP.md`);
+`ALLOWED_ORIGINS` (optional, comma-separated) adds browser origins beyond `APP_URL` and localhost.
 
 | Function | Enforce JWT verification | Called by | Setup doc |
 |---|---|---|---|

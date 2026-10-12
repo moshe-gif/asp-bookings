@@ -6,88 +6,16 @@
 //
 // Function Secrets needed: QBO_CLIENT_ID, QBO_CLIENT_SECRET, QBO_ENVIRONMENT ("sandbox" or
 // "production", defaults to production if unset).
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-// Called directly via fetch() from the browser -- without these headers the browser's CORS
-// preflight (an automatic OPTIONS request before any cross-origin POST carrying custom headers
-// like apikey/Content-Type) fails with no server-visible error; the app just sees "Failed to
-// fetch". Same fix as send-contract-email/index.ts.
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-
-function json(obj: unknown, status = 200) {
-  return new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", ...corsHeaders } });
-}
-
-const QBO_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
-function apiBase() {
-  return (Deno.env.get("QBO_ENVIRONMENT") === "sandbox")
-    ? "https://sandbox-quickbooks.api.intuit.com"
-    : "https://quickbooks.api.intuit.com";
-}
-
-function serviceClient() {
-  return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-}
-
-async function getValidAccessToken(): Promise<{ accessToken: string; realmId: string }> {
-  const sb = serviceClient();
-  const { data: row, error } = await sb.from("qbo_connection").select("*").eq("id", 1).maybeSingle();
-  if (error || !row) throw new Error("QuickBooks is not connected yet -- connect it in Settings first.");
-
-  const msLeft = new Date(row.access_token_expires_at).getTime() - Date.now();
-  if (msLeft > 60_000) {
-    return { accessToken: row.access_token, realmId: row.realm_id };
-  }
-
-  const clientId = Deno.env.get("QBO_CLIENT_ID")!;
-  const clientSecret = Deno.env.get("QBO_CLIENT_SECRET")!;
-  const basicAuth = btoa(`${clientId}:${clientSecret}`);
-  const resp = await fetch(QBO_TOKEN_URL, {
-    method: "POST",
-    headers: {
-      "Authorization": `Basic ${basicAuth}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Accept": "application/json",
-    },
-    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: row.refresh_token }),
-  });
-  if (!resp.ok) throw new Error("Could not refresh the QuickBooks connection -- it may need to be reconnected in Settings.");
-  const tokens = await resp.json();
-  await sb.from("qbo_connection").update({
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    access_token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
-    refresh_token_expires_at: new Date(Date.now() + tokens.x_refresh_token_expires_in * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  }).eq("id", 1);
-  return { accessToken: tokens.access_token, realmId: row.realm_id };
-}
-
-async function qboFetch(path: string, init: RequestInit = {}) {
-  const { accessToken, realmId } = await getValidAccessToken();
-  return fetch(`${apiBase()}/v3/company/${realmId}${path}`, {
-    ...init,
-    headers: { ...(init.headers || {}), "Authorization": `Bearer ${accessToken}`, "Accept": "application/json" },
-  });
-}
+import { jsonFor, preflight } from "../_shared/http.ts";
+import { requireAdmin, serviceClient } from "../_shared/auth.ts";
+import { qboAccessToken, qboFetch } from "../_shared/qbo.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return preflight(req);
+  const json = jsonFor(req);
   if (req.method !== "POST") return json({ ok: false, error: "method not allowed" }, 405);
-
-  const authHeader = req.headers.get("Authorization") || "";
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: authHeader } } },
-  );
-  const { data: { user }, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !user) return json({ ok: false, error: "not authenticated" }, 401);
-  const { data: isAdmin, error: adminErr } = await supabase.rpc("is_admin");
-  if (adminErr || !isAdmin) return json({ ok: false, error: "not authorized" }, 403);
+  const auth = await requireAdmin(req, json);
+  if (auth instanceof Response) return auth;
 
   let body: { clientName?: string; clientEmail?: string; amount?: number; description?: string; eventId?: string; contractId?: string; idempotencyKey?: string };
   try {
@@ -102,6 +30,12 @@ Deno.serve(async (req) => {
   if (!idempotencyKey || !/^[A-Za-z0-9-]{3,60}$/.test(idempotencyKey)) {
     return json({ ok: false, error: "missing or invalid idempotencyKey" }, 400);
   }
+  if (!clientName || !clientEmail || !amount || amount <= 0) {
+    return json({ ok: false, error: "missing or invalid fields (clientName, clientEmail, amount required)" }, 400);
+  }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clientEmail)) {
+    return json({ ok: false, error: "invalid client email" }, 400);
+  }
   // QuickBooks returns the cached original response for a repeated requestid WITHOUT comparing the
   // body, so the key must cover what is being billed: the same contract + amount + recipient +
   // description dedupes (double-click, second tab), while a corrected resend gets a new invoice.
@@ -109,12 +43,6 @@ Deno.serve(async (req) => {
   const sha = async (text: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))), (b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
   const invoiceKey = await sha(`${idempotencyKey}|${amount}|${clientEmail.toLowerCase()}|${description || "Deposit"}`);
   const customerKey = await sha(`customer|${clientEmail.toLowerCase()}`);
-  if (!clientName || !clientEmail || !amount || amount <= 0) {
-    return json({ ok: false, error: "missing or invalid fields (clientName, clientEmail, amount required)" }, 400);
-  }
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clientEmail)) {
-    return json({ ok: false, error: "invalid client email" }, 400);
-  }
 
   try {
     const escapedEmail = clientEmail.replace(/'/g, "\\'");
@@ -164,7 +92,7 @@ Deno.serve(async (req) => {
     // already sent at this point, so a failure here is logged, not returned as an overall failure
     // (the caller already has invoiceId/docNumber and the client already has their invoice).
     try {
-      const { realmId } = await getValidAccessToken();
+      const { realmId } = await qboAccessToken();
       const sb = serviceClient();
       const { error: insertErr } = await sb.from("qbo_invoices").insert({
         event_id: eventId || null, contract_id: contractId || null,

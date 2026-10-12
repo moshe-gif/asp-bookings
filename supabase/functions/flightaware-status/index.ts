@@ -9,34 +9,16 @@
 //
 // Function Secret needed: FLIGHTAWARE_API_KEY. Never exposed to the client -- if it's unset, this
 // returns a clear "not configured" error rather than a confusing upstream failure.
-// Called directly via fetch() from the browser -- without these headers the browser's CORS
-// preflight (an automatic OPTIONS request before any cross-origin POST carrying custom headers
-// like apikey/Content-Type) fails with no server-visible error; the app just sees "Failed to
-// fetch". Same fix as send-contract-email/index.ts.
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-
-function json(obj: unknown, status = 200) {
-  return new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", ...corsHeaders } });
-}
+import { jsonFor, preflight } from "../_shared/http.ts";
+import { requireAdmin } from "../_shared/auth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return preflight(req);
+  const json = jsonFor(req);
   if (req.method !== "POST") return json({ ok: false, error: "method not allowed" }, 405);
 
-  const authHeader = req.headers.get("Authorization") || "";
-  const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: authHeader } } },
-  );
-  const { data: { user }, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !user) return json({ ok: false, error: "not authenticated" }, 401);
-  const { data: isAdmin, error: adminErr } = await supabase.rpc("is_admin");
-  if (adminErr || !isAdmin) return json({ ok: false, error: "not authorized" }, 403);
+  const auth = await requireAdmin(req, json);
+  if (auth instanceof Response) return auth;
 
   const apiKey = Deno.env.get("FLIGHTAWARE_API_KEY");
   if (!apiKey) return json({ ok: false, error: "FlightAware isn't connected yet -- see ops/FLIGHTAWARE_SETUP.md" }, 501);

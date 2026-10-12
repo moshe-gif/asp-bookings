@@ -308,35 +308,38 @@ else {
 function getOutsideBooking(id){ return OUTSIDE_BOOKINGS.find(b=>b.id===id); }
 
 /* ============ DOCUMENTS (general doc builder — contracts, proposals, riders; any subject) ============ */
-const DOC_BRANDS = {
-  asp: { label:'ASP Artist Management', signer:'ASP Artist Management' },
-  sing: { label:'SING Entertainment', signer:'SING Entertainment (for Ilan)' },
+// Brand / sender (2026-10-09 audit 3.13): Supabase `brand_config` (migration 0015) is the one owner --
+// letterhead label, the legal name that signs, sender name, reply-to and office email, read on every
+// document and passed to the email Edge Function (which reads the same row server-side). The literals
+// below are only the first paint / signed-out fallback and mirror the table's seed exactly.
+const BRAND_FALLBACK = {
+  asp:  { label:'ASP Artist Management', signer:'ASP Management Services LLC', senderName:'ASP Management', replyTo:'billing@aspmgmt.com', email:'office@aspmgmt.com' },
+  sing: { label:'SING Entertainment', signer:'SING Entertainment', senderName:'SING Entertainment', replyTo:'', email:'' },
 };
-// Centralized brand config (see supabase/migrations/0015_zelle_gmail_and_brand.sql): the real,
-// admin-editable source of truth once populated. Falls back to DOC_BRANDS' hardcoded text --
-// identical strings today -- when the table isn't reachable yet (signed out, offline, or before
-// that migration has been applied), so nothing changes visually until an admin actually edits a
-// brand in Supabase. New consumers should call getBrandConfig(key) rather than reading DOC_BRANDS
-// directly; existing DOC_BRANDS call sites (e.g. the Documents builder) are untouched for now.
+const BRAND_KEYS = Object.keys(BRAND_FALLBACK); // brand_config.brand_key check constraint: asp, sing
 let BRAND_CONFIG_CACHE = null;
 async function loadBrandConfig(){
   if(!supabaseClient) return;
-  // Same guard as refreshQboStatus(): signed out there is no Supabase session, so skip the network
-  // call entirely rather than let it 404/RLS-reject against a live project with nothing to gain --
-  // matters beyond tidiness, since a real fetch failure logs "Failed to load resource" to the
-  // console regardless of whether the JS promise rejection itself is caught.
+  // Signed out there is no session: skip the call rather than log a failed request.
   try{
     const { data: { session } } = await supabaseClient.auth.getSession();
     if(!session) return;
     const { data, error } = await supabaseClient.from('brand_config').select('*');
     if(error || !data) return;
     const map = {};
-    data.forEach(row=>{ map[row.brand_key] = { label: row.display_name, signer: row.legal_name, raw: row }; });
+    data.forEach(row=>{ map[row.brand_key] = {
+      label: row.display_name, signer: row.legal_name, senderName: row.sender_name, replyTo: row.reply_to, email: row.email,
+    }; });
     if(Object.keys(map).length){ BRAND_CONFIG_CACHE = map; render(); }
-  }catch(err){ /* stays on the DOC_BRANDS fallback */ }
+  }catch(err){ console.error('brand config load failed', err); }
 }
+// A field the table leaves empty falls back to the seed text, so a document never prints a blank.
 function getBrandConfig(key){
-  return (BRAND_CONFIG_CACHE && BRAND_CONFIG_CACHE[key]) || DOC_BRANDS[key] || DOC_BRANDS.asp;
+  const k = BRAND_FALLBACK[key] ? key : 'asp';
+  const row = (BRAND_CONFIG_CACHE && BRAND_CONFIG_CACHE[k]) || {};
+  const out = { ...BRAND_FALLBACK[k] };
+  Object.keys(out).forEach(f=>{ if(row[f]) out[f] = row[f]; });
+  return out;
 }
 let DOCID = 1;
 const DOCUMENTS_LS_KEY = 'asp_mock_documents_v1';
@@ -1247,14 +1250,8 @@ async function doSendContractEmail(){
     // Retry-safe: re-sending after a prior failure re-runs the email step (send-contract-email has
     // no dedupe of its own yet), but never re-runs the QuickBooks step once it already succeeded --
     // c.qboInvoiceId is the idempotency marker.
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-contract-email`, {
-      method: 'POST', headers: authHeaders, body: JSON.stringify({ to, subject, html }),
-    });
-    const data = await resp.json().catch(()=>({ ok:false, error:'Unexpected response from the server.' }));
-    if(!resp.ok || data.ok===false){
-      toast(data.error || 'Could not send the email.', 'system');
-      return;
-    }
+    const sent = await sendEmail({ to, subject, html, brand: c.brand });
+    if(!sent.ok){ toast(sent.error, 'system'); return; }
     if(c.status==='draft'){ freezeContractPayee(c); c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); }
     // The real send is what moves the lead along (only forward: lead/negotiating -> contract_sent).
     advanceLeadForContract(c, `Contract ${c.id} emailed to ${to}.`);
@@ -1565,23 +1562,25 @@ function clientNoticeEmailHtml(ev, artist, introHtml){
     <div class="doc-foot">Sent from ${esc(brand.label||'ASP')}. Remaining balance: ${money(balance)}.</div>
   </div></body></html>`;
 }
-async function sendClientNoticeEmail(ev, subject, html){
+// The one way the app sends email: the send-contract-email Edge Function (admin-only). The sender
+// name and reply-to come server-side from brand_config for `brand`. Requires a real session --
+// signed out, supabaseClient still exists but a request would only fail (audit 5.5). Returns {ok, error}.
+async function sendEmail({ to, subject, html, brand }){
   if(!supabaseClient) return { ok:false, error:'Sign in with your ASP account to send email.' };
-  // Guard on a real SESSION, not just supabaseClient (which always exists, even signed out) --
-  // without this, a signed-out page fires a real network request that fails at the connection level and
-  // logs a browser-level console error regardless of this function's own try/catch, exactly the
-  // loadBrandConfig() bug fixed earlier this project (see the memory note on that lesson).
   const { data: { session } } = await supabaseClient.auth.getSession();
-  if(!session) return { ok:false, error:'Sign in with your ASP account to send email.' };
-  const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-contract-email`, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
-    body: JSON.stringify({ to: ev.clientEmail, subject, html }),
-  });
-  const data = await resp.json().catch(()=>({ok:false, error:'Unexpected response from the server.'}));
-  if(!resp.ok || data.ok===false) return { ok:false, error: data.error || 'Could not send the email.' };
-  return { ok:true };
+  if(!session) return { ok:false, error:'Your sign-in has expired — sign in again to send email.' };
+  try{
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-contract-email`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
+      body: JSON.stringify({ to, subject, html, brand: BRAND_FALLBACK[brand] ? brand : 'asp' }),
+    });
+    const data = await resp.json().catch(()=>({ ok:false, error:'Unexpected response from the server.' }));
+    if(!resp.ok || data.ok===false) return { ok:false, error: data.error || 'Could not send the email.' };
+    return { ok:true };
+  }catch(err){ return { ok:false, error:'Could not reach the email service: ' + String(err && err.message || err) }; }
 }
+function sendClientNoticeEmail(ev, subject, html){ return sendEmail({ to: ev.clientEmail, subject, html, brand:'asp' }); }
 // Fires automatically right after a deposit is marked received (doMarkDeposit) -- "after verified
 // payment... send an ASP-branded confirmation with balance + QR for the correct payee" (item 5).
 // Also reachable manually via a Resend button on the preview, per "manual resend + audit log."
@@ -1643,15 +1642,8 @@ async function doSendTravelRequest(id){
     const ev = getEvent(tr.eventId);
     const html = travelRequestEmailHtml(tr);
     const subject = `Travel Request — ${ev? (artistById(ev.artistId)||{}).name||'' : ''}${tr.details.eventDate? ` (${fmtDateShort(tr.details.eventDate)})`:''}`;
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    if(!session){ toast('Your sign-in has expired — sign in again to send email.', 'system'); return; }
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-contract-email`, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${session.access_token}`, 'apikey': SUPABASE_PUBLISHABLE_KEY },
-      body: JSON.stringify({ to: ORG_SETTINGS.rivkyEmail, subject, html }),
-    });
-    const data = await resp.json().catch(()=>({ok:false, error:'Unexpected response from the server.'}));
-    if(!resp.ok || data.ok===false){ toast(data.error || 'Could not send the travel request.', 'system'); return; }
+    const sent = await sendEmail({ to: ORG_SETTINGS.rivkyEmail, subject, html, brand:'asp' });
+    if(!sent.ok){ toast(sent.error || 'Could not send the travel request.', 'system'); return; }
     tr.status='sent'; tr.sentAt=new Date().toISOString(); saveTravelRequests();
     if(ev){ logEvent(ev, 'system', `Travel request sent to Rivky (${ORG_SETTINGS.rivkyEmail}).`); reportEventSave(updateEvent(ev.id, {}), 'sending the travel request'); }
     toast(`Travel request sent to ${ORG_SETTINGS.rivkyEmail}.`, 'success');
@@ -3342,7 +3334,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.2.0'; // bump on every release so a phone can tell it has updated. v1.2.0: artist portal on real data (0038/0039)
+const APP_VERSION = 'v1.3.0'; // bump on every release so a phone can tell it has updated. v1.3.0: brand/sender from brand_config, one email helper
 const OVERTIME_PER_HALF_HOUR = 250;
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
@@ -4379,7 +4371,7 @@ function renderDocumentsPage(){
       return `<tr class="row-link" data-action="open-document" data-id="${d.id}">
         <td data-label="Title">${esc(d.title)}</td>
         <td data-label="For">${esc(documentSubjectLabel(d))}</td>
-        <td data-label="Letterhead">${esc((DOC_BRANDS[d.brand]||DOC_BRANDS.asp).label)}</td>
+        <td data-label="Letterhead">${esc(getBrandConfig(d.brand).label)}</td>
         <td data-label="Date" class="u-mono">${fmtDateShort(d.createdAt)}</td>
         <td data-label="Status"><span class="pill ${d.signedAt?'pill-good':'pill-neutral'}">${d.signedAt?'Signed':'Draft'}</span></td>
       </tr>`;
@@ -5846,7 +5838,7 @@ function documentAttribution(doc){
     const artist = artistById(doc.subjectId);
     if(artist) return `On behalf of ${artist.name}`;
   }
-  return (DOC_BRANDS[doc.brand] || DOC_BRANDS.asp).signer;
+  return getBrandConfig(doc.brand).signer;
 }
 function defaultDocumentTitle(subjectType, subjectId){
   const ctx = documentSubjectContext(subjectType, subjectId);
@@ -5932,7 +5924,7 @@ function renderDocumentBuilderModal(){
 }
 function renderDocumentDoc(doc){
   if(!doc) return '';
-  const brandInfo = DOC_BRANDS[doc.brand] || DOC_BRANDS.asp;
+  const brandInfo = getBrandConfig(doc.brand);
   return `<div class="overlay center" data-action="document-overlay-close">
     <div class="doc" data-stop>
       <div class="sheet-head"><h2 style="font-size:1.1rem;">Document Preview</h2><button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button></div>
@@ -5984,7 +5976,7 @@ function renderInvoiceDoc(){
         <div class="doc-sub">${esc(inv.id)} &middot; ${fmtDate(inv.createdAt)}</div>
 
         <div class="doc-parties">
-          <div class="doc-party"><h4>From</h4><p><strong>ASP Artist Management</strong><br/>office@aspmgmt.com</p></div>
+          <div class="doc-party"><h4>From</h4><p><strong>${esc(getBrandConfig('asp').label)}</strong><br/>${esc(getBrandConfig('asp').email)}</p></div>
           <div class="doc-party"><h4>Bill To</h4><p><strong>${esc(inv.clientName)}</strong><br/>${esc(inv.clientEmail)}</p></div>
         </div>
 
@@ -5997,7 +5989,7 @@ function renderInvoiceDoc(){
         ${inv.notes? `<div class="doc-section"><p style="font-size:12.5px;color:var(--ink-2);margin:0;">${esc(inv.notes)}</p></div>` : ''}
 
         <div class="doc-section"><h3>Payment</h3>
-          <p style="font-size:12.5px;line-height:1.7;margin:0;">Payment via QuickBooks invoice, Zelle, or check made out to ASP Artist Management. Contact <span class="u-mono">office@aspmgmt.com</span> with questions.</p>
+          <p style="font-size:12.5px;line-height:1.7;margin:0;">Payment via QuickBooks invoice, Zelle, or check made out to ${esc(getBrandConfig('asp').label)}. Contact <span class="u-mono">${esc(getBrandConfig('asp').email)}</span> with questions.</p>
         </div>
 
       </div>
@@ -6086,14 +6078,14 @@ function renderContractDoc(){
 
         <div class="doc-sign">
           <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc(ev.clientName)}</span><br/>Signed electronically &middot; ${fmtDateShort(ev.depositReceivedDate)}` : `<strong>&nbsp;</strong>Client Signature &middot; Date`}</div>
-          <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc(artist.name)}</span><br/>` : `<strong>ASP Artist Management</strong>`}For ${esc(artist.name)}</div>
+          <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc(artist.name)}</span><br/>` : `<strong>${esc(getBrandConfig('asp').label)}</strong>`}For ${esc(artist.name)}</div>
         </div>
 
         <div class="doc-section"><h3>Payment</h3>
           <p style="font-size:12.5px;line-height:1.7;margin:0;">
             <strong>Booking Fee</strong> (${money(ev.commission)}) — emailed as a QuickBooks invoice upon signing; pay by card or ACH directly from the invoice.<br/>
             <strong>Balance</strong> (${money(artistPayout(ev))}) — ${(zellePayeeFor(ev)||{}).identifier ? `Zelle to <span class="u-mono">${esc(zellePayeeFor(ev).identifier)}</span>` : 'by Zelle (the office will send the Zelle details)'}, due no later than the day of the event.<br/>
-            Prefer to pay by check? Contact <span class="u-mono">office@aspmgmt.com</span> to arrange.
+            Prefer to pay by check? Contact <span class="u-mono">${esc(getBrandConfig('asp').email)}</span> to arrange.
           </p>
         </div>
 
@@ -6506,7 +6498,7 @@ function renderBarterSection(c){
 function renderContractDocSettingsSection(c){
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     <h3 style="font-size:13.5px;margin:0;">Letterhead</h3>
-    <div class="chip-row">${Object.keys(DOC_BRANDS).map(k=>`<button class="filter-chip ${c.brand===k?'sel':''}" data-action="pick-contract-brand" data-value="${k}">${esc(DOC_BRANDS[k].label)}</button>`).join('')}</div>
+    <div class="chip-row">${BRAND_KEYS.map(k=>`<button class="filter-chip ${c.brand===k?'sel':''}" data-action="pick-contract-brand" data-value="${k}">${esc(getBrandConfig(k).label)}</button>`).join('')}</div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-contract-field="top.bsdHeader" ${c.bsdHeader?'checked':''}/> Show "BS"D" header</label>
   </div>`;
 }

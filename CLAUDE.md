@@ -27,7 +27,9 @@
     (`link_new_user_to_roster`) links them to their `admin_users`/`artists` row by email.
   - DB: `supabase/migrations/` — **applied by hand** in Supabase → SQL Editor, strictly in number
     order; add an `-- Applied: <date>` header line when run. There is no migration ledger yet.
-  - Edge Functions: `supabase/functions/*` — deployed by pasting into the dashboard; JWT
+  - Edge Functions: `supabase/functions/*`, sharing `functions/_shared/` (CORS locked to the
+    app's origin, admin check, brand/app URL, pinned imports) — deploy with
+    `supabase/deploy-function.sh <name>|all` (dashboard paste can't bundle `_shared`). JWT
     verification is on except for OAuth callbacks/webhooks (see each `ops/*_SETUP.md`).
     Secrets live in Edge Function secrets, never in the frontend.
 - **Where data lives today:**
@@ -72,7 +74,7 @@ Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM
 | Commission rate | literal `0.15` in 3 places | one `COMMISSION_RATE` |
 | Event statuses | `statusMeta()` + inline arrays | `EVENT_PIPELINE` + `STATUS_GROUPS` |
 | Views / nav | nav arrays + `pageTitle` + `renderView` + CSS hide-list | one `VIEWS` registry |
-| Brand / sender | Supabase `brand_config` via `getBrandConfig()` (+ legacy `DOC_BRANDS`) | `brand_config` |
+| Brand / sender | Supabase `brand_config`: app via `getBrandConfig()`, email via `_shared/config.ts brandFor()` | done (2026-10-12) |
 | Sign-in email template | `supabase/templates/signin-code.html` (pasted to dashboard) | same |
 | Schema | `supabase/migrations/` (hand-applied) | same + ledger |
 

@@ -7,35 +7,25 @@
 //
 // Deploy with "Enforce JWT Verification" ON. Uses the default SUPABASE_URL, SUPABASE_ANON_KEY,
 // SUPABASE_SERVICE_ROLE_KEY secrets.
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { jsonFor, preflight } from "../_shared/http.ts";
+import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-}
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return preflight(req);
+  const json = jsonFor(req);
   if (req.method !== "POST") return json({ ok: false, error: "method not allowed" }, 405);
 
-  const caller = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: req.headers.get("Authorization") || "" } },
-  });
-  const { data: { user }, error: userErr } = await caller.auth.getUser();
-  if (userErr || !user) return json({ ok: false, error: "not authenticated" }, 401);
-  const { data: isAdmin, error: adminErr } = await caller.rpc("is_admin");
-  if (adminErr || !isAdmin) return json({ ok: false, error: "not authorized" }, 403);
+  const auth = await requireAdmin(req, json);
+  if (auth instanceof Response) return auth;
+  const { user } = auth;
 
   let body: { kind?: string; rosterId?: string };
   try { body = await req.json(); } catch { return json({ ok: false, error: "bad json" }, 400); }
   const table = body?.kind === "admin" ? "admin_users" : body?.kind === "artist" ? "artists" : null;
   if (!table || !body.rosterId) return json({ ok: false, error: "kind (admin|artist) and rosterId are required" }, 400);
 
-  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const sb = serviceClient();
   const { data: row, error: rowErr } = await sb.from(table).select("id, name, user_id").eq("id", body.rosterId).maybeSingle();
   if (rowErr) return json({ ok: false, error: rowErr.message }, 500);
   if (!row) return json({ ok: false, error: "that person no longer exists" }, 404);

@@ -5,35 +5,25 @@
 //
 // Deploy with "Enforce JWT Verification" ON. Secrets: SUPABASE_URL, SUPABASE_ANON_KEY,
 // SUPABASE_SERVICE_ROLE_KEY (the defaults every function already has).
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { jsonFor, preflight } from "../_shared/http.ts";
+import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-}
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return preflight(req);
+  const json = jsonFor(req);
   if (req.method !== "POST") return json({ ok: false, error: "method not allowed" }, 405);
 
-  const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: req.headers.get("Authorization") || "" } },
-  });
-  const { data: { user }, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !user) return json({ ok: false, error: "not authenticated" }, 401);
-  const { data: isAdmin, error: adminErr } = await supabase.rpc("is_admin");
-  if (adminErr || !isAdmin) return json({ ok: false, error: "not authorized" }, 403);
+  const auth = await requireAdmin(req, json);
+  if (auth instanceof Response) return auth;
+  const { user } = auth;
 
   let body: { provider?: string; mailboxId?: string };
   try { body = await req.json(); } catch { return json({ ok: false, error: "bad json" }, 400); }
   const provider = body?.provider;
   if (!provider || !["qbo", "gcal", "gmail"].includes(provider)) return json({ ok: false, error: "unknown provider" }, 400);
 
-  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const sb = serviceClient();
   let mailboxId: string | null = null;
   if (provider === "gmail") {
     const { data: mailbox } = await sb.from("gmail_mailboxes").select("id").eq("id", body.mailboxId || "").maybeSingle();

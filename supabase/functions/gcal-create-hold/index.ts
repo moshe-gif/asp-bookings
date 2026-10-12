@@ -11,24 +11,8 @@
 // UNVERIFIED beyond "this is what the Calendar API v3 documents expect" -- no real Google account
 // was available in this environment to exercise it end to end. Function Secrets needed:
 // GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET (to refresh the stored access token).
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-// Called directly via fetch() from the browser -- without these headers the browser's CORS
-// preflight (an automatic OPTIONS request before any cross-origin POST carrying custom headers
-// like apikey/Content-Type) fails with no server-visible error; the app just sees "Failed to
-// fetch". Same fix as send-contract-email/index.ts.
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-
-function json(obj: unknown, status = 200) {
-  return new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json", ...corsHeaders } });
-}
-
-function serviceClient() {
-  return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-}
+import { jsonFor, preflight } from "../_shared/http.ts";
+import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
@@ -63,19 +47,11 @@ async function getValidAccessToken(): Promise<string> {
 type Target = { role: "asp_main" | "artist"; artistId: string | null; label: string };
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return preflight(req);
+  const json = jsonFor(req);
   if (req.method !== "POST") return json({ ok: false, error: "method not allowed" }, 405);
-
-  const authHeader = req.headers.get("Authorization") || "";
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: authHeader } } },
-  );
-  const { data: { user }, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !user) return json({ ok: false, error: "not authenticated" }, 401);
-  const { data: isAdmin, error: adminErr } = await supabase.rpc("is_admin");
-  if (adminErr || !isAdmin) return json({ ok: false, error: "not authorized" }, 403);
+  const auth = await requireAdmin(req, json);
+  if (auth instanceof Response) return auth;
 
   let body: {
     eventId?: string; summary?: string; description?: string;
