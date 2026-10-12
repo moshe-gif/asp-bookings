@@ -109,11 +109,12 @@ def test_artist_portal_reads_live_views_only(live_server, browser):
     # Content: client, venue, Waze link, money with the gig's own percent.
     gig = next(g for g in rows["gigs"] if g["client_name"] or g["venue"])
     row = page.locator(f'tr[data-action="open-event"][data-id="{gig["legacy_id"] or gig["event_id"]}"]').first
-    row_text = row.inner_text()
+    flat = lambda t: " ".join(str(t).split())  # the page collapses line breaks / double spaces
+    row_text = flat(row.inner_text())
     if gig["client_name"]:
-        assert gig["client_name"] in row_text, "client name missing from My Gigs"
+        assert flat(gig["client_name"]) in row_text, "client name missing from My Gigs"
     if gig["venue"]:
-        assert gig["venue"] in row_text, "venue missing from My Gigs"
+        assert flat(gig["venue"]) in row_text, "venue missing from My Gigs"
         assert row.locator("a", has_text="Navigate (Waze)").count() == 1, "no Waze link on the gig row"
     row.click()
     sheet = page.locator(".sheet").inner_text()

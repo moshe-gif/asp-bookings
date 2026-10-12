@@ -3198,7 +3198,17 @@ function repositionNavSliders(){
 const AUTO_FOCUS_INPUT_IDS = ['contractsSearchInput','askAIInput','contractSearchInput'];
 let autoFocusBeforeRender = { focusedId:null, present:[] };
 function shouldRefocus(id){ return autoFocusBeforeRender.focusedId===id || !autoFocusBeforeRender.present.includes(id); }
+// A render asked for while one is running -- e.g. tearing down a focused field fires blur -> change
+// -> render() -- runs right after it instead of inside it. Nested, it removed DOM the outer render
+// was still using ("The node to be removed is no longer a child of this node").
+let renderDepth = 0, renderQueued = false;
 function render(){
+  if(renderDepth){ renderQueued = true; return; }
+  renderDepth++;
+  try{ renderNow(); } finally { renderDepth--; }
+  if(renderQueued){ renderQueued = false; render(); }
+}
+function renderNow(){
   autoFocusBeforeRender = { focusedId: document.activeElement && document.activeElement.id || null, present: AUTO_FOCUS_INPUT_IDS.filter(id=>document.getElementById(id)) };
   const app = document.getElementById('app');
   const prevScroll = { sheet: document.querySelector('.sheet')?.scrollTop, modal: document.querySelector('.modal')?.scrollTop };
@@ -3383,7 +3393,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.6.0'; // bump on every release so a phone can tell it has updated. v1.6.0: per-artist commission, overtime = fee / hours per half hour
+const APP_VERSION = 'v1.7.0'; // bump on every release so a phone can tell it has updated. v1.7.0: safe rendering (audit 1.9), project links fixed, render re-entrancy
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -3940,7 +3950,7 @@ function renderCalendarPage(events, opts={}){
         ${opts.showBlockButton && !artistReadOnly() ? `<button class="btn btn-sm" data-action="open-block-time">${ICO.clock} Block Time</button>` : ''}
         ${modeToggle}
       </div>
-      ${opts.showFilter ? `<div class="chip-row">${ARTISTS.map(a=>`<button class="filter-chip ${S.calArtistFilter.includes(a.id)?'sel':''}" data-action="cal-filter" data-id="${a.id}"><span class="dot" data-slot="${a.slot}"></span>${a.name.split(' ')[0]}</button>`).join('')}</div>`:''}
+      ${opts.showFilter ? `<div class="chip-row">${ARTISTS.map(a=>`<button class="filter-chip ${S.calArtistFilter.includes(a.id)?'sel':''}" data-action="cal-filter" data-id="${a.id}"><span class="dot" data-slot="${a.slot}"></span>${esc(a.name.split(' ')[0])}</button>`).join('')}</div>`:''}
     </div>`;
 
   if(mode==='week'){
@@ -4487,7 +4497,7 @@ function renderProjectFolderCard(p, opts={}){
   const a = artistById(p.artistId);
   const isAdmin = isAdminUser(S.user);
   const overdue = p.dueDate && isPast(p.dueDate);
-  const coverStyle = p.coverImage? `background-image:url('${p.coverImage}');` : `background:var(--cat-${a?.slot||1});`;
+  const coverStyle = p.coverImage? `background-image:url('${safeDataUrl(p.coverImage)}');` : `background:var(--cat-${a?.slot||1});`;
   return `<div class="project-folder" data-action="open-project" data-id="${p.id}">
     <div class="project-folder-cover" style="${coverStyle}">
       ${!p.coverImage? `<span class="project-folder-cover-fallback">${esc((p.title||'?').trim().slice(0,1).toUpperCase())}</span>`:''}
@@ -4498,7 +4508,7 @@ function renderProjectFolderCard(p, opts={}){
       ${p.coverImage && isAdmin? `<button class="icon-btn project-folder-cover-remove" data-action="remove-project-cover" data-id="${p.id}" title="Remove cover" style="width:24px;height:24px;" aria-label="Remove cover">${ICO.x}</button>`:''}
     </div>
     <div class="project-folder-body">
-      ${opts.showArtist? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;"><span class="avatar" data-slot="${a?a.slot:0}" style="width:18px;height:18px;font-size:8px;">${a?a.initials:'—'}</span><span style="font-size:11px;color:var(--ink-2);">${a?esc(a.name):'General'}</span></div>`:''}
+      ${opts.showArtist? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;"><span class="avatar" data-slot="${a?a.slot:0}" style="width:18px;height:18px;font-size:8px;">${a?esc(a.initials):'—'}</span><span style="font-size:11px;color:var(--ink-2);">${a?esc(a.name):'General'}</span></div>`:''}
       <strong style="font-family:var(--font-display);font-size:14px;display:block;">${esc(p.title)}</strong>
       ${p.subtitle? `<div style="font-size:11.5px;color:var(--ink-2);margin-top:2px;">${esc(p.subtitle)}</div>`:''}
       ${p.dueDate? `<div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;">
@@ -4607,7 +4617,7 @@ function renderProjectDetail(){
   return `
     <button class="icon-btn" data-action="nav" data-view="${backView}" title="Back to Projects" style="margin-bottom:14px;" aria-label="Back to Projects">${ICO.chev('l')}</button>
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-      <span class="avatar" data-slot="${a?a.slot:0}" style="width:44px;height:44px;flex:none;">${a?a.initials:'—'}</span>
+      <span class="avatar" data-slot="${a?a.slot:0}" style="width:44px;height:44px;flex:none;">${a?esc(a.initials):'—'}</span>
       <div style="min-width:0;flex:1;">
       ${isAdmin? `<input class="blend-input" data-action="set-project-title" data-id="${p.id}" value="${esc(p.title)}" placeholder="Project name…" style="font-family:var(--font-display);font-size:1.3rem;font-weight:600;padding:0;"/>`
         : `<strong style="font-family:var(--font-display);font-size:1.3rem;display:block;">${esc(p.title)}</strong>`}
@@ -4744,13 +4754,13 @@ function renderProjectDetail(){
           <div class="log" style="margin-bottom:10px;">
             ${p.links.length? p.links.map(l=>`<div class="log-item" style="align-items:center;">
               <span class="log-ico">${ICO.share}</span>
-              <a href="${esc(l.url)}" target="_blank" rel="noopener" style="flex:1;color:var(--accent);text-decoration:none;font-size:12.5px;word-break:break-all;">${esc(l.label||l.url)}</a>
+              <a href="${esc(safeWebUrl(l.url) || '#')}" target="_blank" rel="noopener" style="flex:1;color:var(--accent);text-decoration:none;font-size:12.5px;word-break:break-all;">${esc(l.label||l.url)}</a>
               <button class="icon-btn" data-action="remove-project-link" data-id="${p.id}" data-linkid="${l.id}" style="width:24px;height:24px;" aria-label="Remove project link">${ICO.x}</button>
             </div>`).join('') : `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No links yet.</p>`}
           </div>
           <div data-form="projectlink" style="display:flex;gap:6px;flex-wrap:wrap;">
-            <input data-field="linkLabel" placeholder="Label (optional)" style="flex:1;min-width:100px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newLinkForm.label||'')}"/>
-            <input data-field="linkUrl" placeholder="https://…" style="flex:2;min-width:140px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newLinkForm.url||'')}"/>
+            <input data-field="label" placeholder="Label (optional)" style="flex:1;min-width:100px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newLinkForm.label||'')}"/>
+            <input data-field="url" placeholder="https://…" style="flex:2;min-width:140px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newLinkForm.url||'')}"/>
             <button class="btn btn-sm" data-action="add-project-link" data-id="${p.id}">Add</button>
           </div>
           ` : ''}
@@ -5434,7 +5444,7 @@ function renderFlightBlock(ev, isAdmin){
         </div>
         ${isAdmin? `<button class="btn btn-sm" data-action="check-flight-status" data-id="${ev.id}" ${checking?'disabled':''} style="min-width:118px;justify-content:center;">${checking? markLoader(12) : 'Check for Update'}</button>` : ''}
       </div>
-      ${f.trackingStatusAt? `<div style="font-size:11px;color:var(--ink-3);margin-top:6px;">Last checked ${new Date(f.trackingStatusAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})} — emailed to ${artistById(ev.artistId).name} in an ASP-branded update.</div>` : ''}
+      ${f.trackingStatusAt? `<div style="font-size:11px;color:var(--ink-3);margin-top:6px;">Last checked ${new Date(f.trackingStatusAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})} — emailed to ${esc(artistById(ev.artistId).name)} in an ASP-branded update.</div>` : ''}
     </div>` : ''}
   </div>`;
 }
@@ -6373,7 +6383,7 @@ function renderContractFeeSection(c){
     </div>
     <div class="field-row">
       <div class="field"><label>Deposit ($)</label><input type="number" data-contract-field="deposit.amount" data-focus-key="deposit.amount" data-live value="${c.deposit.amount||0}"/></div>
-      <div class="field"><label>Deposit (% of total, optional)</label><input type="number" data-contract-field="deposit.percent" data-focus-key="deposit.percent" data-live value="${c.deposit.percent||0}" placeholder="0 = use $ amount"/></div>
+      <div class="field"><label>Deposit (% of total, optional)</label><input type="number" data-contract-field="deposit.percent" data-focus-key="deposit.percent" data-live value="${esc(String(c.deposit.percent||0))}" placeholder="0 = use $ amount"/></div>
     </div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-contract-field="deposit.nonRefundable" ${c.deposit.nonRefundable?'checked':''}/> Deposit is non-refundable</label>
     <div class="field"><label>Balance Due</label>
@@ -6421,7 +6431,7 @@ function renderContractCancellationSection(c){
         <span style="font-size:12px;color:var(--ink-3);">Within</span>
         <input type="number" data-contract-field="tier.${t.id}.withinDays" value="${t.withinDays}" style="width:70px;"/>
         <span style="font-size:12px;color:var(--ink-3);">days:</span>
-        <input type="number" data-contract-field="tier.${t.id}.percent" value="${t.percent}" style="width:70px;"/>
+        <input type="number" data-contract-field="tier.${t.id}.percent" value="${esc(String(t.percent??''))}" style="width:70px;"/>
         <span style="font-size:12px;color:var(--ink-3);">%</span>
         <button class="icon-btn" data-action="remove-cancellation-tier" data-id="${t.id}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
       </div>`).join('')}
@@ -7872,8 +7882,12 @@ function doRemoveBoardItem(pid, cardId, itemId){
   if(c) c.items = (c.items||[]).filter(i=>i.id!==itemId);
   saveProjects(); render();
 }
+// Project links are web pages: http(s) only, so a "javascript:" address can never become a link.
+function safeWebUrl(u){ return /^https?:\/\/[^\s"'<>]+$/i.test(String(u||'').trim()) ? String(u).trim() : ''; }
 function doAddProjectLink(id){
-  const url = (S.newLinkForm.url||'').trim(); if(!url) return;
+  const typed = (S.newLinkForm.url||'').trim(); if(!typed) return;
+  const url = safeWebUrl(/^[a-z][a-z0-9+.-]*:/i.test(typed) ? typed : 'https://' + typed);
+  if(!url){ toast('Enter a web address (https://…).', 'system'); return; }
   const p = getProject(id);
   p.links = p.links || [];
   p.links.push({id:'LNK-'+Math.random().toString(36).slice(2,9), label:(S.newLinkForm.label||'').trim(), url});
