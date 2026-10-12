@@ -686,7 +686,8 @@ function contractsForLead(leadId){ return CONTRACTS.filter(c=>c.leadId===leadId)
 function blankTravelClause(){
   return { flightsCount:0, flightsClass:'economy', hotelRooms:0, hotelNights:0, hotelTier:'standard', food:false, shabbos:false, groundTransport:false };
 }
-function contractStatusLabel(s){ return {draft:'Draft', sent:'Sent', signed:'Signed', void:'Void'}[s] || s; }
+const CONTRACT_STATUSES = [['draft','Draft'], ['sent','Sent'], ['signed','Signed'], ['void','Void']];
+function contractStatusLabel(s){ const m = CONTRACT_STATUSES.find(([k])=>k===s); return m ? m[1] : s; }
 function contractStatusPillClass(s){ return s==='signed' ? 'pill-good' : s==='sent' ? 'pill-accent' : s==='void' ? 'pill-crit' : 'pill-neutral'; }
 
 /* ---- Naming, math, prose ---- */
@@ -1970,7 +1971,8 @@ function loadEvents(){
 function saveEvents(){
   // An artist session is read-only: its S.events are view rows held in memory (ARTIST PORTAL below),
   // never this browser's gigs cache.
-  if(artistReadOnly()) return { ok:false, error:'read_only' };
+  if(artistReadOnly()){ PENDING_LOG.clear(); return { ok:false, error:'read_only' }; }
+  applyPendingLog();
   const r = persist(LS_KEY, S.events, 'gigs'); if(SHARED) SHARED.events.schedule(); return r;
 }
 
@@ -2806,13 +2808,14 @@ function getEvent(id){ return S.events.find(e=>e.id===id); }
    never been through updateEvent() and so have no updatedAt yet at all -- that first-ever write
    is exactly the common case this needs to protect, not just the second and later ones. */
 function updateEvent(id, patch, opts={}){
-  if(artistReadOnly()) return { ok:false, error:'read_only' };
+  if(artistReadOnly()){ PENDING_LOG.delete(id); return { ok:false, error:'read_only' }; }
   const ev = getEvent(id);
-  if(!ev) return { ok:false, error:'not_found' };
+  if(!ev){ PENDING_LOG.delete(id); return { ok:false, error:'not_found' }; }
   if(!opts.force){
     let persisted = null;
     try{ const raw = localStorage.getItem(LS_KEY); if(raw) persisted = JSON.parse(raw).find(e=>e.id===id); }catch(e){}
     if(persisted && persisted.updatedAt && persisted.updatedAt !== (ev.updatedAt||null)){
+      PENDING_LOG.delete(id);
       return { ok:false, error:'conflict', persisted };
     }
   }
@@ -2936,7 +2939,19 @@ function toast(msg, type){
   wrap.appendChild(el);
   setTimeout(()=>{ el.style.transition='.25s ease'; el.style.opacity='0'; el.style.transform='translateY(6px)'; setTimeout(()=>el.remove(),260); }, 4200);
 }
-function logEvent(ev, type, text){ ev.log.push({ts:new Date().toISOString(), type, text}); }
+// Activity-log lines wait for the gig's next save and are written in that same write (saveEvents),
+// so a save that updateEvent() refuses -- a conflict, an artist session -- leaves no half-applied
+// log behind; the refused lines are dropped with it (2026-10-09 audit 3.15).
+const PENDING_LOG = new Map();
+function logEvent(ev, type, text){
+  const q = PENDING_LOG.get(ev.id) || [];
+  q.push({ ts:new Date().toISOString(), type, text });
+  PENDING_LOG.set(ev.id, q);
+}
+function applyPendingLog(){
+  PENDING_LOG.forEach((entries, id)=>{ const ev = getEvent(id); if(ev) ev.log = [...(ev.log||[]), ...entries]; });
+  PENDING_LOG.clear();
+}
 
 /* ============ INSTALL PROMPT ============ */
 let deferredInstallPrompt = null;
@@ -3332,7 +3347,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.4.0'; // bump on every release so a phone can tell it has updated. v1.4.0: one contract system (audit 2.11)
+const APP_VERSION = 'v1.5.0'; // bump on every release so a phone can tell it has updated. v1.5.0: one status field, no half-applied saves (audit 3.9/3.15)
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -6192,7 +6207,7 @@ function renderContractBuilderModal(){
       </div>
       <div class="sheet-body">
         <div class="field"><label>Status</label>
-          <div class="chip-row">${['draft','sent','signed','void'].map(s=>`<button class="filter-chip ${c.status===s?'sel':''}" data-action="set-contract-status" data-status="${s}">${esc(contractStatusLabel(s))}</button>`).join('')}</div>
+          <div class="chip-row">${CONTRACT_STATUSES.map(([s])=>`<button class="filter-chip ${c.status===s?'sel':''}" data-action="set-contract-status" data-status="${s}">${esc(contractStatusLabel(s))}</button>`).join('')}</div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--surface-2);">
           ${isContractApproved(c)
@@ -6776,7 +6791,7 @@ function renderContractsBuilderListPage(){
     <input id="contractsSearchInput" value="${esc(S.contractsSearchQuery||'')}" placeholder="Search client, performer, or template..." style="width:100%;max-width:360px;padding:9px 12px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:14px;margin-bottom:10px;"/>
     <div class="chip-row" style="margin-bottom:14px;">
       <button class="filter-chip ${statusFilter==='all'?'sel':''}" data-action="filter-contracts-status" data-status="all">All</button>
-      ${['draft','sent','signed','void'].map(s=>`<button class="filter-chip ${statusFilter===s?'sel':''}" data-action="filter-contracts-status" data-status="${s}">${esc(contractStatusLabel(s))}</button>`).join('')}
+      ${CONTRACT_STATUSES.map(([s])=>`<button class="filter-chip ${statusFilter===s?'sel':''}" data-action="filter-contracts-status" data-status="${s}">${esc(contractStatusLabel(s))}</button>`).join('')}
     </div>
     ${list.length? `<div class="card table-cards"><table>
       <thead><tr><th>Client</th><th>Performer</th><th>Template</th><th>Event Date</th><th>Status</th></tr></thead>
@@ -7159,22 +7174,23 @@ function doSendContract(id){
   else { S.showTemplatePicker = true; S.templatePickerLeadId = id; }
   render();
 }
-function doMarkDeposit(id){
-  const ev = getEvent(id); if(!ev) return;
+function doMarkDeposit(id, extra={}){
+  const ev = getEvent(id); if(!ev) return false;
   logEvent(ev,'success',`Bookkeeping marked booking fee received (${paymentMethodLabel(ev)}) — job officially booked & locked on calendar.`);
   // Internal team notification stays mocked -- no internal-notification channel exists yet, and
   // it's not what the spec's item 5 requires be real (that's specifically the client-facing
   // confirmation, sent for real below).
   logEvent(ev,'email',`Booking-confirmed notification emailed to ${artistById(ev.artistId).name}, Ilan, and Moshe.`);
-  const result = updateEvent(id, { status:'booked', depositReceived:true, depositReceivedDate:todayISO() });
+  const result = updateEvent(id, { status:'booked', depositReceived:true, depositReceivedDate:todayISO(), ...extra });
   if(!result.ok){
     toast(result.error==='conflict' ? 'This booking changed elsewhere since you loaded it — reload before marking the deposit received.' : 'Could not save.', 'system');
-    return;
+    return false;
   }
   S.showBookingConfirmation = true;
   render();
   if(ev.clientEmail) doSendBookingConfirmationEmail(id);
   else toast('Booking locked in — no client email on file, confirmation not sent.', 'system');
+  return true;
 }
 /* ---- Durable booking record architecture (PR 6): audited deposit verification + confirm ----
    Alongside (not replacing) doMarkDeposit above. The state machine's own rule is "hold_awaiting_
@@ -7192,21 +7208,14 @@ function doMarkDepositVerified(id){
 }
 function doConfirmBooking(id, {method, note} = {}){
   const ev = getEvent(id); if(!ev) return;
-  const fromStatus = ev.bookingStatus || ev.status;
-  ev.depositVerification = { method: method||null, note: note||null, loggedBy: S.user, loggedAt: new Date().toISOString() };
-  // Runs the real, existing lock-in effects (status->booked, depositReceived, activity log, client
-  // confirmation email) -- the verification gate above adds rigor in front of this, it doesn't
-  // reinvent what "booked" already correctly does.
-  doMarkDeposit(id);
-  // First real call site for the new EventStore primitive (Wave A) -- a conflict here (another
-  // tab/session changed this event since this one loaded it) surfaces as a toast instead of
-  // silently overwriting whatever that other write did.
-  const result = updateEvent(id, { bookingStatus: 'confirmed' }); // new, additive column (migration 0020) -- ev.status above is untouched
-  if(!result.ok){
-    toast(result.error==='conflict' ? 'This booking changed elsewhere since you loaded it — reload before confirming.' : 'Could not save the confirmed status.', 'system');
-    return;
-  }
-  logEvent(ev, 'system', `Deposit verified (${method||'manual'}): ${note||'—'}. Booking status: confirmed.`);
+  const fromStatus = ev.status;
+  // One guarded write: the verification record, the lock-in effects of doMarkDeposit (status ->
+  // booked, deposit received, activity log, client confirmation email) and the log line together.
+  // "Confirmed" is status booked/paid -- the separate ev.bookingStatus field (migration 0020) is no
+  // longer written (2026-10-09 audit 3.9: two status fields with no mapping).
+  logEvent(ev, 'system', `Deposit verified (${method||'manual'}): ${note||'—'}.`);
+  const depositVerification = { method: method||null, note: note||null, loggedBy: S.user, loggedAt: new Date().toISOString() };
+  if(!doMarkDeposit(id, { depositVerification })) return;
   // Best-effort structured audit trail (booking_exceptions/booking_status_history, migration 0021)
   // -- only possible once this event has a real Supabase row, which no local event does yet (no
   // event migration path exists). Never blocks the real, local confirmation above if this fails.
@@ -7328,46 +7337,47 @@ function doCopyText(value){
 function doSaveEditEvent(id){
   const ev = getEvent(id); if(!ev) return;
   const f = S.editEventForm;
+  // One patch through updateEvent (2026-10-09 audit 3.15): editing ev first would leave a refused
+  // save (conflict) half-applied in memory.
+  const p = {};
   if(!ev.unpaid){
-    if(f.clientName!==undefined) ev.clientName = f.clientName.trim();
-    if(f.clientEmail!==undefined) ev.clientEmail = f.clientEmail.trim();
-    if(f.clientPhone!==undefined) ev.clientPhone = f.clientPhone.trim();
+    if(f.clientName!==undefined) p.clientName = f.clientName.trim();
+    if(f.clientEmail!==undefined) p.clientEmail = f.clientEmail.trim();
+    if(f.clientPhone!==undefined) p.clientPhone = f.clientPhone.trim();
   }
-  if(f.type!==undefined) ev.type = f.type;
-  if(ev.type==='Wedding'){
-    if(f.band!==undefined) ev.band = f.band.trim()||null;
-    if(f.bandSize!==undefined) ev.bandSize = f.bandSize? Number(f.bandSize) : null;
+  if(f.type!==undefined) p.type = f.type;
+  if((p.type ?? ev.type)==='Wedding'){
+    if(f.band!==undefined) p.band = f.band.trim()||null;
+    if(f.bandSize!==undefined) p.bandSize = f.bandSize? Number(f.bandSize) : null;
   }
-  if(f.date!==undefined) ev.date = f.date;
-  if(f.time!==undefined) ev.time = f.time;
-  if(f.endTime!==undefined) ev.endTime = f.endTime || null;
-  if(f.venue!==undefined) ev.venue = f.venue.trim();
-  if(f.city!==undefined) ev.city = f.city.trim();
-  if(f.state!==undefined) ev.state = f.state.trim();
+  if(f.date!==undefined) p.date = f.date;
+  if(f.time!==undefined) p.time = f.time;
+  if(f.endTime!==undefined) p.endTime = f.endTime || null;
+  if(f.venue!==undefined) p.venue = f.venue.trim();
+  if(f.city!==undefined) p.city = f.city.trim();
+  if(f.state!==undefined) p.state = f.state.trim();
   const notes = [];
   if(!ev.unpaid && f.price!==undefined){
-    ev.price = Number(f.price)||0;
+    p.price = Number(f.price)||0;
     // Only auto-recompute the deposit at 15% if this same save doesn't also set an explicit
     // deposit amount -- an explicit value (below) always wins, same "manual override beats the
     // formula" convention as reminderIntervalDays (see WORKFLOWS.md §4).
-    if(f.commission===undefined) ev.commission = standardCommission(ev.price);
+    if(f.commission===undefined) p.commission = standardCommission(p.price);
   }
   if(!ev.unpaid && f.commission!==undefined){
-    const oldCommission = ev.commission;
-    ev.commission = Math.max(0, Number(f.commission)||0);
-    if(ev.commission!==oldCommission) notes.push(`deposit changed from ${money(oldCommission)} to ${money(ev.commission)}`);
+    p.commission = Math.max(0, Number(f.commission)||0);
+    if(p.commission!==ev.commission) notes.push(`deposit changed from ${money(ev.commission)} to ${money(p.commission)}`);
   }
   // ev.balance is no longer a stored field (PR 12) -- eventBalance(ev)/artistPayout(ev) derive it
   // live from price/commission/charges on every read, so there's nothing to recompute here.
   if(!ev.unpaid && f.paymentMethod!==undefined){
-    const oldMethod = ev.paymentMethod || 'standard';
-    ev.paymentMethod = f.paymentMethod;
-    if(ev.paymentMethod!==oldMethod) notes.push(`payment method changed to ${paymentMethodLabel(ev)}`);
+    p.paymentMethod = f.paymentMethod;
+    if(p.paymentMethod!==(ev.paymentMethod || 'standard')) notes.push(`payment method changed to ${paymentMethodLabel({ ...ev, ...p })}`);
   }
-  if(!ev.unpaid && f.paymentMethodNote!==undefined) ev.paymentMethodNote = f.paymentMethodNote.trim();
+  if(!ev.unpaid && f.paymentMethodNote!==undefined) p.paymentMethodNote = f.paymentMethodNote.trim();
   logEvent(ev, 'system', notes.length? `Details updated by office — ${notes.join('; ')}.` : 'Details updated by office.');
   S.showEditEvent=false; S.editEventForm={};
-  if(reportEventSave(updateEvent(id, {}), 'saving these changes')) toast('Changes saved.', 'success');
+  if(reportEventSave(updateEvent(id, p), 'saving these changes')) toast('Changes saved.', 'success');
   openEvent(id);
 }
 function doSubmitInvoice(){

@@ -72,7 +72,7 @@ Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM
 | Event balance / artist payout | `eventBalance()` / `artistPayout()` (derived, next to each other) | same |
 | Contract money | `contractPaymentFigures()` (derived) | same |
 | Commission rate | literal `0.15` in 3 places | one `COMMISSION_RATE` |
-| Event statuses | `statusMeta()` + inline arrays | `EVENT_PIPELINE` + `STATUS_GROUPS` |
+| Event statuses | `EVENT_PIPELINE` + `STATUS_GROUPS` (+ `statusMeta()` labels); contracts `CONTRACT_STATUSES`; `ev.bookingStatus` no longer written | done (2026-10-12) |
 | Views / nav | nav arrays + `pageTitle` + `renderView` + CSS hide-list | one `VIEWS` registry |
 | Brand / sender | Supabase `brand_config`: app via `getBrandConfig()`, email via `_shared/config.ts brandFor()` | done (2026-10-12) |
 | Sign-in email template | `supabase/templates/signin-code.html` (pasted to dashboard) | same |
@@ -81,6 +81,8 @@ Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM
 ## Conventions to reuse
 - `updateEvent(id, patch)` + `reportEventSave()` for event writes (concurrency check + visible
   failure). Build a patch object; don't mutate `ev.*` first.
+- `logEvent()` queues the line; it is written by the gig's next save and dropped if updateEvent()
+  refuses that save -- so log, then save (one patch), never mutate `ev.*` first.
 - Derive, don't store (`eventBalance`, `contractPaymentFigures`).
 - Additive-defaults migrations for stored shapes (`migrateContract`, `migratePayeeProfiles`):
   fill `undefined`, never overwrite user data.
