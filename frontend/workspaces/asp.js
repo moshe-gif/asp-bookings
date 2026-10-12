@@ -313,8 +313,8 @@ function getOutsideBooking(id){ return OUTSIDE_BOOKINGS.find(b=>b.id===id); }
 // document and passed to the email Edge Function (which reads the same row server-side). The literals
 // below are only the first paint / signed-out fallback and mirror the table's seed exactly.
 const BRAND_FALLBACK = {
-  asp:  { label:'ASP Artist Management', signer:'ASP Management Services LLC', senderName:'ASP Management', replyTo:'billing@aspmgmt.com', email:'office@aspmgmt.com' },
-  sing: { label:'SING Entertainment', signer:'SING Entertainment', senderName:'SING Entertainment', replyTo:'', email:'' },
+  asp:  { label:'ASP Artist Management', signer:'ASP Management Services LLC', senderName:'ASP Management', replyTo:'office@aspmgmt.com', email:'office@aspmgmt.com' },
+  sing: { label:'SING Entertainment', signer:'SING Entertainment', senderName:'SING Entertainment', replyTo:'office@aspmgmt.com', email:'office@aspmgmt.com' },
 };
 const BRAND_KEYS = Object.keys(BRAND_FALLBACK); // brand_config.brand_key check constraint: asp, sing
 let BRAND_CONFIG_CACHE = null;
@@ -3393,7 +3393,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.7.0'; // bump on every release so a phone can tell it has updated. v1.7.0: safe rendering (audit 1.9), project links fixed, render re-entrancy
+const APP_VERSION = 'v1.8.0'; // bump on every release so a phone can tell it has updated. v1.8.0: honest activity log, office@ everywhere
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -5363,7 +5363,6 @@ function renderEventSheet(ev){
         ${isAdmin && (ev.flightNeeded || ev.groundTransportNeeded) ? renderTravelRequestSummary(ev) : ''}
         ${(ev.flightBooked || ev.groundTransportBooked) ? `<div style="display:flex;gap:8px;">
           <button class="btn" style="flex:1;justify-content:flex-start;" data-action="view-itinerary" data-id="${ev.id}">${ICO.suitcase} View Itinerary</button>
-          ${isAdmin? `<button class="btn btn-sm" data-action="email-itinerary" data-id="${ev.id}">${ICO.mail} Email to Artist</button>` : ''}
         </div>` : ''}
         ${renderPrepAndGigInfoCard(ev, isAdmin)}
         ${!isAdmin ? `<div>
@@ -5419,7 +5418,7 @@ function renderFlightBlock(ev, isAdmin){
   if(!ev.flightBooked){
     if(!isAdmin) return '';
     return `<div class="card card-pad" style="border-color:var(--warn);background:var(--warn-wash);">
-      <div style="display:flex;align-items:center;gap:8px;color:var(--warn-ink);font-weight:700;font-size:13px;">${ICO.plane} Flight needed — booking secretary notified</div>
+      <div style="display:flex;align-items:center;gap:8px;color:var(--warn-ink);font-weight:700;font-size:13px;">${ICO.plane} Flight needed — not booked yet</div>
       <button class="btn btn-sm" style="margin-top:10px;" data-action="open-flight-form" data-id="${ev.id}">Add flight info</button>
     </div>`;
   }
@@ -5453,7 +5452,7 @@ function renderGroundTransportBlock(ev, isAdmin){
   if(!ev.groundTransportBooked){
     if(!isAdmin) return '';
     return `<div class="card card-pad" style="border-color:var(--warn);background:var(--warn-wash);">
-      <div style="display:flex;align-items:center;gap:8px;color:var(--warn-ink);font-weight:700;font-size:13px;">${ICO.car} Driver needed — booking secretary notified</div>
+      <div style="display:flex;align-items:center;gap:8px;color:var(--warn-ink);font-weight:700;font-size:13px;">${ICO.car} Driver needed — not booked yet</div>
       <button class="btn btn-sm" style="margin-top:10px;" data-action="open-transport-form" data-id="${ev.id}">Add driver info</button>
     </div>`;
   }
@@ -5621,7 +5620,7 @@ function renderGigInfoFormOverlay(){
             <button class="btn btn-sm" data-action="add-gig-contact" data-id="${ev.id}">+ Add</button>
           </div>
         </div>
-        <button class="btn btn-primary btn-block" data-action="save-giginfo" data-id="${ev.id}" style="margin-top:6px;">Save &amp; Notify Artist</button>
+        <button class="btn btn-primary btn-block" data-action="save-giginfo" data-id="${ev.id}" style="margin-top:6px;">Save</button>
       </div>
     </div>
   </div>`;
@@ -5717,7 +5716,7 @@ function renderFlightFormOverlay(){
           <div class="field"><label>Date</label><input type="date" data-field="arriveDate" value="${f.arriveDate||''}"/></div>
           <div class="field"><label>Time</label><input type="time" data-field="arriveTime" value="${f.arriveTime||''}"/></div>
         </div>
-        <button class="btn btn-primary btn-block" data-action="save-flight" data-id="${ev.id}">Save &amp; Notify Artist</button>
+        <button class="btn btn-primary btn-block" data-action="save-flight" data-id="${ev.id}">Save</button>
       </div>
     </div>
   </div>`;
@@ -5745,7 +5744,7 @@ function renderTransportFormOverlay(){
         </div>
         <div class="field"><label>Drop-off Location</label><input data-field="dropoffLocation" value="${esc(f.dropoffLocation||'')}" placeholder="Venue"/></div>
         <div class="field"><label>Notes</label><input data-field="notes" value="${esc(f.notes||'')}" placeholder="Sedan, one-way"/></div>
-        <button class="btn btn-primary btn-block" data-action="save-transport" data-id="${ev.id}">Save &amp; Notify Artist</button>
+        <button class="btn btn-primary btn-block" data-action="save-transport" data-id="${ev.id}">Save</button>
       </div>
     </div>
   </div>`;
@@ -5760,7 +5759,7 @@ function renderDressCodeFormOverlay(){
       <div class="sheet-body">
         <div class="field"><label>Dress Code</label><input data-field="dressCode" value="${esc(f.dressCode||'')}" placeholder="e.g. Black tie, all black"/></div>
         <div class="chip-row">${DRESS_CODES.map(d=>`<button class="filter-chip" data-action="pick-dresscode" data-value="${esc(d)}">${esc(d)}</button>`).join('')}</div>
-        <button class="btn btn-primary btn-block" data-action="save-dresscode" data-id="${ev.id}" style="margin-top:6px;">Save &amp; Notify Artist</button>
+        <button class="btn btn-primary btn-block" data-action="save-dresscode" data-id="${ev.id}" style="margin-top:6px;">Save</button>
       </div>
     </div>
   </div>`;
@@ -7226,10 +7225,8 @@ function doSendContract(id){
 function doMarkDeposit(id, extra={}){
   const ev = getEvent(id); if(!ev) return false;
   logEvent(ev,'success',`Bookkeeping marked booking fee received (${paymentMethodLabel(ev)}) — job officially booked & locked on calendar.`);
-  // Internal team notification stays mocked -- no internal-notification channel exists yet, and
-  // it's not what the spec's item 5 requires be real (that's specifically the client-facing
-  // confirmation, sent for real below).
-  logEvent(ev,'email',`Booking-confirmed notification emailed to ${artistById(ev.artistId).name}, Ilan, and Moshe.`);
+  // No internal-notification channel exists, so nothing claims the team was told (2026-10-12:
+  // the log only records what actually happened; the client confirmation below is a real email).
   const result = updateEvent(id, { status:'booked', depositReceived:true, depositReceivedDate:todayISO(), ...extra });
   if(!result.ok){
     toast(result.error==='conflict' ? 'This booking changed elsewhere since you loaded it — reload before marking the deposit received.' : 'Could not save.', 'system');
@@ -7291,8 +7288,8 @@ function doConfirmBooking(id, {method, note} = {}){
 }
 function doToggleFlight(id){
   const ev = getEvent(id); if(!ev) return;
-  logEvent(ev,'email','Flight needed — emailed to the booking secretary with gig details.');
-  if(reportEventSave(updateEvent(id, { flightNeeded:true }), 'marking flight needed')) toast('Booking secretary notified: flight needed.', 'email');
+  logEvent(ev,'system','Marked: flight needed.');
+  if(reportEventSave(updateEvent(id, { flightNeeded:true }), 'marking flight needed')) toast('Marked: flight needed. Request travel from the gig to brief the booking secretary.', 'system');
   openEvent(id);
 }
 function doSaveFlight(id){
@@ -7300,9 +7297,9 @@ function doSaveFlight(id){
   const depart = f.departDate? `${f.departDate} ${f.departTime||'00:00'}` : '—';
   const arrive = f.arriveDate? `${f.arriveDate} ${f.arriveTime||'00:00'}` : '—';
   const flight = {airline:f.airline||'—', flightNumber:(f.flightNumber||'').trim(), confirmation:f.confirmation||'—', depart, arrive, trackingStatus:null, trackingStatusAt:null};
-  logEvent(ev,'email',`Flight booked & added to itinerary — Moshe and ${artistById(ev.artistId).name} notified.`);
+  logEvent(ev,'system','Flight booked & added to the itinerary.');
   S.showFlightForm=false;
-  if(reportEventSave(updateEvent(id, { flight, flightBooked:true }), 'saving the flight')) toast('Flight saved — Moshe & artist notified.', 'success');
+  if(reportEventSave(updateEvent(id, { flight, flightBooked:true }), 'saving the flight')) toast('Flight saved to the itinerary.', 'success');
   openEvent(id);
 }
 // Event-sheet flight card. Used to be a mock that stepped through made-up statuses and logged an
@@ -7328,8 +7325,8 @@ async function doCheckFlightStatus(id){
 }
 function doToggleGroundTransport(id){
   const ev = getEvent(id); if(!ev) return;
-  logEvent(ev,'email','Ground transport needed — emailed to the booking secretary with gig details.');
-  if(reportEventSave(updateEvent(id, { groundTransportNeeded:true }), 'marking ground transport needed')) toast('Booking secretary notified: ground transport needed.', 'email');
+  logEvent(ev,'system','Marked: ground transport needed.');
+  if(reportEventSave(updateEvent(id, { groundTransportNeeded:true }), 'marking ground transport needed')) toast('Marked: ground transport needed.', 'system');
   openEvent(id);
 }
 function doSaveGroundTransport(id){
@@ -7337,16 +7334,16 @@ function doSaveGroundTransport(id){
   const pickupTime = f.pickupDate? `${f.pickupDate} ${f.pickupTime||'00:00'}` : '—';
   const dropoffTime = f.dropoffDate? `${f.dropoffDate} ${f.dropoffTime||'00:00'}` : '—';
   const groundTransport = {driverName:f.driverName||'—', driverPhone:f.driverPhone||'—', pickupTime, pickupLocation:f.pickupLocation||'—', dropoffTime, dropoffLocation:f.dropoffLocation||'—', notes:f.notes||''};
-  logEvent(ev,'email',`Driver booked & added to itinerary — Moshe and ${artistById(ev.artistId).name} notified.`);
+  logEvent(ev,'system','Driver booked & added to the itinerary.');
   S.showTransportForm=false;
-  if(reportEventSave(updateEvent(id, { groundTransport, groundTransportBooked:true }), 'saving ground transport')) toast('Driver saved — Moshe & artist notified.', 'success');
+  if(reportEventSave(updateEvent(id, { groundTransport, groundTransportBooked:true }), 'saving ground transport')) toast('Driver saved to the itinerary.', 'success');
   openEvent(id);
 }
 function doSaveDressCode(id){
   const ev = getEvent(id); if(!ev) return; const f = S.dressCodeForm;
   const dressCode = (f.dressCode||'').trim();
-  logEvent(ev, 'system', dressCode? `Dress code set: ${dressCode} — ${artistById(ev.artistId).name} notified.` : 'Dress code cleared.');
-  if(reportEventSave(updateEvent(id, { dressCode }), 'saving the dress code')) toast(dressCode? 'Dress code saved — artist notified.' : 'Dress code cleared.', 'success');
+  logEvent(ev, 'system', dressCode? `Dress code set: ${dressCode}.` : 'Dress code cleared.');
+  if(reportEventSave(updateEvent(id, { dressCode }), 'saving the dress code')) toast(dressCode? 'Dress code saved.' : 'Dress code cleared.', 'success');
   S.showDressCodeForm=false; openEvent(id);
 }
 function doAddGigContact(id){
@@ -7372,9 +7369,9 @@ function doSaveGigInfo(id){
   const f = S.gigInfoForm;
   const prevSheet = ev.gigInfoSheet || {text:'', contacts:[], updatedAt:null};
   const gigInfoSheet = { ...prevSheet, text: (f.text!==undefined? f.text : prevSheet.text).trim(), updatedAt: todayISO() };
-  logEvent(ev, 'email', `Gig info sheet updated — ${artistById(ev.artistId).name} notified.`);
+  logEvent(ev, 'system', 'Gig info sheet updated.');
   S.showGigInfoForm=false; S.gigInfoForm={}; S.newGigContactForm={};
-  if(reportEventSave(updateEvent(id, { gigInfoSheet }), 'saving the gig info sheet')) toast('Gig info sheet saved — artist notified.', 'success');
+  if(reportEventSave(updateEvent(id, { gigInfoSheet }), 'saving the gig info sheet')) toast('Gig info sheet saved.', 'success');
   openEvent(id);
 }
 function doCopyText(value){
@@ -7542,18 +7539,9 @@ function doOpenOutsideBookingDoc(bookingId){
   S.showDocumentBuilder = true;
   render();
 }
-function doEmailItinerary(id){
-  const ev = getEvent(id); if(!ev) return;
-  logEvent(ev,'email',`Travel itinerary emailed to ${artistById(ev.artistId).name}.`);
-  if(reportEventSave(updateEvent(id, {}), 'emailing the itinerary')) toast('Itinerary emailed to artist.', 'email');
-  openEvent(id);
-}
 function doSendReminder(id){
   const ev = getEvent(id); if(!ev) return;
-  // SMS stays mocked -- no SMS provider is wired into this app. The email half is real now.
-  const via = isStandardPayment(ev) ? ' (Zelle link included)' : ` (payment method: ${paymentMethodLabel(ev)})`;
-  logEvent(ev,'sms',`Balance reminder texted to ${ev.clientPhone}${via}.`);
-  reportEventSave(updateEvent(id, {}), 'sending the reminder');
+  // Email only: no SMS provider is connected, so nothing claims a text went out (2026-10-12).
   if(ev.clientEmail) doSendReminderEmail(id);
   else toast('No client email on file — reminder not sent.', 'system');
 }
@@ -7584,10 +7572,10 @@ function doAddCharge(id){
   if(postSigning){
     const newTotal = ev.price + chargesTotal({...ev, charges});
     logEvent(ev,'warning',`Added after signing — client's total changed. New total: ${money(newTotal)}.`);
-    logEvent(ev,'email',`Updated total emailed to client: ${money(newTotal)} (was ${money(newTotal-amount)}).`);
+    logEvent(ev,'warning',`Let the client know: their total is now ${money(newTotal)} (was ${money(newTotal-amount)}).`);
   }
   S.showAddCharge=false; S.addChargeForm={};
-  if(reportEventSave(updateEvent(id, { charges }), 'adding the charge')) toast(postSigning? 'Charge added — client notified of the updated total.' : 'Charge added to contract.', 'system');
+  if(reportEventSave(updateEvent(id, { charges }), 'adding the charge')) toast(postSigning? 'Charge added — the client\'s total changed; let them know.' : 'Charge added to contract.', 'system');
   openEvent(id);
 }
 function doRemoveCharge(id, chargeId){
@@ -7608,7 +7596,7 @@ function doUploadPrep(id, files){
       remaining--;
       if(remaining===0){
         if(succeeded) logEvent(ev,'system', `Prep sheet${succeeded===1?'':'s'} uploaded.`);
-        if(reportEventSave(updateEvent(id, { prepSheets }), 'uploading the prep sheet') && succeeded) toast('Prep sheet uploaded — artist notified.', 'success');
+        if(reportEventSave(updateEvent(id, { prepSheets }), 'uploading the prep sheet') && succeeded) toast('Prep sheet uploaded.', 'success');
         openEvent(id);
       }
     };
@@ -7803,7 +7791,6 @@ function doAddTask(id){
   p.tasks.push({id:'T-'+Math.random().toString(36).slice(2,9), stage:p.stage, text, done:false, assignedTo});
   const person = assignedTo ? (p.people||[]).find(x=>x.id===assignedTo) : null;
   logProjectEvent(p,'system', person? `Task added: ${text} (assigned to ${person.name})` : `Task added: ${text}`);
-  if(person && person.email) logProjectEvent(p,'email', `Notified ${person.name} by email — new task assigned: "${text}".`);
   S.newTaskText=''; S.newTaskAssignee=''; saveProjects(); render();
 }
 function doAssignTask(id, taskId, personId){
@@ -7816,7 +7803,7 @@ function doAssignTask(id, taskId, personId){
   if(newId){
     const person = (p.people||[]).find(x=>x.id===newId);
     if(person){
-      logProjectEvent(p, person.email?'email':'system', `Task "${t.text}" assigned to ${person.name}.${person.email? ' Notified by email.' : ''}`);
+      logProjectEvent(p, 'system', `Task "${t.text}" assigned to ${person.name}.`);
     }
   } else {
     logProjectEvent(p,'system', `Task "${t.text}" unassigned.`);
@@ -8480,7 +8467,6 @@ function bindGlobal(){
       case 'close-itinerary': S.showItinerary=false; S.itineraryEventId=null; render(); break;
       case 'itinerary-overlay-close': if(e.target===t) { S.showItinerary=false; S.itineraryEventId=null; render(); } break;
       case 'print-itinerary': window.print(); break;
-      case 'email-itinerary': doEmailItinerary(id); break;
       case 'open-new-invoice': closeAllOverlays(); S.newInvoiceForm={items:[]}; S.showNewInvoice=true; render(); break;
       case 'add-invoice-item': {
         const f = S.newInvoiceForm; const label=(f.itemLabel||'').trim(); const amt=Number(f.itemAmount);

@@ -29,6 +29,7 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0041_gmail_tables_service_role | Applied 2026-10-12 — service_role grants on `gmail_mailboxes` / `gmail_oauth_tokens` (the Gmail functions were failing with permission denied). |
 | 0042_artist_commission_pct | Applied 2026-10-12 — `artists.commission_pct` (default 15, Dovie 10); prefills each gig's commission. |
 | 0043_artist_finance_package_scope | Applied 2026-10-12 — a client-package `priceScope` counts as shared in `artist_finance_view` (isolation check ALL OK). |
+| 0044_office_email_everywhere | Applied 2026-10-12 — reply-to and office email = office@aspmgmt.com for both brands (owner). |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in

@@ -6,6 +6,8 @@ plus one real-browser check of the local "today" helper.
   (a leftover mock doCheckFlightStatus shadowed the real FlightAware integration for weeks).
 - Duplicate `case '...'` labels in the action switch: the second one can never run.
 - "Today" via fmtISO(new Date()) is the UTC date -- after ~8pm US Eastern it is tomorrow.
+- Activity-log lines and toasts must not claim a text or notification went out: the app has no SMS
+  or internal-notification channel (2026-10-12; real emails log what was actually sent).
 """
 import collections
 import pathlib
@@ -64,3 +66,9 @@ def test_the_two_dark_palettes_stay_identical():
         return sorted(x.strip() for x in css[j + 1:k].replace("\n", " ").split(";") if x.strip())
     assert decls(':root:where(:not([data-theme="light"])){') == decls(':root[data-theme="dark"]{'), \
         "styles.css: the system-dark and user-dark palettes differ — keep them identical"
+
+
+def test_no_fake_notification_claims():
+    fake = re.findall(r"(?:logEvent|logProjectEvent|toast)\([^;]*?(?:texted|notified|Notified)[^;]*?\)", SRC)
+    assert not fake, f"log/toast claims a notification nothing sent: {fake[:3]}"
+    assert "logEvent(ev,'sms'" not in SRC, "an SMS log line, but no SMS provider is connected"

@@ -14,7 +14,7 @@ export type Brand = { key: string; senderName: string; replyTo: string | null };
 // so email never fails over branding.
 // deno-lint-ignore no-explicit-any
 export async function brandFor(sb: any, key: string | undefined): Promise<Brand> {
-  const fallback: Brand = { key: "asp", senderName: "ASP Management", replyTo: Deno.env.get("REPLY_TO") || "billing@aspmgmt.com" };
+  const fallback: Brand = { key: "asp", senderName: "ASP Management", replyTo: Deno.env.get("REPLY_TO") || "office@aspmgmt.com" };
   try {
     const { data, error } = await sb.from("brand_config").select("brand_key, is_default, sender_name, display_name, reply_to");
     if (error || !data?.length) return fallback;
