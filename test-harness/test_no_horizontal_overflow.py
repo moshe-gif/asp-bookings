@@ -160,8 +160,10 @@ def _populate(page):
     _close_all(page); _goto_view(page, "leads")
     page.locator('[data-action="open-event"][data-id="EV-9001"]').first.click()
     if _click_action(page, "create-contract", scope="overlay"):
-        page.locator('[data-action="pick-template-create"]').first.click()
         page.wait_for_timeout(400)
+        if page.locator('[data-action="pick-template-create"]').count():  # weddings skip the picker
+            page.locator('[data-action="pick-template-create"]').first.click()
+            page.wait_for_timeout(400)
     _close_all(page)
 
 

@@ -8,13 +8,13 @@ Comedian contract with the No-Recording/credit-future cancellation defaults, a M
 with line items + add-ons matching the real Stein package numbers and its tiered cancellation
 schedule, live fee/deposit math, and reload persistence.
 """
-from helpers import login_as, goto_nav, collect_console_errors, create_lead
+from helpers import login_as, goto_nav, collect_console_errors, create_lead, pick_template
 
 
 
 def create_contract_from_lead(page, template):
     page.locator('[data-action="create-contract"]').click()
-    page.locator(f'[data-action="pick-template-create"][data-template="{template}"]').click()
+    pick_template(page, template)
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
     return builder
@@ -77,7 +77,7 @@ def test_comedian_contract_defaults_no_recording_and_credit_cancellation(live_se
     page.goto(live_server)
     login_as(page, "admin_bookings")
 
-    create_lead(page, "Comedy Night Client", "2027-10-05", artist_id="dovie")
+    create_lead(page, "Comedy Night Client", "2027-10-05", artist_id="dovie", event_type="Concert")
     builder = create_contract_from_lead(page, "comedian")
 
     # Comedian contracts default to credit-toward-future-event cancellation (not flat-percent-owed)
@@ -102,7 +102,7 @@ def test_multiline_line_items_addons_and_tiered_cancellation(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
 
-    create_lead(page, "Stein Package Client", "2026-11-29", artist_id="eli")
+    create_lead(page, "Stein Package Client", "2026-11-29", artist_id="eli", event_type="Concert")
     builder = create_contract_from_lead(page, "multiline")
 
     # Multiline defaults to a tiered cancellation schedule (not flat %), matching the real Stein
@@ -232,7 +232,7 @@ def test_creative_template_renders_standing_clauses_and_no_overtime(live_server,
     page.goto(live_server)
     login_as(page, "admin_bookings")
 
-    create_lead(page, "SAR Academy", "2027-05-01", artist_id="dovie")
+    create_lead(page, "SAR Academy", "2027-05-01", artist_id="dovie", event_type="Concert")
     builder = create_contract_from_lead(page, "creative")
 
     assert "Creative/Video Production Agreement" in builder.locator('h2').first.inner_text()

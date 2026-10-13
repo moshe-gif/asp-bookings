@@ -567,6 +567,18 @@ const CONTRACT_TEMPLATES = [
   ['multiline','Multi-Performer / Package Agreement'],
   ['creative','Creative/Video Production Agreement'],
 ];
+// A wedding with one artist is always the Standard Artist Agreement (owner 2026-10-13), so creating
+// its contract skips the template picker. Anything else (other types, extra performers) still asks.
+function obviousTemplateFor(ev){
+  return ev && ev.type==='Wedding' && ev.artistId && !(ev.additionalArtists||[]).length ? 'standard' : null;
+}
+// The one entry point for "make a contract for this gig": straight to the builder when the
+// template is obvious, otherwise the picker.
+function startContractForLead(id){
+  const template = obviousTemplateFor(getEvent(id));
+  if(template){ doCreateContractFromLead(id, template); return; }
+  S.showTemplatePicker = true; S.templatePickerLeadId = id; render();
+}
 function contractTemplateLabel(t){ const m = CONTRACT_TEMPLATES.find(([k])=>k===t); return m ? m[1] : t; }
 
 /* ---- Contracts (persisted, per-lead, versioned) ---- */
@@ -1728,7 +1740,7 @@ function sendClientNoticeEmail(ev, subject, html){ return sendEmail({ to: ev.cli
 // Also reachable manually via a Resend button on the preview, per "manual resend + audit log."
 function bookingConfirmationIntroHtml(ev, artist, balance){
   return `<p style="margin:0 0 8px;">Hi ${esc((ev.clientName||'').split(' ')[0])},</p>
-    <p style="margin:0 0 8px;">You're all set — ${esc(artist.name)} is booked for your ${esc(ev.type)} on ${esc(fmtDate(ev.date))} at ${esc(fmtTime(ev.time))}.</p>
+    <p style="margin:0 0 8px;">You're all set — ${esc(artist.name)} is booked for your ${esc(ev.type)} on ${esc(fmtDate(ev.date))}${ev.time && ev.time!=='00:00' ? ` at ${esc(fmtTime(ev.time))}` : ''}.</p>
     <p style="margin:0 0 8px;">Remaining balance of ${money(balance)} is due before the event${isStandardPayment(ev)? zellePaymentSentence(ev) : ` (${esc(paymentMethodLabel(ev))})`}.</p>`;
 }
 function reminderIntroHtml(ev, artist, balance){
@@ -1833,8 +1845,17 @@ function applyStandardPricing(){
   if(!f.artistId || !f.type || f.type==='Other') return;
   const p = getPricing(f.artistId, f.type);
   if(p.hourlyRate) f.price = p.hourlyRate * p.includedHours;
-  if(f.time && p.includedHours) f.endTime = addMinutesToTime(f.time, Math.round(p.includedHours*60));
+  if(!f.endTimeManual) delete f.endTime; // re-derive from the new artist/type
 }
+// New Lead end time (owner 2026-10-13): start + the artist's included hours for that event type
+// (Pricing page; 2 hours when nothing is set), until someone types an end time. "Time TBD" leaves
+// both blank, and clearing the end time leaves only the end TBD.
+const LEAD_DEFAULT_START = '19:00';
+function leadDefaultEndTime(f){
+  const hours = getPricing(f.artistId, f.type).includedHours || 2;
+  return addMinutesToTime(f.time || LEAD_DEFAULT_START, Math.round(hours*60));
+}
+function leadEndTime(f){ return f.endTime!==undefined ? f.endTime : leadDefaultEndTime(f); }
 function setPricing(artistId, type, patch){
   PRICING[artistId] = PRICING[artistId] || {};
   PRICING[artistId][type] = Object.assign({hourlyRate:0,includedHours:2}, PRICING[artistId][type], patch);
@@ -3041,21 +3062,38 @@ function renderMapLinks(ev){
 }
 const US_STATES = new Set(['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC']);
 function isInternational(ev){ const s=(ev.state||'').trim().toUpperCase(); return s.length>0 && !US_STATES.has(s); }
-function eventTravelDates(ev){
-  const dates = new Set([ev.date]);
-  if(ev.flight){
-    if(ev.flight.depart) dates.add(ev.flight.depart.slice(0,10));
-    if(ev.flight.arrive) dates.add(ev.flight.arrive.slice(0,10));
+// Scheduling conflicts compare TIMES, not just dates (owner 2026-10-13): two things on the same day
+// conflict only if their time ranges overlap. A gig with no end time is taken as 3 hours (same as
+// the calendar export); one ending at or before its start runs past midnight. "All day" and "Time
+// TBD" items hold the whole day. A booked flight holds depart -> arrive (a side with no time holds
+// its whole day).
+const HOUR_MS = 3600000, DAY_MS = 86400000;
+function dayStartMs(iso){ return new Date(iso+'T00:00:00').getTime(); }
+function eventBusyRanges(ev){
+  const ranges = [];
+  if(ev.date){
+    if(!ev.time || (ev.time==='00:00' && !ev.endTime)) ranges.push([dayStartMs(ev.date), dayStartMs(ev.date)+DAY_MS]);
+    else {
+      const start = new Date(ev.date+'T'+ev.time+':00').getTime();
+      let end = ev.endTime ? new Date(ev.date+'T'+ev.endTime+':00').getTime() : start + 3*HOUR_MS;
+      if(end <= start) end += DAY_MS;
+      ranges.push([start, end]);
+    }
   }
-  return dates;
+  if(ev.flight){
+    const at = v=>{ const m = String(v||'').match(/^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}))?/);
+      return m ? { day: dayStartMs(m[1]), ms: m[2] && m[2]!=='00:00' ? new Date(m[1]+'T'+m[2]+':00').getTime() : null } : null; };
+    const dep = at(ev.flight.depart), arr = at(ev.flight.arrive);
+    if(dep && arr && dep.ms!==null && arr.ms!==null && arr.ms > dep.ms) ranges.push([dep.ms, arr.ms]);
+    else [dep, arr].forEach(x=>{ if(x) ranges.push(x.ms!==null ? [x.ms, x.ms+HOUR_MS] : [x.day, x.day+DAY_MS]); });
+  }
+  return ranges;
 }
 function findConflicts(ev){
-  const myDates = eventTravelDates(ev);
+  const mine = eventBusyRanges(ev);
   return S.events.filter(e=>{
     if(e.id===ev.id || e.artistId!==ev.artistId) return false;
-    const otherDates = eventTravelDates(e);
-    for(const d of myDates) if(otherDates.has(d)) return true;
-    return false;
+    return eventBusyRanges(e).some(([s2,e2])=>mine.some(([s1,e1])=> s1 < e2 && s2 < e1));
   });
 }
 function allConflictPairs(){
@@ -3516,7 +3554,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.3'; // bump on every release so a phone can tell it has updated. v1.9.3: integration status loads after sign-in; labels on icon buttons
+const APP_VERSION = 'v1.9.4'; // bump on every release so a phone can tell it has updated. v1.9.4: conflicts by time; gig window; wedding contracts skip picker
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -5159,10 +5197,11 @@ function renderNewLeadModal(){
           <div class="field"><label>Client Phone</label><input data-field="clientPhone" value="${esc(f.clientPhone||'')}" placeholder="(555) 555-5555"/></div>
         </div>` : ''}
         <div class="field"><label>Date</label><input type="date" data-field="date" value="${f.date||''}"/></div>
-        <div class="field-row">
-          <div class="field"><label>Start Time</label><input type="time" data-field="time" value="${f.time||'19:00'}"/></div>
-          <div class="field"><label>End Time</label><input type="time" data-field="endTime" value="${f.endTime||''}"/></div>
-        </div>
+        ${f.timeTbd? '' : `<div class="field-row">
+          <div class="field"><label>Start Time</label><input type="time" data-field="time" value="${f.time||LEAD_DEFAULT_START}"/></div>
+          <div class="field"><label>End Time</label><input type="time" data-field="endTime" value="${leadEndTime(f)||''}"/></div>
+        </div>`}
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-field="timeTbd" ${f.timeTbd?'checked':''} style="width:16px;height:16px;"/> Time TBD</label>
         <div class="field"><label>Venue Name</label><input data-field="venue" value="${esc(f.venue||'')}" placeholder="${isInternal?'Studio name':'Ateres Chaya Hall'}"/></div>
         <div class="field-row">
           <div class="field"><label>City</label><input data-field="city" value="${esc(f.city||'')}" placeholder="Lakewood"/></div>
@@ -5418,8 +5457,8 @@ function renderEventSheet(ev){
   const steps = EVENT_PIPELINE.map(p=>({ key:p.key, label:p.step }));
   const curIdx = EVENT_PIPELINE.findIndex(p=>p.key===ev.status);
 
-  return `<div class="overlay" data-action="overlay-close">
-    <div class="sheet" data-stop>
+  return `<div class="overlay overlay-window" data-action="overlay-close">
+    <div class="sheet sheet-window" data-stop>
       ${S.showEventMenu? `<div class="kebab-scrim"></div>`:''}
       <div class="sheet-head">
         <div style="display:flex;align-items:center;gap:10px;">
@@ -5520,7 +5559,7 @@ function renderConflictWarning(ev){
     <div style="display:flex;align-items:center;gap:8px;color:var(--crit-ink);font-weight:700;font-size:13px;">${ICO.alert} Scheduling conflict</div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">
       ${conflicts.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--crit-ink);cursor:pointer;" data-action="open-event" data-id="${c.id}">
-        <span>${fmtDateShort(c.date)} — ${c.clientName ? `${esc(c.clientName)} (${esc(c.type)})` : esc(c.type)}${c.date!==ev.date?' · overlaps via flight travel':''}</span>
+        <span>${fmtDateShort(c.date)} · ${esc(fmtTimeRange(c.time, c.endTime))} — ${c.clientName ? `${esc(c.clientName)} (${esc(c.type)})` : esc(c.type)}</span>
         <span style="text-decoration:underline;">View</span>
       </div>`).join('')}
     </div>
@@ -5542,14 +5581,18 @@ function renderFlightBlock(ev, isAdmin){
     if(!isAdmin) return '';
     return `<div class="card card-pad" style="border-color:var(--warn);background:var(--warn-wash);">
       <div style="display:flex;align-items:center;gap:8px;color:var(--warn-ink);font-weight:700;font-size:13px;">${ICO.plane} Flight needed — not booked yet</div>
-      <button class="btn btn-sm" style="margin-top:10px;" data-action="open-flight-form" data-id="${ev.id}">Add flight info</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn btn-sm" data-action="open-flight-form" data-id="${ev.id}">Add flight info</button>
+        <button class="btn btn-sm btn-ghost" data-action="unmark-flight" data-id="${ev.id}">Not needed</button>
+      </div>
     </div>`;
   }
   const f = ev.flight;
   const trackable = !!(f.flightNumber || (f.confirmation && f.confirmation!=='—'));
   const checking = S.checkingFlightId===ev.id;
   return `<div class="card card-pad">
-    <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--good-ink);">${ICO.plane} Flight booked</div>
+    <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--good-ink);">${ICO.plane} Flight booked
+      ${isAdmin? `<button class="btn btn-sm btn-ghost" style="margin-left:auto;" data-action="unmark-flight" data-id="${ev.id}">Remove flight</button>` : ''}</div>
     <div class="ledger" style="margin-top:8px;">
       <div class="ledger-row"><span>Airline</span><span class="amt">${esc(f.airline)}</span></div>
       ${f.flightNumber?`<div class="ledger-row"><span>Flight #</span><span class="amt">${esc(f.flightNumber)}</span></div>`:''}
@@ -5576,12 +5619,16 @@ function renderGroundTransportBlock(ev, isAdmin){
     if(!isAdmin) return '';
     return `<div class="card card-pad" style="border-color:var(--warn);background:var(--warn-wash);">
       <div style="display:flex;align-items:center;gap:8px;color:var(--warn-ink);font-weight:700;font-size:13px;">${ICO.car} Driver needed — not booked yet</div>
-      <button class="btn btn-sm" style="margin-top:10px;" data-action="open-transport-form" data-id="${ev.id}">Add driver info</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn btn-sm" data-action="open-transport-form" data-id="${ev.id}">Add driver info</button>
+        <button class="btn btn-sm btn-ghost" data-action="unmark-ground-transport" data-id="${ev.id}">Not needed</button>
+      </div>
     </div>`;
   }
   const g = ev.groundTransport;
   return `<div class="card card-pad">
-    <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--good-ink);">${ICO.car} Driver booked</div>
+    <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--good-ink);">${ICO.car} Driver booked
+      ${isAdmin? `<button class="btn btn-sm btn-ghost" style="margin-left:auto;" data-action="unmark-ground-transport" data-id="${ev.id}">Remove driver</button>` : ''}</div>
     <div class="ledger" style="margin-top:8px;">
       <div class="ledger-row"><span>Driver</span><span class="amt">${esc(g.driverName)}</span></div>
       <div class="ledger-row"><span>Phone</span><span class="amt">${esc(g.driverPhone)}</span></div>
@@ -6670,8 +6717,9 @@ function docChrome(innerHtml, c){
     <div class="doc" data-stop>
       <div class="sheet-head">
         <h2 style="font-size:1.1rem;">Contract Preview</h2>
-        <div style="display:flex;gap:6px;">
-          ${c ? `<button class="icon-btn" data-action="open-send-contract" data-id="${c.id}" title="Send Contract" aria-label="Send Contract"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg></button>` : ''}
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+          ${c ? `<button class="btn btn-sm btn-primary" data-action="open-send-contract" data-id="${c.id}">${ICO.mail} Send to client</button>
+          <button class="btn btn-sm" data-action="edit-contract-from-doc" data-id="${c.id}">${ICO.edit} Edit</button>` : ''}
           <button class="icon-btn" data-action="print-contract-builder" title="Print / Save as PDF" aria-label="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
           <button class="icon-btn" data-action="close-contract-builder-doc" aria-label="Close">${ICO.x}</button>
         </div>
@@ -7347,8 +7395,10 @@ function renderItineraryDoc(){
 // The real send (doSendContractEmail) is what advances the lead to contract_sent.
 function doSendContract(id){
   const latest = contractsForLead(id).find(c=>c.status!=='void');
-  if(latest){ S.showContractBuilder = true; S.contractBuilderId = latest.id; }
-  else { S.showTemplatePicker = true; S.templatePickerLeadId = id; }
+  // Review first (owner 2026-10-13): the existing contract opens as the document preview, with
+  // Send and Edit at the top; a new one opens in the builder to be filled in.
+  if(latest){ S.contractBuilderId = latest.id; S.showContractBuilderDoc = true; }
+  else { startContractForLead(id); return; }
   render();
 }
 function doMarkDeposit(id, extra={}){
@@ -7421,6 +7471,15 @@ function doToggleFlight(id){
   if(reportEventSave(updateEvent(id, { flightNeeded:true }), 'marking flight needed')) toast('Marked: flight needed. Request travel from the gig to brief the booking secretary.', 'system');
   openEvent(id);
 }
+// Undo "flight needed" (owner 2026-10-13). A booked flight is cleared too, after a confirm, since
+// its details would otherwise be lost silently.
+function doUnmarkFlight(id){
+  const ev = getEvent(id); if(!ev) return;
+  if(ev.flightBooked && !confirm('Remove the booked flight from this gig? Its details will be cleared.')) return;
+  logEvent(ev,'system', ev.flightBooked ? 'Flight removed; no flight needed.' : 'Marked: no flight needed.');
+  if(reportEventSave(updateEvent(id, { flightNeeded:false, flightBooked:false, flight:null }), 'marking no flight needed')) toast('No flight needed.', 'system');
+  openEvent(id);
+}
 function doSaveFlight(id){
   const ev = getEvent(id); if(!ev) return; const f=S.flightForm;
   const depart = f.departDate? `${f.departDate} ${f.departTime||'00:00'}` : '—';
@@ -7456,6 +7515,13 @@ function doToggleGroundTransport(id){
   const ev = getEvent(id); if(!ev) return;
   logEvent(ev,'system','Marked: ground transport needed.');
   if(reportEventSave(updateEvent(id, { groundTransportNeeded:true }), 'marking ground transport needed')) toast('Marked: ground transport needed.', 'system');
+  openEvent(id);
+}
+function doUnmarkGroundTransport(id){
+  const ev = getEvent(id); if(!ev) return;
+  if(ev.groundTransportBooked && !confirm('Remove the booked driver from this gig? Their details will be cleared.')) return;
+  logEvent(ev,'system', ev.groundTransportBooked ? 'Driver removed; no ground transport needed.' : 'Marked: no ground transport needed.');
+  if(reportEventSave(updateEvent(id, { groundTransportNeeded:false, groundTransportBooked:false, groundTransport:null }), 'marking no ground transport needed')) toast('No ground transport needed.', 'system');
   openEvent(id);
 }
 function doSaveGroundTransport(id){
@@ -7830,7 +7896,7 @@ function doAddProject(){
       charges:[], dressCode:'', prepSheets:[], createdAt: todayISO(),
       log:[{ts:new Date().toISOString(), type:'system', text:`Recording Day scheduled for ${artist.name} — ${count} episode project${count===1?'':'s'}.`}],
     };
-    if(findConflicts(ev).length) toast(`⚠ Scheduling conflict — ${artist.name} already has something this date.`, 'system');
+    if(findConflicts(ev).length) toast(`⚠ Scheduling conflict — ${artist.name} already has something at that time.`, 'system');
     S.events.unshift(ev); saveEvents();
     const cadence = Number(f.releaseCadenceDays)||7;
     const firstRelease = f.releaseDate || fmtISO(addDays(new Date(f.recordingDate+'T00:00:00'), 7));
@@ -8037,7 +8103,7 @@ function doSubmitLead(){
     unpaid: isInternal,
     clientName: isInternal? null : f.clientName,
     clientEmail: isInternal? '' : (f.clientEmail||''), clientPhone: isInternal? '' : (f.clientPhone||''),
-    date: f.date, time: f.time||'19:00', endTime: f.endTime||null,
+    date: f.date, time: f.timeTbd ? '' : (f.time||LEAD_DEFAULT_START), endTime: f.timeTbd ? null : (leadEndTime(f)||null),
     venue: f.venue||'', city: f.city||'', state: f.state||'',
     price, commission, status: isInternal? 'scheduled':'lead', depositReceived:false, depositReceivedDate:null,
     balanceReceived:false, balanceReceivedDate:null, reminderIntervalDays: defaultReminderCadence(f.date), lastReminderSent:null,
@@ -8054,7 +8120,7 @@ function doSubmitLead(){
   };
   S.events.unshift(ev); saveEvents();
   toast(isInternal? `Internal day added — penciled in on ${artistById(f.artistId).name}'s calendar.` : `Lead added — penciled in on ${artistById(f.artistId).name}'s calendar.`, 'success');
-  if(findConflicts(ev).length) toast(`⚠ Scheduling conflict — ${artistById(f.artistId).name} already has something this date.`, 'system');
+  if(findConflicts(ev).length) toast(`⚠ Scheduling conflict — ${artistById(f.artistId).name} already has something at that time.`, 'system');
   S.showNewLead=false; S.newLeadForm={}; openEvent(ev.id);
 }
 function doSubmitBlockTime(){
@@ -8089,7 +8155,7 @@ function doSubmitBlockTime(){
   });
   saveEvents();
   toast(dates.length>1? `${dates.length} days blocked on your calendar.` : 'Date blocked on your calendar.', 'success');
-  if(hadConflict) toast(`⚠ You already have something booked in that range.`, 'system');
+  if(hadConflict) toast(`⚠ You already have something booked at that time.`, 'system');
   S.showBlockTime=false; S.blockTimeForm={}; render();
 }
 
@@ -8148,6 +8214,9 @@ function registerAction(name, fn){
 }
 registerAction('download-backup', ()=>doDownloadBackup());
 registerAction('make-sign-link', ({ id })=>doMakeSignLink(id));
+registerAction('edit-contract-from-doc', ({ id })=>{ S.showContractBuilderDoc = false; S.showContractBuilder = true; S.contractBuilderId = id; render(); });
+registerAction('unmark-flight', ({ id })=>doUnmarkFlight(id));
+registerAction('unmark-ground-transport', ({ id })=>doUnmarkGroundTransport(id));
 registerAction('external-link', ()=>{}); // the browser follows the link; nothing else happens
 registerAction('retry-artist-portal', ()=>loadArtistPortalData());
 registerAction('open-contract-doc', ({ id })=>{ S.contractBuilderId = id; S.showContractBuilderDoc = true; render(); });
@@ -8289,6 +8358,11 @@ function bindGlobal(){
       if(form && !formTargets[form]){ console.warn('data-field inside unknown data-form:', form, key); return; }
       const target = form ? formTargets[form] : S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
+      if(target===S.newLeadForm && key==='endTime') S.newLeadForm.endTimeManual = true;
+      if(target===S.newLeadForm && key==='time' && !S.newLeadForm.endTimeManual){
+        const endEl = el.closest('[data-form]')?.querySelector('[data-field="endTime"]');
+        if(endEl) endEl.value = leadDefaultEndTime(S.newLeadForm);
+      }
       if(form==='orgsettings') saveOrgSettings();
       if(el.type==='checkbox') render();
     });
@@ -8535,7 +8609,7 @@ function bindGlobal(){
       case 'confirm-add-charge': doAddCharge(id); break;
       case 'remove-charge': doRemoveCharge(id, t.getAttribute('data-chargeid')); break;
       case 'remove-prep': doRemovePrep(id, t.getAttribute('data-prepid')); break;
-      case 'create-contract': S.showTemplatePicker=true; S.templatePickerLeadId=id; render(); break;
+      case 'create-contract': startContractForLead(id); break;
       case 'close-template-picker': S.showTemplatePicker=false; S.templatePickerLeadId=null; render(); break;
       case 'templatepicker-overlay-close': if(e.target===t){ S.showTemplatePicker=false; S.templatePickerLeadId=null; render(); } break;
       case 'pick-template-create': { const leadId=id; const template=t.getAttribute('data-template'); S.showTemplatePicker=false; S.templatePickerLeadId=null; doCreateContractFromLead(leadId, template); break; }

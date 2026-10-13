@@ -214,7 +214,7 @@ def mark_contract_sent_from_event_sheet(page):
     contract Sent -> close. Moves the lead to Contract Sent the same way a real emailed send does
     (the event-sheet button stopped faking a send on 2026-10-09)."""
     page.locator('[data-action="send-contract"]').click()
-    page.locator('[data-action="pick-template-create"][data-template="standard"]').click()
+    pick_template(page, "standard")
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
     builder.locator('[data-action="set-contract-status"][data-status="sent"]').click()
@@ -247,10 +247,13 @@ def create_outside_booking(page, performer="Test Harness Outside Act", client="T
     page.wait_for_timeout(400)
 
 
-def create_lead(page, client_name, date, artist_id="benny"):
-    """New Lead modal → pick artist → client name + date → submit. Leaves the new lead's event sheet open."""
+def create_lead(page, client_name, date, artist_id="benny", event_type=None):
+    """New Lead modal → pick artist → client name + date → submit. Leaves the new lead's event sheet open.
+    The default type is Wedding (first in the list); pass event_type for anything else."""
     page.locator('[data-action="open-new-lead"]').click()
     page.locator(f'[data-action="pick-artist"][data-id="{artist_id}"]').click()
+    if event_type:
+        page.locator('select[data-action="pick-event-type"]').select_option(event_type)
     page.locator('input[data-field="clientName"]').fill(client_name)
     page.locator('input[data-field="date"]').fill(date)
     page.locator('[data-action="submit-lead"]').click()
@@ -261,3 +264,16 @@ def no_shared_sync(context):
     list (the default `page` fixture already gets this from conftest)."""
     context.add_init_script("window.ASP_DISABLE_EVENT_SYNC = true;")
     return context
+
+
+def pick_template(page, template="standard"):
+    """After clicking Create Contract: choose the template in the picker. A one-artist wedding skips
+    the picker and opens the Standard Artist Agreement directly (owner 2026-10-13), so then there is
+    nothing to pick -- only valid when the test wanted "standard"."""
+    page.wait_for_function("() => document.querySelector('#templatePickerOverlayHost')"
+                           " || document.querySelector('#contractBuilderOverlayHost .sheet')", timeout=15000)
+    option = page.locator(f'[data-action="pick-template-create"][data-template="{template}"]')
+    if option.count():
+        option.click()
+    else:
+        assert template == "standard", f"no template picker (one-artist wedding?) but the test wanted {template!r}"

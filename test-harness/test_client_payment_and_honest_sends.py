@@ -42,8 +42,9 @@ def test_primary_contract_button_routes_to_real_builder_and_logs_nothing(live_se
     login_as(page, "admin_bookings")
     _open_gig(page, "leads", "Test Client EV-9102")
     page.locator('[data-action="send-contract"]').first.click()
-    page.locator('#templatePickerOverlayHost').wait_for(state="attached")
-    assert page.locator('[data-action="pick-template-create"]').count() > 0, "template picker didn't open"
+    # A one-artist wedding opens the Standard Artist Agreement straight away; anything else, the picker.
+    page.wait_for_function("() => document.querySelector('#templatePickerOverlayHost')"
+                           " || document.querySelector('#contractBuilderOverlayHost .sheet')", timeout=15000)
     ev = page.evaluate("() => window.S.events.find(e => e.id === 'EV-9102')")
     assert ev["status"] == "lead", f"lead status changed without a real send: {ev['status']}"
     assert not any("emailed" in (l.get("text") or "") for l in ev.get("log", [])), ev.get("log")

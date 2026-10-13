@@ -22,6 +22,10 @@ function doPost(e) {
   if (!sharedSecret || body.secret !== sharedSecret) {
     return respond({ ok: false, error: 'unauthorized' });
   }
+  // Diagnostics (no email sent): which Google account this script sends as, and today's quota left.
+  if (body.ping) {
+    return respond({ ok: true, from: Session.getEffectiveUser().getEmail(), quota: MailApp.getRemainingDailyQuota() });
+  }
   if (!body.to || !body.subject || !body.html) {
     return respond({ ok: false, error: 'missing fields (to, subject, html required)' });
   }
@@ -34,7 +38,7 @@ function doPost(e) {
       name: body.fromName || 'ASP Management',
       replyTo: body.replyTo || undefined,
     });
-    return respond({ ok: true });
+    return respond({ ok: true, from: Session.getEffectiveUser().getEmail(), quota: MailApp.getRemainingDailyQuota() });
   } catch (err) {
     return respond({ ok: false, error: String(err) });
   }
