@@ -34,6 +34,7 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0046_service_role_table_access | Applied 2026-10-12 — service_role gets the standard table access (it had none: Edge Function writes/reads were failing or silently empty). |
 | 0047_artist_gig_view_office_days | Applied 2026-10-12 — artists also see their office days (`unpaid` internal days; no money row); never leads (owner). |
 | 0048_qbo_connection | Applied 2026-10-12 — recreates `qbo_connection` (0009's table was missing from the database); service role only. |
+| 0049_tighten_client_grants | Applied 2026-10-12 — audit 1.4 safe slice: anon/authenticated lose TRUNCATE/TRIGGER/REFERENCES everywhere (TRUNCATE skips RLS), write grants on the read-only artist views, and all access to the token tables; same for future tables. Isolation check ALL OK after. |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in
