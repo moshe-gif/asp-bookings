@@ -2560,6 +2560,11 @@ async function linkRealSessionToRosterNow(session){
   syncURL();
   if(!adminRow) startArtistPortal(); // before the first paint, so no cached office gig ever shows
   render();
+  // Loaded once the person is known (audit 5.7): before, these ran only at page load, so a fresh
+  // sign-in showed QuickBooks/Calendar as "not connected" until a reload, and an artist's reload
+  // called the admin-only status functions.
+  loadBrandConfig();
+  if(adminRow){ refreshQboStatus(); refreshGcalStatus(); }
   await syncArtistRoster();
   startSharedSync().then(startClientSignatureWatch); // after contracts load, so signatures land on them
 }
@@ -2896,9 +2901,6 @@ async function refreshGcalStatus(){
   if(qbo==='connected'){ toast('QuickBooks connected.', 'success'); refreshQboStatus(); }
   else if(qbo==='error'){ toast('Could not connect QuickBooks -- check the setup and try again.', 'system'); }
 })();
-refreshQboStatus();
-refreshGcalStatus();
-loadBrandConfig();
 
 /* ============ THEME PREF ============ */
 const THEME_LS_KEY = 'asp_theme_pref';
@@ -3514,7 +3516,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.2'; // bump on every release so a phone can tell it has updated. v1.9.2: clients sign contracts online
+const APP_VERSION = 'v1.9.3'; // bump on every release so a phone can tell it has updated. v1.9.3: integration status loads after sign-in; labels on icon buttons
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -4766,7 +4768,7 @@ function renderProjectDetail(){
           <div style="margin-top:16px;">
             <div class="u-label" style="margin-bottom:8px;">Who's Involved</div>
             <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:${isAdmin?'10px':'0'};">
-              ${(p.people||[]).length? p.people.map(person=>`<span class="pill pill-neutral" style="display:inline-flex;align-items:center;gap:6px;">${renderPersonAvatar(person,15)}${esc(person.role)}: ${esc(person.name)}${isAdmin?`<button data-action="remove-person" data-id="${p.id}" data-pid="${person.id}" style="border:none;background:none;cursor:pointer;color:var(--ink-3);padding:0;display:flex;">${ICO.x}</button>`:''}</span>`).join('') : `<span style="font-size:12px;color:var(--ink-3);">Nobody added yet.</span>`}
+              ${(p.people||[]).length? p.people.map(person=>`<span class="pill pill-neutral" style="display:inline-flex;align-items:center;gap:6px;">${renderPersonAvatar(person,15)}${esc(person.role)}: ${esc(person.name)}${isAdmin?`<button data-action="remove-person" data-id="${p.id}" data-pid="${person.id}" aria-label="Remove ${esc(person.name)}" style="border:none;background:none;cursor:pointer;color:var(--ink-3);padding:0;display:flex;">${ICO.x}</button>`:''}</span>`).join('') : `<span style="font-size:12px;color:var(--ink-3);">Nobody added yet.</span>`}
             </div>
             ${isAdmin? `
             <div class="chip-row" style="margin-bottom:8px;">
@@ -6581,7 +6583,7 @@ function renderContractProvidesSection(c){
     <input data-contract-field="top.artistProvides" value="${esc(c.artistProvides||'')}" placeholder="e.g. Vocal performance for up to 5 hours"/>
     <h3 style="font-size:13.5px;margin:10px 0 0;">Client Shall Provide</h3>
     <div class="chip-row">${CLIENT_PROVIDES_SUGGESTIONS.map(s=>`<button class="filter-chip" data-action="add-client-provides" data-id="${c.id}" data-label="${esc(s)}">${ICO.plus} ${esc(s)}</button>`).join('')}</div>
-    ${c.clientProvides.length? `<div class="chip-row">${c.clientProvides.map((label,idx)=>`<span class="filter-chip sel" style="display:flex;align-items:center;gap:6px;">${esc(label)} <button data-action="remove-client-provides" data-id="${c.id}" data-idx="${idx}" style="background:none;border:none;cursor:pointer;color:inherit;">${ICO.x}</button></span>`).join('')}</div>` : `<p style="font-size:12px;color:var(--ink-3);margin:0;">None yet.</p>`}
+    ${c.clientProvides.length? `<div class="chip-row">${c.clientProvides.map((label,idx)=>`<span class="filter-chip sel" style="display:flex;align-items:center;gap:6px;">${esc(label)} <button data-action="remove-client-provides" data-id="${c.id}" data-idx="${idx}" aria-label="Remove ${esc(label)}" style="background:none;border:none;cursor:pointer;color:inherit;">${ICO.x}</button></span>`).join('')}</div>` : `<p style="font-size:12px;color:var(--ink-3);margin:0;">None yet.</p>`}
   </div>`;
 }
 function renderBarterSection(c){
