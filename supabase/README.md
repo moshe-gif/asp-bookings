@@ -31,8 +31,9 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0043_artist_finance_package_scope | Applied 2026-10-12 — a client-package `priceScope` counts as shared in `artist_finance_view` (isolation check ALL OK). |
 | 0044_office_email_everywhere | Applied 2026-10-12 — reply-to and office email = office@aspmgmt.com for both brands (owner). |
 | 0045_email_sends_service_role | Applied 2026-10-12 — service_role can record/count sends (first real send went out unlogged). |
-| 0046_service_role_table_access | Applied 2026-10-12 — service_role gets the standard table access (it had none: Edge Function writes/reads were failing or silently empty). Note: table `qbo_connection` (0009) does not exist — create it before QuickBooks go-live. |
+| 0046_service_role_table_access | Applied 2026-10-12 — service_role gets the standard table access (it had none: Edge Function writes/reads were failing or silently empty). |
 | 0047_artist_gig_view_office_days | Applied 2026-10-12 — artists also see their office days (`unpaid` internal days; no money row); never leads (owner). |
+| 0048_qbo_connection | Applied 2026-10-12 — recreates `qbo_connection` (0009's table was missing from the database); service role only. |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in
@@ -58,7 +59,7 @@ works. Secrets live in Edge Function secrets (names in `.env.example` and each `
 **QuickBooks / Google go-live checklist** (do all of it before filling in any client ID):
 1. ~~Apply migrations 0033 and 0034~~ — done 2026-10-10.
 2. ~~Deploy `oauth-start` and the updated callbacks / webhook / invoice functions~~ — done 2026-10-10.
-3. Create `qbo_connection` (0009's table is missing from the database -- found 2026-10-12).
+3. ~~Create `qbo_connection`~~ — done 2026-10-12 (0048).
 4. In the QuickBooks sandbox, confirm invoice idempotency (`requestid`) behaves as expected and
    which webhook payload format your Intuit app receives (the function logs unknown formats).
 
