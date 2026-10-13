@@ -933,6 +933,7 @@ function doRefreshContractFromLead(id){
 }
 function doDeleteContract(id){
   if(!confirm('Delete this contract? This can’t be undone.')) return;
+  const gone = getContract(id); if(gone) revokeOpenSignLinks(gone);
   CONTRACTS = CONTRACTS.filter(c=>c.id!==id);
   saveContracts();
   S.showContractBuilder=false; S.contractBuilderId=null;
@@ -1203,7 +1204,7 @@ async function doMigrateContractsToSupabase(){
 // counts except bookkeeping that never reaches the client document. Canonical form (sorted keys,
 // numeric strings as numbers) so retyping the same value doesn't void it. Approvals saved before
 // this existed have no fingerprint and need one re-approval (the safe direction to fail in).
-const CONTRACT_FINGERPRINT_IGNORED = ['payeeSnapshot','id','leadId','status','createdAt','updatedAt','approvedBy','approvedAt','approvedTermsFingerprint','versions','signedAt','qboInvoiceId','qboInvoiceDocNumber','calendarHoldsStatus','_supabaseId','_migratedAt','notes','schemaVersion'];
+const CONTRACT_FINGERPRINT_IGNORED = ['payeeSnapshot','id','leadId','status','createdAt','updatedAt','approvedBy','approvedAt','approvedTermsFingerprint','versions','signedAt','clientSignature','qboInvoiceId','qboInvoiceDocNumber','calendarHoldsStatus','_supabaseId','_migratedAt','notes','schemaVersion'];
 function contractTermsFingerprint(c){
   const canon = v => Array.isArray(v) ? v.map(canon)
     : (v && typeof v==='object') ? Object.keys(v).sort().reduce((o,k)=>{ o[k]=canon(v[k]); return o; }, {})
@@ -1214,6 +1215,7 @@ function contractTermsFingerprint(c){
 function isContractApproved(c){ return !!c.approvedAt && c.approvedTermsFingerprint === contractTermsFingerprint(c); }
 async function doApproveContractForSending(id){
   const c = getContract(id); if(!c) return;
+  if(c.approvedTermsFingerprint && c.approvedTermsFingerprint!==contractTermsFingerprint(c)) revokeOpenSignLinks(c); // links to the old terms
   c.approvedBy = S.user; c.approvedAt = new Date().toISOString(); c.updatedAt = c.approvedAt;
   c.approvedTermsFingerprint = contractTermsFingerprint(c);
   saveContracts(); render();
@@ -1227,12 +1229,120 @@ async function doApproveContractForSending(id){
 }
 function doRevokeContractApproval(id){
   const c = getContract(id); if(!c) return;
+  revokeOpenSignLinks(c);
   c.approvedBy = null; c.approvedAt = null; c.approvedTermsFingerprint = null; c.updatedAt = new Date().toISOString();
   saveContracts(); render();
   if(supabaseClient && c._supabaseId){
     supabaseClient.from('contracts').update({ approved_by:null, approved_at:null }).eq('id', c._supabaseId)
       .then(({error})=>{ if(error) console.error('contract approval revoke sync failed', c.id, error); });
   }
+}
+
+/* ---- Client online signing (migration 0052, Edge Function contract-sign, ops/CONTRACT_SIGN_SETUP.md) ----
+   A signing link is a random token the client opens at /sign/#<token> (no login). The database keeps
+   only the token's SHA-256, a frozen copy of the wording, and which contract (id + createdAt -- ids can
+   be reused or re-numbered, the creation time can't) and terms (SHA-256 of the approved fingerprint)
+   it was made from. contract_sign_requests is the source of truth for "the client signed"; the server
+   never edits the contract. applyClientSignatures() does, in every admin browser, with the same values
+   (so it's idempotent): a signature to the contract's CURRENT terms marks it Signed; one to older
+   terms only shows a warning. A signature stays once applied -- a later void or status change by an
+   admin is never undone. Harness contracts get a "CT-TEST-" key unique to the test browser (their ids
+   are per-browser counters that would collide with real contracts); the server sends no email and
+   writes no gig log for them. 2026-10-13. */
+const isHarnessBrowser = ()=>!!(window.ASP_DISABLE_EVENT_SYNC || window.ASP_DISABLE_SHARED_SYNC);
+function signLinkContractKey(c){ return isHarnessBrowser() ? `CT-TEST-${c.id}-${Date.parse(c.createdAt)||0}` : c.id; }
+async function sha256Hex(str){
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function createSignLink(c, html, clientEmail){
+  if(!supabaseClient || !S.realSession) return { ok:false, error:'Sign in with your ASP account to make a signing link.' };
+  if(!isContractApproved(c)) return { ok:false, error:'This contract isn\'t approved for sending.' };
+  // The server checks the link against the shared copy of the contract, so send this one's latest first.
+  if(SHARED.contracts.on) await SHARED.contracts.flush();
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const token = btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  const { error } = await supabaseClient.from('contract_sign_requests').insert({
+    token_hash: await sha256Hex(token), contract_legacy_id: signLinkContractKey(c), contract_created_at: c.createdAt,
+    terms_sha256: await sha256Hex(c.approvedTermsFingerprint), event_legacy_id: isHarnessBrowser() ? null : (c.leadId||null),
+    brand_key: c.brand||null, client_name: c.snapshot.clientName||null, client_email: clientEmail||null, rendered_html: html,
+  });
+  if(error) return { ok:false, error:'Could not make a signing link: ' + error.message };
+  return { ok:true, url: `${location.origin}/sign/#${token}` };
+}
+// Cancels a contract's unsigned links (deleted, voided, approval revoked or replaced by new terms), so a
+// client can't sign terms that no longer stand. Best-effort: the app also refuses to apply a signature
+// to changed terms, and the server refuses to sign a void or deleted contract.
+function revokeOpenSignLinks(c){
+  if(!supabaseClient || !S.realSession || !isAdminUser(S.user)) return;
+  supabaseClient.from('contract_sign_requests').update({ revoked_at: new Date().toISOString() })
+    .eq('contract_legacy_id', signLinkContractKey(c)).eq('contract_created_at', c.createdAt)
+    .is('signed_at', null).is('revoked_at', null)
+    .then(({ error })=>{ if(error) console.warn('could not cancel signing links', c.id, error.message); });
+}
+// What the client receives: the contract as it reads once it has gone out. Rendered from a draft it
+// would carry a "Draft" status pill on the letterhead (every emailed contract did, until 2026-10-13).
+function clientContractHtml(c){ return contractEmailHtml(c.status==='draft' ? { ...c, status:'sent' } : c); }
+function contractEmailWithSignButton(html, url){
+  const button = `<div style="max-width:640px;margin:0 auto 16px;text-align:center;"><a href="${esc(url)}" style="display:inline-block;background:#4C6FA5;color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">Review &amp; sign online</a></div>`;
+  return html.replace('<body>', '<body>' + button);
+}
+async function doMakeSignLink(id){
+  const c = getContract(id); if(!c || S.signLinkBusy) return;
+  if(c.status==='void'){ toast('This contract is void — it can\'t be signed.', 'system'); return; }
+  if(c.status==='signed'){ toast('This contract is already signed. If you changed its terms, set its status back to Sent to send the new version for signing.', 'system'); return; }
+  if(!isContractApproved(c)){ toast(c.approvedAt ? 'Money/terms changed since this contract was approved — re-approve it first.' : 'Approve this contract for sending first — money/terms must be approved before a signing link can go out.', 'system'); return; }
+  S.signLinkBusy = id; render();
+  const link = await createSignLink(c, clientContractHtml(c), c.snapshot.clientEmail);
+  S.signLinkBusy = null;
+  if(!link.ok){ toast(link.error, 'system'); render(); return; }
+  S.signLinks = { ...(S.signLinks||{}), [id]: link.url };
+  // A link made for a draft is going out another way: same as marking it Sent by hand.
+  if(c.status==='draft'){ freezeContractPayee(c); c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); advanceLeadForContract(c, `Signing link made for contract ${c.id} (sent outside the app).`); }
+  render();
+  try{ await navigator.clipboard.writeText(link.url); toast('Signing link copied — paste it to the client.', 'success'); }
+  catch(e){ toast('Signing link ready — copy it from the box.', 'system'); }
+}
+// S.earlierClientSignatures: contract id → { name, at } -- signed online, but to terms since changed.
+async function applyClientSignatures(){
+  if(!supabaseClient || !S.realSession || !isAdminUser(S.user)) return;
+  const { data, error } = await supabaseClient.from('contract_sign_requests')
+    .select('id, contract_legacy_id, contract_created_at, terms_sha256, signer_name, signed_at')
+    .not('signed_at', 'is', null).order('signed_at');
+  if(error){ console.warn('could not load online signatures', error.message); return; }
+  const earlier = {};
+  let changed = false;
+  for(const c of CONTRACTS){
+    const mine = (data||[]).filter(r=>r.contract_legacy_id===signLinkContractKey(c) && r.contract_created_at===c.createdAt);
+    if(!mine.length) continue;
+    const terms = await sha256Hex(contractTermsFingerprint(c));
+    const r = mine.find(x=>x.terms_sha256===terms);   // the first signature to the current terms
+    if(!r){ const last = mine[mine.length-1]; earlier[c.id] = { name:last.signer_name, at:last.signed_at }; continue; }
+    if(c.status==='void' || (c.clientSignature && c.clientSignature.termsSha256===terms)) continue;
+    freezeContractPayee(c);
+    Object.assign(c, { status:'signed', signedAt:r.signed_at, updatedAt:r.signed_at,
+      clientSignature:{ name:r.signer_name, at:r.signed_at, requestId:r.id, termsSha256:r.terms_sha256, termsHash:hashStr(contractTermsFingerprint(c)) } });
+    changed = true;
+  }
+  const earlierChanged = canon(earlier)!==canon(S.earlierClientSignatures||{});
+  S.earlierClientSignatures = earlier;
+  if(changed) saveContracts();
+  if(changed || earlierChanged) renderPreservingFocus();
+}
+function earlierClientSignature(c){ return (S.earlierClientSignatures||{})[c.id] || null; }
+// Signed online, then the money/terms were edited: the signature is to terms the contract no longer has.
+function signedTermsChanged(c){ return !!(c.clientSignature && c.clientSignature.termsHash && c.clientSignature.termsHash!==hashStr(contractTermsFingerprint(c))); }
+let clientSignatureChannel = null;
+function startClientSignatureWatch(){
+  if(clientSignatureChannel || !supabaseClient || !S.realSession || !isAdminUser(S.user)) return;
+  clientSignatureChannel = supabaseClient.channel('contract-signatures')
+    .on('postgres_changes', { event:'UPDATE', schema:'public', table:'contract_sign_requests' }, ()=>applyClientSignatures())
+    .subscribe();
+  applyClientSignatures();
+}
+function stopClientSignatureWatch(){
+  if(clientSignatureChannel){ supabaseClient.removeChannel(clientSignatureChannel); clientSignatureChannel = null; }
+  S.earlierClientSignatures = {};
 }
 
 /* ---- Send Contract (real email, via the send-contract-email Supabase Edge Function) ---- */
@@ -1265,7 +1375,7 @@ async function doSendContractEmail(){
   if(!supabaseClient){ toast('Sign in with your ASP account to send email.', 'system'); return; }
   S.sendContractBusy = true; render();
   try{
-    const html = contractEmailHtml(c);
+    const html = clientContractHtml(c);
     const { data: { session } } = await supabaseClient.auth.getSession();
     // A session is required: falling back to the publishable key as a bearer token only produced
     // a confusing server-side auth failure (2026-10-09 audit 5.5).
@@ -1278,7 +1388,11 @@ async function doSendContractEmail(){
     // Retry-safe: re-sending after a prior failure re-runs the email step (send-contract-email has
     // no dedupe of its own yet), but never re-runs the QuickBooks step once it already succeeded --
     // c.qboInvoiceId is the idempotency marker.
-    const sent = await sendEmail({ to, subject, html, brand: c.brand });
+    // The sign-online button (the client signs the exact wording below it). If the link can't be
+    // made, the contract still goes out -- without the button -- and the admin is told.
+    const link = c.status==='signed' ? { ok:false } : await createSignLink(c, html, to);
+    if(!link.ok && link.error) toast(link.error + ' The contract will go out without the sign-online button.', 'system');
+    const sent = await sendEmail({ to, subject, html: link.ok ? contractEmailWithSignButton(html, link.url) : html, brand: c.brand });
     if(!sent.ok){ toast(sent.error, 'system'); return; }
     if(c.status==='draft'){ freezeContractPayee(c); c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); }
     // The real send is what moves the lead along (only forward: lead/negotiating -> contract_sent).
@@ -2447,7 +2561,7 @@ async function linkRealSessionToRosterNow(session){
   if(!adminRow) startArtistPortal(); // before the first paint, so no cached office gig ever shows
   render();
   await syncArtistRoster();
-  startSharedSync();
+  startSharedSync().then(startClientSignatureWatch); // after contracts load, so signatures land on them
 }
 // Load the roster from Supabase (any signed-in user may read it) and let it win: names, slots,
 // roles and emails come from the table, keyed in the app by legacy_id ('benny') or the row's uuid.
@@ -2539,6 +2653,7 @@ async function doRealSignInPasskey(){
 // Business data in this browser's storage is deliberately kept -- it is still the only copy.
 function resetAfterSignOut(){
   stopSharedSync();
+  stopClientSignatureWatch();
   stopArtistPortal();
   closeAllOverlays();
   S.user = null; S.realSession = null; S.realPasskeys = null; S.realRoster = null;
@@ -3399,7 +3514,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.1'; // bump on every release so a phone can tell it has updated. v1.9.1: artists read a name-only roster; splash once per session
+const APP_VERSION = 'v1.9.2'; // bump on every release so a phone can tell it has updated. v1.9.2: clients sign contracts online
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -6272,6 +6387,12 @@ function renderContractBuilderModal(){
             : `<span class="pill pill-wrap pill-neutral">Not yet approved — money/terms must be approved before this contract can be sent</span>
                <button class="btn btn-sm" data-action="approve-contract-for-sending" data-id="${c.id}">Approve for Sending</button>`}
         </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:8px 10px;border-radius:8px;background:var(--surface-2);">
+          ${c.clientSignature ? `<span class="pill pill-wrap ${signedTermsChanged(c) ? 'pill-warn' : 'pill-good'}">Signed online by ${esc(c.clientSignature.name)} — ${fmtDateShort(String(c.clientSignature.at).slice(0,10))}${signedTermsChanged(c) ? ' (terms changed since)' : ''}</span>` : ''}
+          ${c.clientSignature && !signedTermsChanged(c) ? '' : `${!c.clientSignature && earlierClientSignature(c) ? `<span class="pill pill-wrap pill-warn" style="flex:1 1 100%;">${esc(earlierClientSignature(c).name)} signed an earlier version online (${fmtDateShort(String(earlierClientSignature(c).at).slice(0,10))}) — the terms have changed since, so it isn't marked Signed. Send the current version to sign.</span>` : ''}<span style="font-size:12px;color:var(--ink-2);flex:1 1 220px;min-width:0;">Clients sign online: emailing the contract adds the link, or make one to send yourself.</span>
+               <button class="btn btn-sm btn-ghost" style="flex:none;" data-action="make-sign-link" data-id="${c.id}" ${S.signLinkBusy===c.id?'disabled':''}>${S.signLinkBusy===c.id?'Making link…':'Signing link'}</button>
+               ${S.signLinks && S.signLinks[c.id] ? `<input readonly data-testid="sign-link-url" aria-label="Signing link" value="${esc(S.signLinks[c.id])}" style="flex:1 1 100%;min-width:0;"/>` : ''}`}
+        </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
           <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Autofilled from the lead — editing here does not change the lead.</p>
           <button class="btn btn-sm btn-ghost" style="flex:none;" data-action="contract-refresh-from-lead" data-id="${c.id}">Refresh from Lead</button>
@@ -6575,7 +6696,7 @@ function renderContractSignBlock(c, signingPartyLabel){
   const signed = c.status==='signed';
   const signedDate = signed ? fmtDateShort((c.signedAt||c.updatedAt).slice(0,10)) : '';
   let block = `<div class="doc-sign">
-    <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc(c.snapshot.clientName||'Client')}</span><br/>Signed electronically &middot; ${signedDate}` : `<strong>&nbsp;</strong>Client Signature &middot; Date`}</div>
+    <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc((c.clientSignature&&c.clientSignature.name)||c.snapshot.clientName||'Client')}</span><br/>Signed electronically &middot; ${signedDate}` : `<strong>&nbsp;</strong>Client Signature &middot; Date`}</div>
     <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc(signingPartyLabel)}</span><br/>` : `<strong>&nbsp;</strong>`}For Artist, ${esc(signingPartyLabel)}</div>
   </div>`;
   if(c.boilerplate.acceptanceClause){
@@ -8024,6 +8145,7 @@ function registerAction(name, fn){
   ACTIONS[name] = fn;
 }
 registerAction('download-backup', ()=>doDownloadBackup());
+registerAction('make-sign-link', ({ id })=>doMakeSignLink(id));
 registerAction('external-link', ()=>{}); // the browser follows the link; nothing else happens
 registerAction('retry-artist-portal', ()=>loadArtistPortalData());
 registerAction('open-contract-doc', ({ id })=>{ S.contractBuilderId = id; S.showContractBuilderDoc = true; render(); });
@@ -8420,7 +8542,7 @@ function bindGlobal(){
       case 'contractbuilder-overlay-close': if(e.target===t){ S.showContractBuilder=false; S.contractBuilderId=null; render(); } break;
       case 'contract-refresh-from-lead': doRefreshContractFromLead(S.contractBuilderId); break;
       case 'delete-contract': doDeleteContract(S.contractBuilderId); break;
-      case 'set-contract-status': { const c=getContract(S.contractBuilderId); if(c){ c.status=t.getAttribute('data-status'); if(c.status==='sent' || c.status==='signed') freezeContractPayee(c); if(c.status==='signed' && !c.signedAt) c.signedAt=new Date().toISOString(); c.updatedAt=new Date().toISOString(); saveContracts(); if(c.status==='sent' || c.status==='signed') advanceLeadForContract(c, `Contract ${c.id} marked ${c.status} by hand (sent outside the app).`); } render(); break; }
+      case 'set-contract-status': { const c=getContract(S.contractBuilderId); if(c){ c.status=t.getAttribute('data-status'); if(c.status==='void') revokeOpenSignLinks(c); if(c.status==='sent' || c.status==='signed') freezeContractPayee(c); if(c.status==='signed' && !c.signedAt) c.signedAt=new Date().toISOString(); c.updatedAt=new Date().toISOString(); saveContracts(); if(c.status==='sent' || c.status==='signed') advanceLeadForContract(c, `Contract ${c.id} marked ${c.status} by hand (sent outside the app).`); } render(); break; }
       case 'approve-contract-for-sending': doApproveContractForSending(id); break;
       case 'revoke-contract-approval': doRevokeContractApproval(id); break;
       case 'pick-contract-overtime-interval': { const c=getContract(S.contractBuilderId); if(c){ c.overtime.interval=t.getAttribute('data-value'); refreshAutoOvertime(c); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }

@@ -37,6 +37,9 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0049_tighten_client_grants | Applied 2026-10-12 — audit 1.4 safe slice: anon/authenticated lose TRUNCATE/TRIGGER/REFERENCES everywhere (TRUNCATE skips RLS), write grants on the read-only artist views, and all access to the token tables; same for future tables. Isolation check ALL OK after. |
 | 0050_artist_directory | Applied 2026-10-13 — name-only `artist_directory` view for every signed-in user; artist sessions read it (v1.9.1). |
 | 0051_artists_own_row_only | Applied 2026-10-13 (after v1.9.1 went live) — artists read only their own `artists` row; other artists' emails and commission rates are admin-only. |
+| 0052_contract_sign_requests | Applied 2026-10-13 — clients sign contracts online: `contract_sign_requests` + `sign_contract_request()` (service role only). See `ops/CONTRACT_SIGN_SETUP.md`. |
+| 0053_drop_artist_bookings_rpc | Applied 2026-10-13 — drops `artist_bookings()` (any artist could call it and get their leads + fee columns); activity_log's artist read now scopes through `artist_gig_view`. Isolation check ALL OK. |
+| 0054_rls_auth_uid_once | Applied 2026-10-13 — five RLS policies evaluate auth.uid() once per query (performance advisor); duplicate user_settings read policy dropped. Isolation check ALL OK. |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in

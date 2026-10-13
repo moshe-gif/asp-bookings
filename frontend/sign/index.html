@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8" />
+<title>Review &amp; Sign</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex" />
+<meta name="referrer" content="no-referrer" />
+<link rel="icon" type="image/png" href="../icon-192.png" />
+<!-- The client's contract signing page (migration 0052, Edge Function contract-sign). Standalone on
+     purpose: clients aren't ASP users, so this page loads none of the app, no sign-in and no
+     supabase-js -- just the contract (in a sandboxed frame that can't run scripts) and the signing
+     form. The link's token is after the "#", so the browser never sends it to any server except in
+     the POST body to contract-sign. -->
+<style>
+  :root{
+    --page:#F5F4EF; --surface:#FFFFFF; --ink:#17171A; --ink-2:#67676D; --ink-3:#9A9AA1;
+    --border:#E1E1E6; --border-strong:#D1D1D8; --accent:#4C6FA5; --accent-hover:#3D5C8C;
+    --good:#2F7D5B; --good-wash:#E3F1EA; --bad:#A4473B;
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--page); color:var(--ink); font:15px/1.5 Inter,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap{ max-width:720px; margin:0 auto; padding:24px 16px calc(32px + env(safe-area-inset-bottom)); }
+  .top{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
+  .brand{ font-weight:700; font-size:1.05rem; }
+  .label{ font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-3); font-weight:700; }
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 1px 2px rgba(23,23,26,.04),0 4px 14px rgba(23,23,26,.04); }
+  iframe{ display:block; width:100%; border:0; border-radius:10px; min-height:400px; background:var(--page); }
+  .panel{ padding:20px; margin-top:16px; }
+  .panel h2{ margin:0 0 4px; font-size:1.15rem; font-weight:600; }
+  .muted{ color:var(--ink-2); font-size:13.5px; margin:0 0 14px; }
+  .field{ display:block; margin-bottom:12px; }
+  .field span{ display:block; font-size:12.5px; font-weight:600; margin-bottom:4px; }
+  input[type=text], input[type=email]{ width:100%; padding:10px 12px; border:1px solid var(--border-strong); border-radius:8px; font:inherit; background:#fff; color:var(--ink); }
+  input:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  .sigpreview{ min-height:44px; font-family:"Snell Roundhand","Segoe Script","Brush Script MT",cursive; font-size:1.8rem; border-bottom:1px solid var(--ink); margin:4px 0 14px; padding:0 4px; overflow-wrap:anywhere; }
+  .consent{ display:flex; gap:10px; align-items:flex-start; font-size:13.5px; color:var(--ink-2); margin-bottom:16px; }
+  .consent input{ margin-top:3px; width:18px; height:18px; flex:none; }
+  .btn{ display:inline-flex; align-items:center; justify-content:center; padding:11px 18px; border-radius:8px; border:1px solid transparent; font:inherit; font-weight:600; cursor:pointer; transition:background .15s; }
+  .btn-primary{ background:var(--accent); color:#fff; width:100%; }
+  .btn-primary:hover{ background:var(--accent-hover); }
+  .btn-primary:disabled{ opacity:.55; cursor:default; }
+  .btn-ghost{ background:var(--surface); border-color:var(--border-strong); color:var(--ink); }
+  .err{ color:var(--bad); font-size:13.5px; margin:10px 0 0; min-height:1em; }
+  .done{ display:flex; gap:12px; align-items:center; padding:16px 20px; margin-bottom:16px; background:var(--good-wash); border-color:transparent; color:var(--good); }
+  .done strong{ color:var(--ink); }
+  .msg{ padding:32px 20px; text-align:center; }
+  .msg h1{ font-size:1.25rem; margin:0 0 6px; }
+  @media print{ .top, .panel, .done .btn{ display:none !important; } body{ background:#fff; } .wrap{ padding:0; max-width:none; } iframe{ border-radius:0; } }
+</style>
+
+<div class="wrap" id="root"><div class="card msg"><p class="muted">Loading your contract…</p></div></div>
+
+<script>
+(function(){
+  const FN = 'https://psgpxbkncuavlnpplykf.supabase.co/functions/v1/contract-sign';
+  const root = document.getElementById('root');
+  let token = '';
+  try{ token = decodeURIComponent((location.hash||'').replace(/^#/, '')); }catch(e){}
+  const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmt = iso => new Date(iso).toLocaleString(undefined, { dateStyle:'long', timeStyle:'short' });
+  const MESSAGES = {
+    not_found: ['This link doesn’t work', 'Check that you opened the whole link from your email, or ask us to send it again.'],
+    void:      ['This contract is no longer open for signing', 'It was cancelled or replaced. Please contact us if you think this is a mistake.'],
+    revoked:   ['This link is no longer active', 'The contract was changed or withdrawn. Please use the link in the most recent email from us, or contact us.'],
+    expired:   ['This link has expired', 'Ask us to send the contract again and we’ll send a fresh link.'],
+    server:    ['Something went wrong', 'Please try again in a minute.'],
+  };
+
+  async function call(body){
+    try{
+      const r = await fetch(FN, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(Object.assign({ token }, body)) });
+      return await r.json().catch(()=>({ ok:false, error:'server' }));
+    }catch(e){ return { ok:false, error:'network' }; }
+  }
+  function showMessage(code){
+    const [h, p] = MESSAGES[code] || (code==='network' ? ['No connection', 'Check your internet connection and reload this page.'] : MESSAGES.server);
+    root.innerHTML = `<div class="card msg"><h1>${esc(h)}</h1><p class="muted" style="margin:0;">${esc(p)}</p></div>`;
+  }
+
+  // The contract shows in a sandboxed frame: its own styles stay intact and it can never run script.
+  function frame(html){
+    const f = document.createElement('iframe');
+    f.setAttribute('sandbox', 'allow-same-origin');
+    f.title = 'Contract';
+    f.srcdoc = html;
+    const fit = ()=>{ try{ f.style.height = (f.contentDocument.documentElement.scrollHeight + 4) + 'px'; }catch(e){} };
+    f.addEventListener('load', ()=>{ fit(); setTimeout(fit, 300); });
+    window.addEventListener('resize', fit);
+    return f;
+  }
+
+  function render(d){
+    root.innerHTML = `<div class="top"><div><div class="label">Contract ${esc(d.contractId)}</div><div class="brand">${esc(d.brandName)}</div></div>
+      ${d.signed ? '<button class="btn btn-ghost" id="print">Print / Save PDF</button>' : ''}</div>
+      ${d.signed ? `<div class="card done" data-testid="signed-banner"><div><strong>Signed by ${esc(d.signed.name)}</strong><br/>${esc(fmt(d.signed.at))}. Thank you! Use Print / Save PDF to keep a copy; this link keeps working too.</div></div>` : ''}
+      <div id="doc"></div>
+      ${d.signed ? '' : `<form class="card panel" id="signform" novalidate>
+        <h2>Sign this contract</h2>
+        <p class="muted">Please read the contract above. Type your full name to sign.</p>
+        <label class="field"><span>Full name</span><input type="text" id="name" autocomplete="name" maxlength="120" value="${esc(d.clientName)}" required/></label>
+        <div class="sigpreview" id="preview" aria-hidden="true">${esc(d.clientName)}</div>
+        <label class="field"><span>Email for your signed copy <span style="font-weight:400;color:var(--ink-3);">(optional)</span></span><input type="email" id="email" autocomplete="email" maxlength="200"/></label>
+        <label class="consent"><input type="checkbox" id="agree"/><span>${esc(d.consentText)}</span></label>
+        <button class="btn btn-primary" id="signbtn" type="submit">Sign contract</button>
+        <p class="err" id="err" role="alert"></p>
+      </form>`}`;
+    document.getElementById('doc').appendChild(frame(d.html));
+    const p = document.getElementById('print');
+    // The page prints itself (its print styles hide everything but the contract); the sandboxed frame
+    // isn't allowed to open a print dialog.
+    if(p) p.onclick = ()=>window.print();
+    const form = document.getElementById('signform');
+    if(!form) return;
+    const name = document.getElementById('name'), preview = document.getElementById('preview');
+    name.addEventListener('input', ()=>{ preview.textContent = name.value; });
+    form.addEventListener('submit', async ev=>{
+      ev.preventDefault();
+      const err = document.getElementById('err'), btn = document.getElementById('signbtn');
+      const n = name.value.trim(), email = document.getElementById('email').value.trim();
+      if(n.length < 2){ err.textContent = 'Type your full name to sign.'; name.focus(); return; }
+      if(email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ err.textContent = 'That email address doesn’t look right.'; return; }
+      if(!document.getElementById('agree').checked){ err.textContent = 'Tick the box to agree to sign electronically.'; return; }
+      err.textContent = ''; btn.disabled = true; btn.textContent = 'Signing…';
+      const res = await call({ action:'sign', name:n, email, agree:true });
+      if(!res.ok){
+        btn.disabled = false; btn.textContent = 'Sign contract';
+        if(MESSAGES[res.error] && res.error!=='server'){ showMessage(res.error); return; }
+        err.textContent = res.error==='network' ? 'No connection — check your internet and try again.' : 'Something went wrong — please try again.';
+        return;
+      }
+      load();
+    });
+  }
+
+  async function load(){
+    if(!/^[A-Za-z0-9_-]{43}$/.test(token)){ showMessage('not_found'); return; }
+    const d = await call({ action:'view' });
+    if(!d.ok){ showMessage(d.error); return; }
+    render(d);
+  }
+  load();
+})();
+</script>
+</html>
