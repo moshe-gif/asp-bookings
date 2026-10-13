@@ -124,7 +124,7 @@ begin
       n := (select count(*) from artist_finance_view where legacy_id in ('EV-ISO-2','EV-ISO-5','EV-ISO-6') and is_shared and money_pending and gross_amount is null and net_amount is null);
       all_ok := all_ok and n = 3; res := res || format(E'\n%s | %s | fixture: no package money (incl. outside act, package scope) | rows=%s', case when n = 3 then 'ok  ' else 'FAIL' end, a.name, n);
       n := (select count(*) from artist_gig_view where legacy_id = 'EV-ISO-2' and is_primary and flight is not null
-              and co_performers = (select jsonb_build_array(jsonb_build_object('name', x.name, 'role', 'Harmony')) from artists x where x.legacy_id = 'eli'));
+              and co_performers = (select jsonb_build_array(jsonb_build_object('name', x.name, 'role', 'Harmony')) from artist_directory x where x.legacy_id = 'eli'));
       all_ok := all_ok and n = 1; res := res || format(E'\n%s | %s | fixture: primary gets travel + co-performer name/role | rows=%s', case when n = 1 then 'ok  ' else 'FAIL' end, a.name, n);
     elsif a.legacy_id = 'eli' then
       n := (select count(*) from artist_gig_view where legacy_id = 'EV-ISO-2' and not is_primary and flight is null and flight_needed is null and ground_transport is null);
