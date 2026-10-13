@@ -32,6 +32,7 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0044_office_email_everywhere | Applied 2026-10-12 — reply-to and office email = office@aspmgmt.com for both brands (owner). |
 | 0045_email_sends_service_role | Applied 2026-10-12 — service_role can record/count sends (first real send went out unlogged). |
 | 0046_service_role_table_access | Applied 2026-10-12 — service_role gets the standard table access (it had none: Edge Function writes/reads were failing or silently empty). Note: table `qbo_connection` (0009) does not exist — create it before QuickBooks go-live. |
+| 0047_artist_gig_view_office_days | Applied 2026-10-12 — artists also see their office days (`unpaid` internal days; no money row); never leads (owner). |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in

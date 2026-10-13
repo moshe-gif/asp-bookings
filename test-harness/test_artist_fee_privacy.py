@@ -95,3 +95,17 @@ def test_financials_use_each_gigs_percent_and_no_owes(live_server, page):
     assert "Amount being confirmed" in body, "shared gig isn't marked as being confirmed on Financials"
     assert not OWES.search(body), "owes wording on the artist's Financials"
     assert not errors, f"console errors on Financials as an artist: {errors}"
+
+
+def test_office_day_shows_without_money(live_server, page):
+    """Owner 2026-10-12: artists see their office days (never leads); an office day has no money."""
+    errors = collect_console_errors(page)
+    seed_events(page, BENNY_GIGS + [fake_gig("EV-9003", "benny", "2099-05-01", unpaid=True, status="scheduled",
+                                             type="Recording Day", clientName=None, price=0, commission=0)])
+    page.goto(live_server)
+    login_as(page, "benny")
+    goto_nav(page, "a_gigs", mobile=False)
+    row = page.locator('tr[data-action="open-event"][data-id="EV-9003"]').inner_text()
+    assert "Recording Day" in row and "Office day" in row, "office day missing or mislabeled on My Gigs"
+    assert "$" not in row and "Being confirmed" not in row, "an office day shows money"
+    assert not errors, f"console errors: {errors}"

@@ -1782,6 +1782,7 @@ function artistMoney(ev){
 function fmtPct(p){ return `${Number(Number(p).toFixed(2))}%`; }
 // Artist-facing status: about the artist's money, never what a client still owes.
 function artistGigStatus(ev){
+  if(ev.unpaid) return { label: isPast(ev.date) ? 'Completed' : 'Office day', cls:'pill-neutral' };
   if(ev.artistPaidOut) return { label: ev.artistPaidOutDate ? `Paid to you ${fmtDateShort(ev.artistPaidOutDate)}` : 'Paid to you', cls:'pill-good' };
   if(ev.balanceReceived) return { label:'Client balance received', cls:'pill-good' };
   if(artistMoney(ev).pending) return { label:'Amount being confirmed', cls:'pill-neutral' };
@@ -2349,7 +2350,7 @@ function artistPortalEvent(g, m, artistId){
   const pending = !m || !!m.money_pending;
   const num = v=>(v===null || v===undefined || pending) ? 0 : Number(v)||0;
   return {
-    id: g.legacy_id || g.event_id, artistId, fromArtistPortal: true,
+    id: g.legacy_id || g.event_id, artistId, fromArtistPortal: true, unpaid: !!g.unpaid,
     type: g.type || 'Other', status: g.status, date: day(g.date), time: g.time || '', endTime: g.end_time || null,
     clientName: g.client_name || '', clientPhone: g.client_phone || '', clientEmail: g.client_email || '',
     venue: g.venue || '', address: g.address || '', city: g.city || '', state: g.state || '', mapQuery: g.map_query || '',
@@ -3393,7 +3394,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.8.0'; // bump on every release so a phone can tell it has updated. v1.8.0: honest activity log, office@ everywhere
+const APP_VERSION = 'v1.9.0'; // bump on every release so a phone can tell it has updated. v1.9.0: artists see office days (never leads)
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -4934,7 +4935,7 @@ function renderArtistGigTable(events){
         <td data-label="Type">${esc(e.type)}</td>
         <td data-label="Date &amp; Time" class="u-mono">${fmtDateShort(e.date)} · ${esc(fmtTimeRange(e.time, e.endTime))}</td>
         <td data-label="Location"><span style="display:block;min-width:0;">${e.venue ? esc(e.venue) : (hasLocation(e) ? esc(fullLocation(e)) : '—')}${renderMapLinks(e)}</span></td>
-        <td data-label="You Receive" class="u-mono">${m.pending ? 'Being confirmed' : money(m.net)}</td>
+        <td data-label="You Receive" class="u-mono">${e.unpaid ? '—' : m.pending ? 'Being confirmed' : money(m.net)}</td>
         <td data-label="Status"><span class="pill ${st.cls}">${esc(st.label)}</span></td>
       </tr>`; }).join('')}
     </tbody></table></div>`;

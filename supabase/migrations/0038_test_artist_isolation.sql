@@ -1,4 +1,4 @@
--- 0038 isolation test. Run in Supabase SQL editor AFTER 0038_artist_portal_views.sql, 0039 and 0043.
+-- 0038 isolation test. Run in Supabase SQL editor AFTER 0038_artist_portal_views.sql, 0039, 0043 and 0047.
 -- Not a migration: a check you run by hand. Applied: n/a (writes nothing).
 --
 -- The whole test is ONE statement (a DO block) that always ends by raising an exception, so
@@ -26,6 +26,7 @@
 --   EV-ISO-4  eli solo, paid, $8,000                             -> eli only
 --   EV-ISO-5  benny primary + an outside act with no artists row -> benny: shared, no money
 --   EV-ISO-6  benny alone, but priceScope 'Client package' (0043)  -> benny: no money
+--   EV-ISO-7  benny office day (Recording Day, unpaid; 0047)        -> benny sees it, no money row
 -- Inserting into events also queues the axis_sync_events webhook, but pg_net only sends after
 -- COMMIT, and this statement never commits.
 
@@ -35,6 +36,7 @@ declare
   n int;
   m int;
   expected uuid[];
+  expected_money uuid[];
   all_ok boolean := true;
   res text := '';
   eli_id uuid := (select id from artists where legacy_id = 'eli');
@@ -46,7 +48,8 @@ begin
     ('{"id":"EV-ISO-3","artistId":"benny","status":"lead","type":"Bar Mitzvah","date":"2099-01-03","price":5000,"commission":750,"clientName":"Isolation Lead"}'),
     ('{"id":"EV-ISO-4","artistId":"eli","status":"paid","type":"Concert","date":"2099-01-04","price":8000,"commission":800,"clientName":"Isolation Client Four"}'),
     ('{"id":"EV-ISO-5","artistId":"benny","additionalArtists":[{"artistId":"outside-act-not-on-roster","feeAmount":4000}],"status":"booked","type":"Wedding","date":"2099-01-05","price":15000,"commission":2250,"clientName":"Isolation Client Five"}'),
-    ('{"id":"EV-ISO-6","artistId":"benny","priceScope":"Client package","status":"booked","type":"Concert","date":"2099-01-06","price":59000,"commission":0,"clientName":"Isolation Client Six"}');
+    ('{"id":"EV-ISO-6","artistId":"benny","priceScope":"Client package","status":"booked","type":"Concert","date":"2099-01-06","price":59000,"commission":0,"clientName":"Isolation Client Six"}'),
+    ('{"id":"EV-ISO-7","artistId":"benny","unpaid":true,"status":"scheduled","type":"Recording Day","date":"2099-01-07","price":0,"commission":0}');
   if eli_id is not null then
     insert into event_artists (event_id, artist_id, role, fee_amount, asp_cut, net_amount)
     select id, eli_id, 'Harmony', 9000, 900, 8100 from events where legacy_id = 'EV-ISO-2';
@@ -59,12 +62,14 @@ begin
   for a in select id, name, user_id, legacy_id from artists where user_id is not null order by name loop
     -- what this artist SHOULD see, from the gig documents, as superuser
     select coalesce(array_agg(e.id), '{}') into expected from events e
-     where e.status in ('booked','paid') and e.booking_type = 'gig'
+     where (e.status in ('booked','paid') or e.unpaid) and e.booking_type = 'gig'
        and (e.artist_id = a.id
             or exists (select 1 from event_artists ea where ea.event_id = e.id and ea.artist_id = a.id)
             or exists (select 1 from jsonb_array_elements(case when jsonb_typeof(e.app_doc->'additionalArtists') = 'array'
                                                                then e.app_doc->'additionalArtists' else '[]'::jsonb end) x
                         where x->>'artistId' in (a.legacy_id, a.id::text)));
+    select coalesce(array_agg(e.id), '{}') into expected_money from events e
+     where e.id = any(expected) and e.status in ('booked','paid');
 
     perform set_config('request.jwt.claims', json_build_object('sub', a.user_id, 'role', 'authenticated')::text, true);
     set local role authenticated;
@@ -86,8 +91,8 @@ begin
     m := (select count(*) from unnest(expected) x where x not in (select event_id from artist_gig_view));
     all_ok := all_ok and n = 0 and m = 0;
     res := res || format(E'\n%s | %s | gig view = exactly own gigs | foreign=%s missing=%s', case when n = 0 and m = 0 then 'ok  ' else 'FAIL' end, a.name, n, m);
-    n := (select count(*) from artist_finance_view where not (event_id = any(expected)));
-    m := (select count(*) from unnest(expected) x where x not in (select event_id from artist_finance_view));
+    n := (select count(*) from artist_finance_view where not (event_id = any(expected_money)));
+    m := (select count(*) from unnest(expected_money) x where x not in (select event_id from artist_finance_view));
     all_ok := all_ok and n = 0 and m = 0;
     res := res || format(E'\n%s | %s | finance view = exactly own gigs | foreign=%s missing=%s', case when n = 0 and m = 0 then 'ok  ' else 'FAIL' end, a.name, n, m);
 
@@ -105,6 +110,9 @@ begin
 
     -- 5. fixture expectations
     if a.legacy_id = 'benny' then
+      n := (select count(*) from artist_gig_view where legacy_id = 'EV-ISO-7' and unpaid)
+         + (select count(*) from artist_finance_view where legacy_id = 'EV-ISO-7');
+      all_ok := all_ok and n = 1; res := res || format(E'\n%s | %s | fixture: office day visible, no money row | n=%s', case when n = 1 then 'ok  ' else 'FAIL' end, a.name, n);
       n := (select count(*) from artist_finance_view where legacy_id = 'EV-ISO-1' and gross_amount = 10000 and asp_cut = 1000 and asp_cut_pct = 10 and net_amount = 9000 and not money_pending);
       all_ok := all_ok and n = 1; res := res || format(E'\n%s | %s | fixture: solo gig money + 10%% | rows=%s', case when n = 1 then 'ok  ' else 'FAIL' end, a.name, n);
       n := (select count(*) from artist_finance_view where legacy_id in ('EV-ISO-2','EV-ISO-5','EV-ISO-6') and is_shared and money_pending and gross_amount is null and net_amount is null);
