@@ -211,8 +211,8 @@ For a "enter a flight/confirmation number, get live status updates" feature (ASP
 ---
 
 ## The meta-rules (apply to every integration)
-1. **Secrets server-side only**, in gitignored/`600` files outside the deployed git dir; the proxy
-   injects them.
+1. **Secrets server-side only.** Here: Supabase Edge Function secrets (never `frontend/`, which is
+   public). Generic kit wording about a proxy / `600` files doesn't apply to this repo.
 2. **Prefer keyless/free tiers that don't gate the core flow** (Esri tiles, Nominatim, Apps
    Script relay) — but know each one's quota and have a fallback before it's load-bearing.
 3. **Every unattended job needs a failure channel** (fallback chain + local artifact). Quota
@@ -220,3 +220,22 @@ For a "enter a flight/confirmation number, get live status updates" feature (ASP
 4. **Do the fee math** on percentage-vs-fixed pricing (Stripe's $0.30, per-MB vs bundled data)
    against YOUR average transaction before choosing a provider.
 5. **New integration = run `/harden` on the touched surface** before calling it done.
+
+## Adding an integration to ASP Bookings (the extension points)
+Every live integration here has the same five parts. Copy the nearest existing one (QuickBooks is
+the fullest example) instead of inventing a new shape.
+1. **Edge Function(s)** in `supabase/functions/<name>/`, built on `functions/_shared/`:
+   `http.ts` (CORS allowlist + `jsonFor`/`preflight`/`readJson`), `auth.ts` (`requireAdmin`,
+   `serviceClient`), `config.ts` (`appUrl`, `brandFor`), `deps.ts` (pinned imports),
+   `oauth.ts` (`consumeOAuthState` -- every OAuth callback must use it). Deploy with
+   `supabase/deploy-function.sh <name>`. JWT verification stays on except for OAuth callbacks
+   and webhooks, which verify their own signature/state.
+2. **Migration** in `supabase/migrations/` for any table. Token tables: RLS on, no policies, no
+   anon/authenticated grants (service role only, see 0049). Add the ledger row in
+   `supabase/README.md`.
+3. **Ops doc** `ops/<NAME>_SETUP.md`: the owner's console steps, secret names, and how to verify.
+4. **Settings card** in `asp.js` (`render<Name>Card()` in `renderSettingsPage`) that shows the
+   real status from a `<name>-status` function, never a stored flag.
+5. **Harness spec** in `test-harness/` plus a registry line in its README. Tests never call the
+   live third party; they check the app's behavior around it.
+Then run `/harden` on the new surface.

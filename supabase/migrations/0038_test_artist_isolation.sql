@@ -86,6 +86,12 @@ begin
     n := (select count(*) from app_records);
     all_ok := all_ok and n = 0; res := res || format(E'\n%s | %s | app_records direct read is empty | rows=%s', case when n = 0 then 'ok  ' else 'FAIL' end, a.name, n);
 
+    -- 1b. roster: only their own artists row; the directory has every name but no email/commission (0050/0051)
+    n := (select count(*) from artists where id <> a.id);
+    all_ok := all_ok and n = 0; res := res || format(E'\n%s | %s | artists: no other artist''s row | rows=%s', case when n = 0 then 'ok  ' else 'FAIL' end, a.name, n);
+    n := (select count(*) from artist_directory);
+    all_ok := all_ok and n > 1; res := res || format(E'\n%s | %s | artist_directory lists the roster | rows=%s', case when n > 1 then 'ok  ' else 'FAIL' end, a.name, n);
+
     -- 2. views contain exactly this artist's gigs
     n := (select count(*) from artist_gig_view where not (event_id = any(expected)));
     m := (select count(*) from unnest(expected) x where x not in (select event_id from artist_gig_view));

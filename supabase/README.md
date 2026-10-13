@@ -35,6 +35,8 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0047_artist_gig_view_office_days | Applied 2026-10-12 — artists also see their office days (`unpaid` internal days; no money row); never leads (owner). |
 | 0048_qbo_connection | Applied 2026-10-12 — recreates `qbo_connection` (0009's table was missing from the database); service role only. |
 | 0049_tighten_client_grants | Applied 2026-10-12 — audit 1.4 safe slice: anon/authenticated lose TRUNCATE/TRIGGER/REFERENCES everywhere (TRUNCATE skips RLS), write grants on the read-only artist views, and all access to the token tables; same for future tables. Isolation check ALL OK after. |
+| 0050_artist_directory | Applied 2026-10-13 — name-only `artist_directory` view for every signed-in user; artist sessions read it (v1.9.1). |
+| 0051_artists_own_row_only | Applied 2026-10-13 (after v1.9.1 went live) — artists read only their own `artists` row; other artists' emails and commission rates are admin-only. |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in

@@ -163,3 +163,30 @@ def test_second_artists_gigs_never_appear(live_server, browser):
     ctx.close()
     if not eli_rows["gigs"]:
         pytest.skip("eli has no booked/paid gigs in artist_gig_view -- nothing of theirs to leak; isolation checked only structurally")
+
+
+def test_artist_never_loads_other_artists_private_roster_fields(live_server, browser):
+    """Other artists' emails and commission rates stay with the office (0050/0051): an artist's
+    session reads the name-only artist_directory, and the artists table gives them their own row only."""
+    ctx = _live_artist_context(browser)
+    page = ctx.new_page()
+    urls = []
+    page.on("request", lambda r: urls.append(r.url) if "/rest/v1/artists" in r.url else None)
+    _sign_in(page, live_server, "benny")
+    page.wait_for_timeout(1500)  # roster sync runs right after sign-in
+
+    private = [u for u in urls if re.search(r"commission_pct|email|select=\*", u) and "user_id=eq." not in u]
+    assert not private, f"artist session asked for private roster fields: {private}"
+    seen = page.evaluate("""async () => {
+        const [own, dir] = await Promise.all([
+          window.supabaseClient.from('artists').select('id'),
+          window.supabaseClient.from('artist_directory').select('*'),
+        ]);
+        return { own: (own.data || []).length, dir: dir.data || [], err: (own.error || dir.error || {}).message || null };
+    }""")
+    assert not seen["err"], seen["err"]
+    assert seen["own"] == 1, f"artist can read {seen['own']} artists rows (expected only their own)"
+    assert len(seen["dir"]) > 1, "artist_directory doesn't list the roster"
+    assert not any(k in row for row in seen["dir"] for k in ("email", "commission_pct", "user_id")), \
+        "artist_directory exposes private columns"
+    ctx.close()

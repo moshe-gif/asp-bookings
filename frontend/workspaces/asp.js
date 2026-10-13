@@ -2457,7 +2457,11 @@ async function linkRealSessionToRosterNow(session){
 const ROSTER_SYNCED_KEY = 'asp_sync_artists';
 async function syncArtistRoster(){
   if(!supabaseClient || !S.realSession) return;
-  const { data: rows, error } = await supabaseClient.from('artists').select('id, legacy_id, name, slot, initials, email, role, commission_pct').order('created_at');
+  // Artists read the name-only directory (0050): other artists' emails and commission rates are
+  // the office's business, not theirs. Only admins read the full table.
+  const { data: rows, error } = isAdminUser(S.user)
+    ? await supabaseClient.from('artists').select('id, legacy_id, name, slot, initials, email, role, commission_pct').order('created_at')
+    : await supabaseClient.from('artist_directory').select('id, legacy_id, name, slot, initials, role').order('created_at');
   if(error || !rows){ if(error) console.error('roster load failed', error); return; }
   const appIdOf = r=>r.legacy_id || r.id;
   const onServer = new Set(rows.map(appIdOf));
@@ -2470,7 +2474,8 @@ async function syncArtistRoster(){
     }
   }
   rows.forEach(r=>{
-    const fields = { name:r.name, slot:r.slot, initials:r.initials, email:r.email||'', role:r.role, dbId:r.id,
+    const fields = { name:r.name, slot:r.slot, initials:r.initials, role:r.role, dbId:r.id,
+      ...(r.email!==undefined ? { email:r.email||'' } : {}),
       ...(r.commission_pct!==undefined && r.commission_pct!==null ? { commissionPct: Number(r.commission_pct) } : {}) };
     const a = ARTISTS.find(x=>x.id===appIdOf(r));
     if(a) Object.assign(a, fields); else ARTISTS.push({ id:appIdOf(r), ...fields });
@@ -3394,7 +3399,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.0'; // bump on every release so a phone can tell it has updated. v1.9.0: artists see office days (never leads)
+const APP_VERSION = 'v1.9.1'; // bump on every release so a phone can tell it has updated. v1.9.1: artists read a name-only roster; splash once per session
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -8697,6 +8702,10 @@ if('serviceWorker' in navigator){
   const opener = document.getElementById('opener');
   if(!opener) return;
   if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){ opener.remove(); return; }
+  // Plays once per browser session (audit 4.11): a reload or deep link opens straight to the app.
+  let seen = false;
+  try{ seen = sessionStorage.getItem('asp_opener_seen')==='1'; sessionStorage.setItem('asp_opener_seen','1'); }catch(e){}
+  if(seen){ opener.remove(); return; }
   const mark = opener.querySelector('.opener-mark');
   let done = false;
   function finish(){

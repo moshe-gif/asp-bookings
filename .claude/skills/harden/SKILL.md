@@ -9,6 +9,14 @@ Audit the target, then produce a findings table (✅ solid / ⚠️ weak / ❌ b
 Prefer to VERIFY live, not assume (e.g. probe an endpoint, attempt an unauthenticated read) — read-only checks only,
 never destructive. After reporting, offer to apply the fixes.
 
+## In this repo (ASP Bookings)
+There is no proxy: the browser talks to Supabase directly, and server code is the Edge Functions in
+`supabase/functions/`. So read the checklist as: secrets = Edge Function secrets; auth-gating =
+`_shared/auth.ts requireAdmin` + JWT verification; CORS = `_shared/http.ts`; database rules = RLS
+policies **and** table grants (check `information_schema.role_table_grants` for anon/authenticated;
+TRUNCATE ignores RLS); the artist boundary = `supabase/migrations/0038_test_artist_isolation.sql`
+(run it with `supabase/run-sql.sh`, expect ALL OK). The repo is public -- also check for PII.
+
 ## Checklist
 1. **Secrets server-side only** — no API keys in client/browser code; proxy injects them.
 2. **Auth-gating** — every `/api/*` (non-public) route requires a verified identity token (signature + iss/aud/exp +
