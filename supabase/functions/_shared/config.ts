@@ -9,7 +9,7 @@ export function appUrl(): string {
 
 export type Brand = { key: string; senderName: string; replyTo: string | null };
 
-// The sender for one brand key ('asp' | 'sing'); unknown keys get the default brand. Falls back to
+// The sender for one brand key (only 'asp' since SING was removed, 0055); unknown keys get the default brand. Falls back to
 // the seeded ASP values (and the REPLY_TO secret, kept for compatibility) if the table can't be read,
 // so email never fails over branding.
 // deno-lint-ignore no-explicit-any

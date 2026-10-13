@@ -269,7 +269,7 @@ function migrateOutsideBooking(b){
 }
 function makeOutsideBooking(performerName, clientName, clientEmail, date, venue, city, state, totalAmount, aspCut, notes, status, daysAgo){
   const created = addDays(new Date(), -daysAgo);
-  const log = [{ts:created.toISOString(), type:'system', text:`Outside booking created — ${performerName} for ${clientName}.`}];
+  const log = [{ts:created.toISOString(), type:'system', text:`Other booking created — ${performerName} for ${clientName}.`}];
   const paid = status==='paid';
   if(paid) log.push({ts:addDays(created, Math.max(1,Math.round(daysAgo/2))).toISOString(), type:'success', text:'Marked paid.'});
   return {
@@ -314,9 +314,8 @@ function getOutsideBooking(id){ return OUTSIDE_BOOKINGS.find(b=>b.id===id); }
 // below are only the first paint / signed-out fallback and mirror the table's seed exactly.
 const BRAND_FALLBACK = {
   asp:  { label:'ASP Artist Management', signer:'ASP Management Services LLC', senderName:'ASP Management', replyTo:'office@aspmgmt.com', email:'office@aspmgmt.com' },
-  sing: { label:'SING Entertainment', signer:'SING Entertainment', senderName:'SING Entertainment', replyTo:'office@aspmgmt.com', email:'office@aspmgmt.com' },
 };
-const BRAND_KEYS = Object.keys(BRAND_FALLBACK); // brand_config.brand_key check constraint: asp, sing
+const BRAND_KEYS = Object.keys(BRAND_FALLBACK); // ASP only: SING Entertainment removed (owner 2026-10-13, 0055); old 'sing' records render as ASP
 let BRAND_CONFIG_CACHE = null;
 async function loadBrandConfig(){
   if(!supabaseClient) return;
@@ -3554,7 +3553,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.4'; // bump on every release so a phone can tell it has updated. v1.9.4: conflicts by time; gig window; wedding contracts skip picker
+const APP_VERSION = 'v1.9.5'; // bump on every release so a phone can tell it has updated. v1.9.5: Other Bookings; one Gig Info; SING removed
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -3634,7 +3633,7 @@ const VIEWS = {
   artists:          { who:'admin',  title:'Artists',                    render:()=>renderArtistsPage() },
   artist_detail:    { who:'admin',  title:()=>artistById(S.artistDetailId)?.name || '', render:()=>renderArtistDetailPage(S.artistDetailId) },
   financials:       { who:'admin',  title:'Financials',                 render:()=>renderFinancialsPage() },
-  outside_bookings: { who:'admin',  title:'External Events',            render:()=>renderOutsideBookingsPage() },
+  outside_bookings: { who:'admin',  title:'Other Bookings',             render:()=>renderOutsideBookingsPage() },
   documents:        { who:'admin',  title:'Documents',                  render:()=>renderDocumentsPage() },
   contracts:        { who:'admin',  title:'Contracts',                  render:()=>renderContractsPage() },
   contract_builder: { who:'admin',  title:'Contract Builder',           render:()=>renderContractsBuilderListPage() },
@@ -4448,11 +4447,11 @@ function outsideBookingOpenReminders(b){ return (b.reminders||[]).filter(r=>!r.c
 function renderOutsideBookingsPage(){
   return `
   <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
-    <div class="card stat-tile"><span class="u-label">External Events Open</span><span class="val">${OUTSIDE_BOOKINGS.filter(b=>b.status==='open').length}</span><span class="sub">Not yet paid</span></div>
+    <div class="card stat-tile"><span class="u-label">Other Bookings Open</span><span class="val">${OUTSIDE_BOOKINGS.filter(b=>b.status==='open').length}</span><span class="sub">Not yet paid</span></div>
     <div class="card stat-tile"><span class="u-label">ASP Earned (External)</span><span class="val">${money(OUTSIDE_BOOKINGS.reduce((s,b)=>s+b.aspCut,0))}</span><span class="sub">Across ${OUTSIDE_BOOKINGS.length} event${OUTSIDE_BOOKINGS.length===1?'':'s'}</span></div>
   </div>
 
-  <div class="section-head"><h2>External Events (${OUTSIDE_BOOKINGS.length})</h2><button class="btn btn-sm btn-primary" data-action="open-new-outside-booking">+ New External Event</button></div>
+  <div class="section-head"><h2>Other Bookings (${OUTSIDE_BOOKINGS.length})</h2><button class="btn btn-sm btn-primary" data-action="open-new-outside-booking">+ New Other Booking</button></div>
   <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Jobs that don't involve one of our own roster artists — outside acts we coordinate or refer. Kept separate from ASP's own leads/calendar unless explicitly shown there.</p>
   <div class="card table-cards"><table>
     <thead><tr><th>Performer</th><th>Event</th><th>Client</th><th>Date</th><th>Total</th><th>ASP Cut</th><th>Payout</th><th>Reminders</th><th>Status</th><th></th></tr></thead>
@@ -4523,7 +4522,7 @@ function renderOutsideBookingDetailSheet(){
       <div class="sheet-head">
         <div>
           <h2 style="font-size:1.2rem;margin-bottom:4px;">${esc(b.eventName||b.performerName)}</h2>
-          <span class="pill pill-accent">External Event</span>
+          <span class="pill pill-accent">Other Booking</span>
           <span class="pill ${b.status==='paid'?'pill-good':'pill-warn'}">${b.status==='paid'?'Paid':'Open'}</span>
         </div>
         <button class="icon-btn" data-action="close-outside-booking-detail" aria-label="Close">${ICO.x}</button>
@@ -5154,8 +5153,12 @@ function renderBandFieldsSection(f, ev){
 function renderAdditionalArtistsSection(f){
   const others = ARTISTS.filter(a=>a.id!==f.artistId);
   const selected = f.additionalArtists||[];
-  return `<div class="field">
-    <label>Additional ASP Artists (optional)</label>
+  // Collapsed behind a checkbox (owner 2026-10-13); it stays open while any extra artist is picked.
+  const open = f.showAdditionalArtists || selected.length>0;
+  const toggle = `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-field="showAdditionalArtists" ${open?'checked':''} ${selected.length?'disabled':''} style="width:16px;height:16px;"/> Additional artist</label>`;
+  if(!open) return toggle;
+  return `${toggle}<div class="field">
+    <label>Additional ASP Artists</label>
     <div class="chip-row">${others.map(a=>{
       const on = selected.some(x=>x.artistId===a.id);
       return `<button type="button" class="filter-chip ${on?'sel':''}" data-action="toggle-additional-artist" data-id="${a.id}"><span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${esc(a.initials)}</span>${esc(a.name.split(' ')[0])}</button>`;
@@ -5179,7 +5182,7 @@ function renderNewLeadModal(){
         <div class="chip-row">
           <button class="filter-chip ${!isInternal?'sel':''}" data-action="pick-booking-kind" data-kind="client">Client Booking</button>
           <button class="filter-chip ${isInternal?'sel':''}" data-action="pick-booking-kind" data-kind="internal">Internal Day</button>
-          <button class="filter-chip" data-action="switch-to-outside-booking">Outside Act</button>
+          <button class="filter-chip" data-action="switch-to-outside-booking">Other Booking</button>
         </div>
         <p style="font-size:12px;color:var(--ink-3);margin:0;">${isInternal? 'For recording days, filming days, rehearsals — no client, no payment, just pencils the artist’s time in.' : "Only the artist, client name, and date are required — everything else can be filled in once it's known."}</p>
         <div class="field"><label>Artist</label>
@@ -5707,18 +5710,6 @@ function renderAddChargeRow(ev){
   </div>`;
 }
 
-function renderPrepSheets(ev, isAdmin){
-  const files = ev.prepSheets||[];
-  return `<div class="u-label" style="margin-bottom:8px;">Prep Sheets</div>
-    ${files.length? `<div class="log" style="margin-bottom:${isAdmin?'10px':'0'};">${files.map(f=>`
-      <div class="log-item" style="align-items:center;">
-        <span class="log-ico">${ICO.leads}</span>
-        <span style="flex:1;">${esc(f.name)}<div class="log-time">Added ${fmtDateShort(f.uploadedAt)}</div></span>
-        <a href="${safeDataUrl(f.dataUrl)}" target="_blank" rel="noopener" class="btn btn-sm">View</a>
-        ${isAdmin?`<button class="icon-btn" data-action="remove-prep" data-id="${ev.id}" data-prepid="${f.id}" title="Remove" aria-label="Remove">${ICO.x}</button>`:''}
-      </div>`).join('')}</div>` : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 ${isAdmin?'10px':'0'};">No prep sheets uploaded yet.</p>`}
-    ${isAdmin? `<label class="btn btn-sm" style="cursor:pointer;display:inline-flex;">Upload File<input type="file" data-action="upload-prep" data-id="${ev.id}" multiple style="display:none;"/></label>` : ''}`;
-}
 
 /* ============ GIG INFO SHEET ============ */
 // Paste/write free-text gig info + a contact list (name/role/phone/email, click-to-copy),
@@ -5734,32 +5725,34 @@ function renderContactCopyRow(c, ev){
     </span>
   </div>`;
 }
-function renderGigInfoCard(ev, isAdmin){
-  if(ev.unpaid) return '';
-  const sheet = gigInfoSheetOf(ev);
-  const hasContent = sheet.text || (sheet.contacts||[]).length;
-  return `<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px;">
-      <div class="u-label">Gig Info Sheet</div>
-      ${isAdmin? `<button class="btn btn-sm btn-ghost" data-action="open-giginfo-form" data-id="${ev.id}" style="padding:2px 6px;">${hasContent?'Edit':'+ Add'}</button>`:''}
-    </div>
-    ${!hasContent? `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No gig info sheet yet.</p>` : `
-      ${sheet.text? `<p style="font-size:12.5px;color:var(--ink);white-space:pre-wrap;margin:0 0 10px;">${esc(sheet.text)}</p>` : ''}
-      ${(sheet.contacts||[]).length? `<div style="margin-bottom:10px;">${sheet.contacts.map(c=>renderContactCopyRow(c, ev)).join('')}</div>` : ''}
-      <button class="btn btn-sm" data-action="view-giginfo" data-id="${ev.id}">${ICO.leads} View / Print</button>
-      ${sheet.updatedAt? `<span style="font-size:10.5px;color:var(--ink-3);margin-left:8px;">Updated ${fmtDateShort(sheet.updatedAt)}</span>`:''}
-    `}`;
-}
-// His ask (2026-10-06): Prep Sheets (file uploads) and Gig Info Sheet (text notes + contacts)
-// used to be two separate cards stacked on top of each other -- same "everything the artist needs
-// for this gig" purpose, just two different content types, so merged into one card with a divider
-// between the two sub-sections. Data model unchanged (ev.prepSheets[] / ev.gigInfoSheet stay
-// separate fields -- different shapes, no reason to force them into one).
+// One "Gig Info" section (owner 2026-10-13: "gig info and prep sheet is the same thing"): the notes,
+// the contact list and the uploaded files are all the gig's info. Stored as before -- notes/contacts
+// in ev.gigInfoSheet, files in ev.prepSheets[] -- only the presentation is merged.
 function renderPrepAndGigInfoCard(ev, isAdmin){
-  const giginfo = renderGigInfoCard(ev, isAdmin);
+  const sheet = gigInfoSheetOf(ev);
+  const files = ev.prepSheets||[];
+  const hasNotes = !!(sheet.text || (sheet.contacts||[]).length);
+  const canNote = isAdmin && !ev.unpaid;
   return `<div class="card card-pad">
-    ${renderPrepSheets(ev, isAdmin)}
-    ${giginfo? `<div style="height:1px;background:var(--border);margin:14px 0;"></div>${giginfo}` : ''}
-    ${isAdmin? `<p style="font-size:10.5px;color:var(--ink-3);margin:10px 0 0;">Files are stored directly on the event record, not in a dedicated file-storage service.</p>` : ''}
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+      <div class="u-label">Gig Info</div>
+      ${isAdmin? `<span style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${canNote? `<button class="btn btn-sm btn-ghost" data-action="open-giginfo-form" data-id="${ev.id}" style="padding:2px 6px;">${hasNotes?'Edit notes':'+ Add notes'}</button>` : ''}
+        <label class="btn btn-sm btn-ghost" style="cursor:pointer;display:inline-flex;padding:2px 6px;">+ Upload file<input type="file" data-action="upload-prep" data-id="${ev.id}" multiple style="display:none;"/></label>
+      </span>` : ''}
+    </div>
+    ${!hasNotes && !files.length? `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No gig info yet.</p>` : ''}
+    ${sheet.text? `<p style="font-size:12.5px;color:var(--ink);white-space:pre-wrap;margin:0 0 10px;">${esc(sheet.text)}</p>` : ''}
+    ${(sheet.contacts||[]).length? `<div style="margin-bottom:10px;">${sheet.contacts.map(c=>renderContactCopyRow(c, ev)).join('')}</div>` : ''}
+    ${files.length? `<div class="log" style="margin-bottom:10px;">${files.map(f=>`
+      <div class="log-item" style="align-items:center;">
+        <span class="log-ico">${ICO.leads}</span>
+        <span style="flex:1;min-width:0;overflow-wrap:anywhere;">${esc(f.name)}<div class="log-time">Added ${fmtDateShort(f.uploadedAt)}</div></span>
+        <a href="${safeDataUrl(f.dataUrl)}" target="_blank" rel="noopener" class="btn btn-sm">View</a>
+        ${isAdmin?`<button class="icon-btn" data-action="remove-prep" data-id="${ev.id}" data-prepid="${f.id}" title="Remove" aria-label="Remove ${esc(f.name)}">${ICO.x}</button>`:''}
+      </div>`).join('')}</div>` : ''}
+    ${hasNotes? `<button class="btn btn-sm" data-action="view-giginfo" data-id="${ev.id}">${ICO.leads} View / Print</button>
+      ${sheet.updatedAt? `<span style="font-size:10.5px;color:var(--ink-3);margin-left:8px;">Updated ${fmtDateShort(sheet.updatedAt)}</span>`:''}` : ''}
   </div>`;
 }
 function renderGigInfoFormOverlay(){
@@ -5770,7 +5763,7 @@ function renderGigInfoFormOverlay(){
   const cf = S.newGigContactForm;
   return `<div class="overlay center" data-action="giginfo-overlay-close">
     <div class="modal" data-stop data-form="giginfo" style="width:480px;">
-      <div class="sheet-head"><h2 style="font-size:1.2rem;">Gig Info Sheet</h2><button class="icon-btn" data-action="close-giginfo-form" aria-label="Close">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Gig Info</h2><button class="icon-btn" data-action="close-giginfo-form" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <div class="field"><label>Gig Info</label>
           <textarea data-field="text" rows="8" placeholder="Paste or write everything the artist needs to know — schedule, sound check, meal info, special requests...">${esc(f.text!==undefined?f.text:sheet.text)}</textarea>
@@ -5802,7 +5795,7 @@ function renderGigInfoDoc(){
   return `<div class="overlay center" data-action="giginfo-doc-overlay-close">
     <div class="doc" data-stop>
       <div class="sheet-head">
-        <h2 style="font-size:1.1rem;">Gig Info Sheet</h2>
+        <h2 style="font-size:1.1rem;">Gig Info</h2>
         <div style="display:flex;gap:6px;">
           <button class="icon-btn" data-action="print-giginfo" title="Print / Save as PDF" aria-label="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
           <button class="icon-btn" data-action="close-giginfo-doc" aria-label="Close">${ICO.x}</button>
@@ -6018,7 +6011,7 @@ function renderNewOutsideBookingModal(){
   const cut = Number(f.aspCut)||0;
   return `<div class="overlay center" data-action="overlay-close">
     <div class="modal" data-stop data-form="newoutsidebooking" style="width:440px;">
-      <div class="sheet-head"><h2 style="font-size:1.3rem;">New Outside Booking</h2><button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.3rem;">New Other Booking</h2><button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <p style="font-size:12px;color:var(--ink-3);margin:0;">For jobs that don't involve one of our own roster artists — an outside act we're coordinating or referring.</p>
         <div class="field"><label>Performer</label><input data-field="performerName" value="${esc(f.performerName||'')}" placeholder="Outside act's name"/></div>
@@ -6069,7 +6062,7 @@ function documentSubjectContext(subjectType, subjectId){
 }
 function documentSubjectLabel(doc){
   if(doc.subjectType==='artist'){ const a=artistById(doc.subjectId); return a? a.name : 'Artist'; }
-  if(doc.subjectType==='outside'){ const b=getOutsideBooking(doc.subjectId); return b? b.performerName : 'Outside Act'; }
+  if(doc.subjectType==='outside'){ const b=getOutsideBooking(doc.subjectId); return b? b.performerName : 'Other booking'; }
   return 'General';
 }
 function documentAttribution(doc){
@@ -6119,7 +6112,7 @@ function renderDocumentBuilderModal(){
         <div class="field"><label>Who's This For?</label>
           <div class="chip-row">
             <button class="filter-chip ${subjectType==='artist'?'sel':''}" data-action="pick-document-subject-type" data-subject="artist">One of Our Artists</button>
-            <button class="filter-chip ${subjectType==='outside'?'sel':''}" data-action="pick-document-subject-type" data-subject="outside">Outside Act</button>
+            <button class="filter-chip ${subjectType==='outside'?'sel':''}" data-action="pick-document-subject-type" data-subject="outside">Other Booking</button>
             <button class="filter-chip ${subjectType==='general'?'sel':''}" data-action="pick-document-subject-type" data-subject="general">General</button>
           </div>
         </div>
@@ -6129,7 +6122,7 @@ function renderDocumentBuilderModal(){
             ${ARTISTS.map(a=>`<option value="${a.id}" ${subjectId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
           </select>
         </div>` : ''}
-        ${subjectType==='outside'? `<div class="field"><label>Outside Booking</label>
+        ${subjectType==='outside'? `<div class="field"><label>Other Booking</label>
           <select class="document-subject-select">
             <option value="">Pick a booking…</option>
             ${OUTSIDE_BOOKINGS.map(b=>`<option value="${b.id}" ${subjectId===b.id?'selected':''}>${esc(b.performerName)} — ${esc(b.clientName)}</option>`).join('')}
@@ -6138,12 +6131,6 @@ function renderDocumentBuilderModal(){
         ` : `<p style="font-size:12px;color:var(--ink-3);margin:0;">For: <strong style="color:var(--ink);">${esc(documentSubjectLabel(existing))}</strong></p>`}
 
         <div class="field"><label>Title</label><input data-field="title" value="${esc(title)}" placeholder="e.g. Succos Proposal — Shmili Landau"/></div>
-        <div class="field"><label>Letterhead / Signing Party</label>
-          <div class="chip-row">
-            <button class="filter-chip ${brand==='asp'?'sel':''}" data-action="pick-document-brand" data-brand="asp">ASP Artist Management</button>
-            <button class="filter-chip ${brand==='sing'?'sel':''}" data-action="pick-document-brand" data-brand="sing">SING Entertainment</button>
-          </div>
-        </div>
         <div class="field-row">
           <div class="field"><label>Client Name</label><input data-field="clientName" value="${esc(clientName)}"/></div>
           <div class="field"><label>Client Signer Title (optional)</label><input data-field="clientSignerTitle" value="${esc(clientSignerTitle)}" placeholder="e.g. Event Coordinator"/></div>
@@ -6169,9 +6156,7 @@ function renderDocumentDoc(doc){
       <div class="sheet-head"><h2 style="font-size:1.1rem;">Document Preview</h2><button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button></div>
       <div class="doc-body">
         <div class="doc-letterhead">
-          ${doc.brand==='sing'
-            ? `<img src="assets/sing-entertainment-logo-dark.svg" alt="SING Entertainment" style="height:36px;"/>`
-            : `<div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>`}
+          <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
           <span class="pill ${doc.signedAt?'pill-good':'pill-neutral'}">${doc.signedAt?'Signed':'Unsigned'}</span>
         </div>
         <div class="doc-title">${esc((doc.title||'Document').toUpperCase())}</div>
@@ -6645,7 +6630,6 @@ function renderBarterSection(c){
 function renderContractDocSettingsSection(c){
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     <h3 style="font-size:13.5px;margin:0;">Letterhead</h3>
-    <div class="chip-row">${BRAND_KEYS.map(k=>`<button class="filter-chip ${c.brand===k?'sel':''}" data-action="pick-contract-brand" data-value="${k}">${esc(getBrandConfig(k).label)}</button>`).join('')}</div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-contract-field="top.bsdHeader" ${c.bsdHeader?'checked':''}/> Show "BS"D" header</label>
   </div>`;
 }
@@ -7564,9 +7548,9 @@ function doSaveGigInfo(id){
   const f = S.gigInfoForm;
   const prevSheet = ev.gigInfoSheet || {text:'', contacts:[], updatedAt:null};
   const gigInfoSheet = { ...prevSheet, text: (f.text!==undefined? f.text : prevSheet.text).trim(), updatedAt: todayISO() };
-  logEvent(ev, 'system', 'Gig info sheet updated.');
+  logEvent(ev, 'system', 'Gig info updated.');
   S.showGigInfoForm=false; S.gigInfoForm={}; S.newGigContactForm={};
-  if(reportEventSave(updateEvent(id, { gigInfoSheet }), 'saving the gig info sheet')) toast('Gig info sheet saved.', 'success');
+  if(reportEventSave(updateEvent(id, { gigInfoSheet }), 'saving the gig info')) toast('Gig info saved.', 'success');
   openEvent(id);
 }
 function doCopyText(value){
@@ -7655,7 +7639,7 @@ function doSubmitOutsideBooking(){
   const booking = makeOutsideBooking(performerName, clientName, (f.clientEmail||'').trim(), f.date, (f.venue||'').trim(), '', '', totalAmount, aspCut, (f.notes||'').trim(), 'open', 0);
   OUTSIDE_BOOKINGS.unshift(booking);
   saveOutsideBookings();
-  toast(`Outside booking created for ${performerName}.`, 'success');
+  toast(`Other booking created for ${performerName}.`, 'success');
   S.showNewOutsideBooking=false; S.newOutsideBookingForm={}; render();
 }
 // Generic field-path writer for the External Event detail sheet, same direct-mutate + autosave
@@ -7700,7 +7684,7 @@ function doMarkOutsideBookingPaid(id){
   b.status = 'paid';
   b.log.push({ts:new Date().toISOString(), type:'success', text:'Marked paid.'});
   saveOutsideBookings();
-  toast('Outside booking marked paid.', 'success');
+  toast('Other booking marked paid.', 'success');
   render();
 }
 function doSaveDocument(){
@@ -7790,8 +7774,8 @@ function doUploadPrep(id, files){
     const finish = ()=>{
       remaining--;
       if(remaining===0){
-        if(succeeded) logEvent(ev,'system', `Prep sheet${succeeded===1?'':'s'} uploaded.`);
-        if(reportEventSave(updateEvent(id, { prepSheets }), 'uploading the prep sheet') && succeeded) toast('Prep sheet uploaded.', 'success');
+        if(succeeded) logEvent(ev,'system', `Gig info file${succeeded===1?'':'s'} uploaded.`);
+        if(reportEventSave(updateEvent(id, { prepSheets }), 'uploading the gig info file') && succeeded) toast('File added to gig info.', 'success');
         openEvent(id);
       }
     };
@@ -7807,7 +7791,7 @@ function doUploadPrep(id, files){
 function doRemovePrep(id, prepId){
   const ev = getEvent(id); if(!ev) return;
   const prepSheets = (ev.prepSheets||[]).filter(f=>f.id!==prepId);
-  reportEventSave(updateEvent(id, { prepSheets }), 'removing the prep sheet');
+  reportEventSave(updateEvent(id, { prepSheets }), 'removing the gig info file');
   openEvent(id);
 }
 function doShareEvent(id){
@@ -8624,7 +8608,6 @@ function bindGlobal(){
       case 'pick-contract-overtime-interval': { const c=getContract(S.contractBuilderId); if(c){ c.overtime.interval=t.getAttribute('data-value'); refreshAutoOvertime(c); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'pick-cancellation-type': { const c=getContract(S.contractBuilderId); if(c){ c.cancellationPolicy.type=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'pick-balance-due-timing': { const c=getContract(S.contractBuilderId); if(c){ c.balanceDueTiming=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
-      case 'pick-contract-brand': { const c=getContract(S.contractBuilderId); if(c){ c.brand=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'pick-travel-flight-class': { const c=getContract(S.contractBuilderId); if(c){ c.travelClause.flightsClass=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'pick-lineitem-travel-flight-class': { const c=getContract(S.contractBuilderId); if(c){ const li=c.lineItems.find(x=>x.id===id); if(li) li.travelClause.flightsClass=t.getAttribute('data-value'); c.updatedAt=new Date().toISOString(); saveContracts(); } render(); break; }
       case 'add-cancellation-tier': doAddCancellationTier(S.contractBuilderId); break;
@@ -8710,7 +8693,6 @@ function bindGlobal(){
       case 'open-document': closeAllOverlays(); S.documentId=id; S.documentForm={}; S.showDocumentBuilder=true; render(); break;
       case 'document-overlay-close': if(e.target===t){ closeAllOverlays(); render(); } break;
       case 'pick-document-subject-type': S.documentForm.subjectType = t.getAttribute('data-subject'); S.documentForm.subjectId = null; render(); break;
-      case 'pick-document-brand': S.documentForm.brand = t.getAttribute('data-brand'); render(); break;
       case 'save-document': doSaveDocument(); break;
       case 'print-document': doSaveDocument(); window.print(); break;
       case 'ai-edit-document': S.showAiEditNotice = true; render(); break;

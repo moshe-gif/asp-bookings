@@ -178,6 +178,7 @@ def _wedding_lead_variant(page, problems, width):
     page.wait_for_timeout(200)
     page.locator('[data-form="lead"] input[data-field="clientEmail"]').fill(LONG_EMAIL)
     page.locator('[data-form="lead"] input[data-field="venue"]').fill(LONG_VENUE)
+    page.locator('[data-form="lead"] input[data-field="showAdditionalArtists"]').check()
     _click_action(page, "toggle-additional-artist", scope="overlay")
     _click_action(page, "add-lead-charge", scope="overlay")
     _check(page, "new-lead-wedding-long", problems, width)

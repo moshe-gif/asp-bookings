@@ -1,36 +1,25 @@
 """
 Real click-through of the general Documents builder (own nav tab, office/bookkeeping only):
-- brand swap (ASP <-> SING Entertainment) via the Outside Bookings entry point
+- ASP-only letterhead (SING Entertainment removed 2026-10-13) via the Other Bookings entry point
 - "On behalf of {artist}" attribution when a document's subject is one of ASP's own artists
 """
 from helpers import login_as, goto_nav, collect_console_errors, create_outside_booking
 
 
-def test_document_brand_swap_from_outside_booking(live_server, page):
+def test_document_from_other_booking_is_asp_only(live_server, page):
+    """SING Entertainment was removed (owner 2026-10-13): documents are ASP-only, no letterhead picker."""
     errors = collect_console_errors(page)
     page.goto(live_server)
     login_as(page, "admin_bookings")
     create_outside_booking(page)
 
     page.locator('[data-action="open-outside-doc-builder"]').first.click()
-
-    page.locator('[data-action="pick-document-brand"][data-brand="sing"]').click()
+    assert page.locator('[data-action="pick-document-brand"]').count() == 0, "letterhead picker still offered"
     page.locator('[data-action="save-document"]').click()
+    assert page.locator("#documentPrintHost .doc-letterhead .wordmark").count() == 1, "ASP wordmark missing"
+    assert "SING" not in page.locator("#documentPrintHost").inner_text()
+    assert page.locator("#documentPrintHost .doc-sign-line").count() == 2, "expected exactly two signature lines"
     assert not errors, f"console errors while saving document: {errors}"
-
-    sing_logo = page.locator('#documentPrintHost img[alt="SING Entertainment"]')
-    assert sing_logo.count() == 1, "SING Entertainment logo not rendered after brand switch"
-    sign_lines = page.locator("#documentPrintHost .doc-sign-line")
-    assert sign_lines.count() == 2, "expected exactly two signature lines"
-    assert "SING Entertainment" in sign_lines.nth(1).inner_text()
-
-    page.locator('[data-action="pick-document-brand"][data-brand="asp"]').click()
-    page.locator('[data-action="save-document"]').click()
-    asp_mark = page.locator("#documentPrintHost .doc-letterhead .wordmark")
-    assert asp_mark.count() == 1, "ASP wordmark not rendered after switching back from SING"
-    assert page.locator('#documentPrintHost img[alt="SING Entertainment"]').count() == 0
-
-    assert not errors, f"console errors during document brand-swap flow: {errors}"
 
 
 def test_document_on_behalf_of_artist(live_server, page):

@@ -40,6 +40,7 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0052_contract_sign_requests | Applied 2026-10-13 — clients sign contracts online: `contract_sign_requests` + `sign_contract_request()` (service role only). See `ops/CONTRACT_SIGN_SETUP.md`. |
 | 0053_drop_artist_bookings_rpc | Applied 2026-10-13 — drops `artist_bookings()` (any artist could call it and get their leads + fee columns); activity_log's artist read now scopes through `artist_gig_view`. Isolation check ALL OK. |
 | 0054_rls_auth_uid_once | Applied 2026-10-13 — five RLS policies evaluate auth.uid() once per query (performance advisor); duplicate user_settings read policy dropped. Isolation check ALL OK. |
+| 0055_remove_sing_brand | Applied 2026-10-13 — SING Entertainment removed (owner): its `brand_config` row deleted, brand_key limited to 'asp'. No records used it. |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in

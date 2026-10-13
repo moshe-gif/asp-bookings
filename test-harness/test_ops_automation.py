@@ -65,6 +65,7 @@ def test_multi_artist_lead_roster_and_multiline_contract_prefill(live_server, pa
     page.locator('[data-action="open-new-lead"]').click()
     modal = page.locator('.modal').last
     modal.locator('[data-action="pick-artist"][data-id="baruch"]').click()
+    modal.locator('input[data-field="showAdditionalArtists"]').check()
     modal.locator('[data-action="toggle-additional-artist"][data-id="eli"]').click()
     modal.locator('input[data-lead-artist-fee="eli"]').fill("1500")
     modal.locator('input[data-field="clientName"]').fill("Multi Artist Test Client")
