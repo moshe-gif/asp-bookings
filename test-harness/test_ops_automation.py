@@ -116,7 +116,9 @@ def test_travel_request_send_gated_on_rivky_email(live_server, page):
     modal.locator('[data-action="submit-lead"]').click()
     page.wait_for_timeout(400)
 
-    page.locator('.sheet').last.locator('[data-action="create-travel-request"]').click()
+    # Flight needed on a new lead creates its travel request automatically (owner 2026-10-14) --
+    # open that one instead of creating another.
+    page.locator('.sheet').last.locator('[data-action="open-travel-request"]').first.click()
     page.wait_for_timeout(400)
     # Once the request exists, the underlying event sheet ALSO shows a "Travel Request" summary
     # button (renderTravelRequestSummary), so a plain has_text="Travel Request" match is ambiguous

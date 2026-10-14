@@ -696,6 +696,11 @@ function getContract(id){ return CONTRACTS.find(c=>c.id===id); }
 function contractsForLead(leadId){ return CONTRACTS.filter(c=>c.leadId===leadId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)); }
 // Flat shape (not nested sub-objects) so it addresses cleanly through the generic
 // setContractFieldByPath path scheme, both top-level (c.travelClause) and per-line-item.
+// Travel goes on a contract only when the gig needs a flight (owner 2026-10-14), and then it is a
+// business-class flight and a hotel. Never from the artist's profile, which put travel on local gigs.
+function gigTravelClause(ev){
+  return ev && ev.flightNeeded ? { ...blankTravelClause(), flightsCount:1, flightsClass:'business', hotelRooms:1 } : blankTravelClause();
+}
 function blankTravelClause(){
   return { flightsCount:0, flightsClass:'economy', hotelRooms:0, hotelNights:0, hotelTier:'standard', food:false, shabbos:false, groundTransport:false };
 }
@@ -884,7 +889,7 @@ function doCreateContractFromLead(eventId, template){
     hoursOfEngagement: hours,
     balanceDueTiming: 'prior',
     artistProvides: defaultArtistProvides(template, performerArtist?performerArtist.name:'the Artist', performerArtist?performerArtist.role:'Singer', hours),
-    travelClause: payeeProfile && payeeProfile.defaultTravelClause ? { ...payeeProfile.defaultTravelClause } : blankTravelClause(),
+    travelClause: gigTravelClause(ev),
     discount: { originalPrice:0, label:'repeat customer price' },
     performanceDuration: '',
     performanceType: template==='comedian' ? `Live comedy show by ${performerArtist?performerArtist.name:'the Artist'}` : '',
@@ -905,6 +910,7 @@ function doCreateContractFromLead(eventId, template){
     contract.cancellationPolicy = { type:'credit_reschedule', flatPercent:80, tiers:[], creditWindowMonths:6, withinDays:40 };
   } else {
     contract.boilerplate.acceptanceClause = true;
+    contract.deposit = { amount:0, percent:15, nonRefundable:true }; // the office's deposit (owner 2026-10-14)
   }
   if(template==='multiline'){
     contract.deposit = { amount:0, percent:0, nonRefundable:false };
@@ -961,7 +967,6 @@ function doSetContractPerformer(contractId, artistId){
     c.boilerplate = { ...c.boilerplate, ...profile.defaultBoilerplate };
     c.overtime.interval = profile.defaultOvertimeInterval;
     refreshAutoOvertime(c);
-    if(profile.defaultTravelClause) c.travelClause = { ...profile.defaultTravelClause };
     if(profile.defaultCancellation) c.cancellationPolicy = { ...c.cancellationPolicy, ...profile.defaultCancellation };
   }
   c.artistProvides = defaultArtistProvides(c.template, artist?artist.name:'the Artist', artist?artist.role:'Singer', c.hoursOfEngagement||'5 hours');
@@ -1784,7 +1789,23 @@ function getTravelRequest(id){ return TRAVEL_REQUESTS.find(t=>t.id===id); }
 function travelRequestsForEvent(eventId){ return TRAVEL_REQUESTS.filter(t=>t.eventId===eventId); }
 function travelRequestStatusLabel(s){ return {draft:'Draft', sent:'Sent to Rivky', awaiting_reply:'Awaiting Reply', answered:'Answered', completed:'Completed'}[s] || s; }
 function doCreateTravelRequest(eventId){
-  const ev = getEvent(eventId); if(!ev) return;
+  const tr = makeTravelRequest(eventId); if(!tr) return;
+  S.showTravelRequestDetail=true; S.travelRequestDetailId=tr.id;
+  render();
+}
+// "Flight needed" emails Rivky on its own (owner 2026-10-14): one travel request per gig, created
+// and sent the moment the flag is set. Skipped when one was already sent; when Rivky's email isn't
+// set (Settings) the request is still created and the office is told.
+async function autoRequestFlight(eventId){
+  const existing = travelRequestsForEvent(eventId);
+  if(existing.some(t=>t.sentAt)) return;
+  const tr = existing[0] || makeTravelRequest(eventId); if(!tr) return;
+  render(); // the gig sheet now shows the request
+  if(!ORG_SETTINGS.rivkyEmail){ toast('Travel request created — set Rivky\'s email in Settings so it sends automatically.', 'system'); return; }
+  await doSendTravelRequest(tr.id);
+}
+function makeTravelRequest(eventId){
+  const ev = getEvent(eventId); if(!ev) return null;
   const artist = artistById(ev.artistId);
   const tr = {
     id:'TRV-'+(TRVID++), eventId, status:'draft', createdAt:new Date().toISOString(),
@@ -1792,7 +1813,7 @@ function doCreateTravelRequest(eventId){
       passengers: artist? artist.name : '', eventDate: ev.date||'', eventTime: ev.time||'', eventTimezone: 'America/New_York',
       venue: ev.venue||'', city: ev.city||'', state: ev.state||'',
       origin:'', destination:'', arriveBy:'', departAfter:'',
-      flightClass:'economy', flightQty:1,
+      flightClass:'business', flightQty:1,
       hotelNeeded: !!ev.flightNeeded, hotelPrefs:'',
       groundTransportNeeded: !!ev.groundTransportNeeded, groundTransportNotes:'',
       notes:'',
@@ -1801,8 +1822,7 @@ function doCreateTravelRequest(eventId){
     flightSegments: [],
   };
   TRAVEL_REQUESTS.unshift(tr); saveTravelRequests();
-  S.showTravelRequestDetail=true; S.travelRequestDetailId=tr.id;
-  render();
+  return tr;
 }
 // Flight tracking (ops automation spec item 8). No auto-extraction from Rivky's reply yet (needs
 // Gmail, blocked same as Phase 6) -- admin enters confirmed details by hand once known through any
@@ -3806,7 +3826,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.8'; // bump on every release so a phone can tell it has updated. v1.9.8: Standard Artist Agreement in the office's own layout
+const APP_VERSION = 'v1.9.9'; // bump on every release so a phone can tell it has updated. v1.9.9: contract defaults (15%, Mechitza, travel only with a flight, pre-signed); flight needed emails Rivky
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -7006,6 +7026,8 @@ function renderPayeeBlock(profile){
   if(profile.zelle) lines.push('IMPORTANT: Payments sent via Zelle must include event date/details in description. Otherwise, we cannot guarantee your deposit will be applied to your event.');
   return lines.length? `<div class="doc-section"><h3>Payment</h3><p style="font-size:12.5px;line-height:1.8;margin:0;">${lines.join('<br/>')}</p></div>` : '';
 }
+// Every contract goes out pre-signed by ASP for the artist (owner 2026-10-14); the client's side
+// stays blank until they sign or pay the deposit.
 // Electronic signature: matches the app's existing convention (see renderDocumentDoc)
 // of rendering a typed name in a cursive script once accepted, rather than a blank line -- also the
 // real-world behavior every "Acceptance" boilerplate clause already describes (deposit payment has
@@ -7015,7 +7037,7 @@ function renderContractSignBlock(c, signingPartyLabel){
   const signedDate = signed ? fmtDateShort((c.signedAt||c.updatedAt).slice(0,10)) : '';
   let block = `<div class="doc-sign">
     <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc((c.clientSignature&&c.clientSignature.name)||c.snapshot.clientName||'Client')}</span><br/>Signed electronically &middot; ${signedDate}` : `<strong>&nbsp;</strong>Client Signature &middot; Date`}</div>
-    <div class="doc-sign-line">${signed? `<span class="doc-signature">${esc(signingPartyLabel)}</span><br/>` : `<strong>&nbsp;</strong>`}For Artist, ${esc(signingPartyLabel)}</div>
+    <div class="doc-sign-line"><span class="doc-signature">${esc(signingPartyLabel)}</span><br/>For Artist, ${esc(signingPartyLabel)}</div>
   </div>`;
   if(c.boilerplate.acceptanceClause){
     block += `<p style="font-size:11px;color:var(--ink-3);margin:8px 0 0;">A signature is welcome but not required where the deposit has been paid.</p>`;
@@ -7066,7 +7088,9 @@ function standardDocContent(c){
   if(c.overtime.interval==='not_applicable') terms.push('Overtime: N/A.');
   else if(Number(c.overtime.rate)) terms.push(`If the Artist is asked to stay beyond the agreed upon time, then a ${money(Number(c.overtime.rate))} per ${overtimeIntervalLabel(c.overtime.interval)} charge shall be paid in overtime fees.`);
   if(travel) terms.push(`Travel (${travel.replace(/^plus /,'')}) is booked by ASP Management and invoiced together with the final balance.`);
-  contractBoilerplateLines(c).filter(l=>l!=='This contract is not binding until the deposit is received.').forEach(l=>terms.push(l));
+  // Every booking needs a Mechitza (owner 2026-10-14), in the samples' wording, whatever the flags say.
+  terms.push(`${who} only performs at events where there is a Mechitza.`);
+  contractBoilerplateLines(c).filter(l=>l!=='This contract is not binding until the deposit is received.' && !/Mechitza/.test(l)).forEach(l=>terms.push(l));
   terms.push(contractCancellationText(c));
   terms.push('Any and all changes to this agreement must be approved and initialed by both Client and Artist.');
   const ink = '#17171A', mute = '#6B6B72', rule = '#17171A', accent = '#5B78A8';
@@ -7799,7 +7823,7 @@ function doConfirmBooking(id, {method, note} = {}){
 function doToggleFlight(id){
   const ev = getEvent(id); if(!ev) return;
   logEvent(ev,'system','Marked: flight needed.');
-  if(reportEventSave(updateEvent(id, { flightNeeded:true }), 'marking flight needed')) toast('Marked: flight needed. Request travel from the gig to brief the booking secretary.', 'system');
+  if(reportEventSave(updateEvent(id, { flightNeeded:true }), 'marking flight needed')) autoRequestFlight(id);
   openEvent(id);
 }
 // Undo "flight needed" (owner 2026-10-13). A booked flight is cleared too, after a confirm, since
@@ -8473,6 +8497,7 @@ function doSubmitLead(){
   toast(isInternal? `Internal day added — penciled in on ${artistById(f.artistId).name}'s calendar.` : `Lead added — penciled in on ${artistById(f.artistId).name}'s calendar.`, 'success');
   if(findConflicts(ev).length) toast(`⚠ Scheduling conflict — ${artistById(f.artistId).name} already has something at that time.`, 'system');
   S.showNewLead=false; S.newLeadForm={}; openEvent(ev.id);
+  if(ev.flightNeeded && !isInternal) autoRequestFlight(ev.id);
 }
 function doSubmitBlockTime(){
   if(artistReadOnly()) return; // blocks would only live in memory; artists can't write gigs (0038)

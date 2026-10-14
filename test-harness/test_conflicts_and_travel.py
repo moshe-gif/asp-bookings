@@ -99,3 +99,47 @@ def test_paste_message_fills_new_lead(live_server, page):
     page.locator('[data-action="submit-lead"]').click()
     assert "From the pasted message: Band is TBD" in page.locator(".sheet").inner_text()
     assert not errors, f"console errors: {errors}"
+
+
+def test_standard_contract_defaults(live_server, page):
+    """Owner 2026-10-14: 15% deposit, Mechitza always, travel only when the gig needs a flight,
+    and the artist side comes pre-signed."""
+    errors = collect_console_errors(page)
+    seed_events(page, [fake_gig("EV-9501", "eli", "2027-11-11", status="lead", clientName="Defaults Local"),
+                       fake_gig("EV-9502", "eli", "2027-11-12", status="lead", clientName="Defaults Flight", flightNeeded=True)])
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    texts = {}
+    for gid in ("EV-9501", "EV-9502"):
+        goto_nav(page, "leads")
+        page.locator(f'[data-action="open-event"][data-id="{gid}"]').first.click()
+        page.locator('.sheet [data-action="create-contract"]').first.click()
+        page.locator('#contractBuilderOverlayHost .sheet').wait_for(state="visible")
+        page.locator('[data-action="view-contract-builder-doc"]').first.click()
+        texts[gid] = page.locator('#contractBuilderPrintHost .doc').inner_text()
+        assert page.locator('#contractBuilderPrintHost .doc-signature').count() == 1, "artist side not pre-signed"
+        page.locator('[data-action="close-contract-builder-doc"]').click()
+        page.locator('#contractBuilderOverlayHost [data-action="close-contract-builder"]').first.click()
+        page.locator('.sheet [data-action="close-sheet"]').first.click()
+    local, flight = texts["EV-9501"], texts["EV-9502"]
+    assert "(15%)" in local, "standard deposit isn't 15%"
+    assert "Eli Marcus only performs at events where there is a Mechitza." in local
+    assert "plus travel expenses" not in local and "Business Class" not in local, "travel on a gig that needs no flight"
+    assert "plus travel expenses" in flight and "Business Class flight and Hotel" in flight
+    assert not errors, f"console errors: {errors}"
+
+
+def test_flight_needed_creates_travel_request(live_server, page):
+    """Marking flight needed creates the gig's travel request at once (it emails Rivky when her
+    address is set in Settings; the harness never has it, so nothing is sent here)."""
+    errors = collect_console_errors(page)
+    seed_events(page, [fake_gig("EV-9503", "benny", "2027-10-10", clientName="Auto Travel Gig")])
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    goto_nav(page, "leads")
+    page.locator('[data-action="open-event"][data-id="EV-9503"]').first.click()
+    page.locator('.sheet [data-action="toggle-flight"]').click()
+    page.wait_for_timeout(500)
+    n = page.evaluate("() => JSON.parse(localStorage.getItem('asp_mock_travel_requests_v1') || '[]').filter(t => t.eventId === 'EV-9503').length")
+    assert n == 1, f"expected one travel request for the gig, found {n}"
+    assert not errors, f"console errors: {errors}"
