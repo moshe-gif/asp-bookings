@@ -313,7 +313,7 @@ function getOutsideBooking(id){ return OUTSIDE_BOOKINGS.find(b=>b.id===id); }
 // document and passed to the email Edge Function (which reads the same row server-side). The literals
 // below are only the first paint / signed-out fallback and mirror the table's seed exactly.
 const BRAND_FALLBACK = {
-  asp:  { label:'ASP Artist Management', signer:'ASP Management Services LLC', senderName:'ASP Management', replyTo:'office@aspmgmt.com', email:'office@aspmgmt.com' },
+  asp:  { label:'ASP Artist Management', signer:'ASP Management Services LLC', senderName:'ASP Management', replyTo:'office@aspmgmt.com', email:'office@aspmgmt.com', phone:'929-392-6076' },
 };
 const BRAND_KEYS = Object.keys(BRAND_FALLBACK); // ASP only: SING Entertainment removed (owner 2026-10-13, 0055); old 'sing' records render as ASP
 let BRAND_CONFIG_CACHE = null;
@@ -327,7 +327,7 @@ async function loadBrandConfig(){
     if(error || !data) return;
     const map = {};
     data.forEach(row=>{ map[row.brand_key] = {
-      label: row.display_name, signer: row.legal_name, senderName: row.sender_name, replyTo: row.reply_to, email: row.email,
+      label: row.display_name, signer: row.legal_name, senderName: row.sender_name, replyTo: row.reply_to, email: row.email, phone: row.phone,
     }; });
     if(Object.keys(map).length){ BRAND_CONFIG_CACHE = map; render(); }
   }catch(err){ console.error('brand config load failed', err); }
@@ -3806,7 +3806,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.7'; // bump on every release so a phone can tell it has updated. v1.9.7: clients pay deposits and invoices online (Stripe)
+const APP_VERSION = 'v1.9.8'; // bump on every release so a phone can tell it has updated. v1.9.8: Standard Artist Agreement in the office's own layout
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -6885,7 +6885,8 @@ function renderContractCancellationSection(c){
 }
 function renderContractBoilerplateSection(c){
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:8px;">
-    <h3 style="font-size:13.5px;margin:0;">Boilerplate Clauses</h3>
+    <h3 style="font-size:13.5px;margin:0;">Artist's Terms</h3>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Filled in from the artist's profile (Settings → Payee Profiles). Change them here only if this one contract differs.</p>
     ${BOILERPLATE_TOGGLES.map(([key,label])=>`<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;">
       <input type="checkbox" data-contract-field="boilerplate.${key}" ${c.boilerplate[key]?'checked':''}/> ${esc(label)}
     </label>`).join('')}
@@ -7001,7 +7002,7 @@ function renderPayeeBlock(profile){
   if(profile.zelle) lines.push(`Zelle: ${esc(profile.zelle)}`);
   if(profile.checkPayee) lines.push(`Check: ${esc(profile.checkPayee)}${profile.checkAddress? ', '+esc(profile.checkAddress):''}`);
   if(profile.wireBankName || profile.wireAccountNumber) lines.push(`Wire: ${esc(profile.wireAccountName||profile.entityName)} — ${esc(profile.wireBankName||'')}${profile.wireBankAddress?`, ${esc(profile.wireBankAddress)}`:''}${profile.wireAccountNumber?`, Account #${esc(profile.wireAccountNumber)}`:''}${profile.wireRoutingNumber?`, Routing #${esc(profile.wireRoutingNumber)}`:''}`);
-  if(profile.notes) lines.push(esc(profile.notes));
+  // profile.notes is the office's own memo (rates, reminders) -- never printed on a client's contract.
   if(profile.zelle) lines.push('IMPORTANT: Payments sent via Zelle must include event date/details in description. Otherwise, we cannot guarantee your deposit will be applied to your event.');
   return lines.length? `<div class="doc-section"><h3>Payment</h3><p style="font-size:12.5px;line-height:1.8;margin:0;">${lines.join('<br/>')}</p></div>` : '';
 }
@@ -7028,54 +7029,96 @@ function renderContractBuilderDoc(c){
   if(!c) return '';
   return docChrome(contractDocContent(c), c);
 }
+// The Standard Artist Agreement in the office's own layout (owner 2026-10-13: "i dont like the
+// boilerplate clauses, there should be a standard template" + 7 sample contracts): dark ASP header
+// band, the not-binding strip, a date/hours/fee/deposit summary, the numbered ENGAGEMENT table, then
+// TERMS in the contracts' own wording. Inline styles + fixed colors so the app, print, the emailed
+// copy and the client signing page all look the same (the email never loads styles.css). The
+// artist-specific lines (Mechitza, approvals, ...) still come from the contract's boilerplate flags,
+// which default from that artist's payee profile.
+function contractMadeOnSentence(c){
+  const d = new Date((c.createdAt||new Date().toISOString()).slice(0,10)+'T00:00:00');
+  return `${ordinal(d.getDate())} day of the month of ${d.toLocaleString('en-US',{month:'long'})} ${d.getFullYear()}`;
+}
 function standardDocContent(c){
   const profile = contractPayeeProfile(c, housePayeeProfile);
   const brand = getBrandConfig(c.brand);
   const figures = contractPaymentFigures(c);
   const who = contractPerformerName(c);
-  const boilerplate = contractBoilerplateLines(c);
-  const travelSentence = contractTravelSentence(c.travelClause);
-  const contactLine = contractClientContactLine(c);
-  return `
-    ${docBsdHeader(c)}
-    <div class="doc-letterhead">
-      <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(brand.label)}</div>
-      <span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span>
+  const b = c.boilerplate || {};
+  const ev = getEvent(c.leadId);
+  const start = ev && ev.time && ev.time!=='00:00' ? fmtTime(ev.time) : '';
+  const travel = contractTravelSentence(c.travelClause);
+  const plusTravel = travel ? ' plus travel expenses' : '';
+  const pct = Number(c.deposit.percent)>0 ? `${Number(c.deposit.percent)}%` : (figures.total && figures.deposit ? `${Math.round(figures.deposit/figures.total*100)}%` : '');
+  const depositLabel = `${money(figures.deposit)}${pct?` (${pct})`:''}`;
+  const dateObj = c.snapshot.eventDate ? new Date(c.snapshot.eventDate+'T00:00:00') : null;
+  const dateLong = dateObj ? dateObj.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'}) : 'TBD';
+  const dateShort = dateObj ? dateObj.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) : 'Date TBD';
+  const where = [c.snapshot.city, c.snapshot.state].filter(Boolean).join(', ');
+  const place = [c.snapshot.venue || 'TBD', where].filter(Boolean).join(', ');
+  const hours = c.hoursOfEngagement || 'TBD';
+  const hoursLine = `${hours}${start? `, starting ${start}` : ' (start time TBD)'}`;
+  const timing = c.balanceDueTiming==='at_event' ? 'at the event' : c.balanceDueTiming==='on_completion' ? 'when the project is complete' : 'prior to the engagement';
+  const terms = [];
+  if(b.notBindingUntilDeposit) terms.push('Contract is not binding until the deposit is received.');
+  terms.push(`A ${c.deposit.nonRefundable?'non-refundable ':''}deposit of ${depositLabel} is required to confirm the date. The outstanding balance of ${money(figures.balance)}${plusTravel} is to be paid ${timing}.`);
+  if(c.overtime.interval==='not_applicable') terms.push('Overtime: N/A.');
+  else if(Number(c.overtime.rate)) terms.push(`If the Artist is asked to stay beyond the agreed upon time, then a ${money(Number(c.overtime.rate))} per ${overtimeIntervalLabel(c.overtime.interval)} charge shall be paid in overtime fees.`);
+  if(travel) terms.push(`Travel (${travel.replace(/^plus /,'')}) is booked by ASP Management and invoiced together with the final balance.`);
+  contractBoilerplateLines(c).filter(l=>l!=='This contract is not binding until the deposit is received.').forEach(l=>terms.push(l));
+  terms.push(contractCancellationText(c));
+  terms.push('Any and all changes to this agreement must be approved and initialed by both Client and Artist.');
+  const ink = '#17171A', mute = '#6B6B72', rule = '#17171A', accent = '#5B78A8';
+  const label = t=>`<div style="font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:${accent};font-weight:700;margin:22px 0 8px;padding-bottom:6px;border-bottom:2px solid ${rule};">${t}</div>`;
+  const row = (n,k,v)=>`<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #E3E3E8;color:${mute};font-size:12.5px;vertical-align:top;white-space:nowrap;">${n}. ${k}</td><td style="padding:8px 0;border-bottom:1px solid #E3E3E8;font-weight:700;font-size:12.5px;">${v}</td></tr>`;
+  const stat = (k,v)=>`<td style="padding:10px 18px 10px 0;vertical-align:top;border:none;background:none;"><div style="font-size:10.5px;color:${mute};">${k}</div><div style="font-size:13px;font-weight:700;">${v}</div></td>`;
+  const bars = [10,22,16,20,13].map(h=>`<span style="display:inline-block;width:5px;height:${h}px;margin-right:3px;border-radius:3px;background:#7FA0D1;vertical-align:bottom;"></span>`).join('');
+  const phone = brand.phone || '';
+  return `<div style="background:#fff;color:${ink};font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.55;">
+    <div style="background:#14161C;color:#fff;border-radius:10px 10px 0 0;padding:20px 24px;position:relative;">
+      ${c.bsdHeader? `<div style="position:absolute;top:10px;right:16px;font-size:11px;color:#9FB3D6;">BS"D</div>` : ''}
+      <table role="presentation" style="border-collapse:collapse;border:none;background:none;"><tr>
+        <td style="padding:0 18px 0 0;border:none;border-right:1px solid #333845;text-align:center;vertical-align:middle;background:none;"><div style="height:24px;">${bars}</div><div style="font-weight:700;font-size:18px;margin-top:4px;">ASP</div></td>
+        <td style="padding:0 0 0 18px;border:none;vertical-align:middle;background:none;">
+          <div style="font-size:10.5px;letter-spacing:.22em;color:#9FB3D6;">ARTIST AGREEMENT${c.status==='draft'?' &nbsp;|&nbsp; DRAFT':''}</div>
+          <div style="font-size:24px;font-weight:700;line-height:1.2;">${esc(who)}</div>
+          <div style="font-size:12.5px;color:#C9CFDA;">${[esc(c.snapshot.occasion||''), esc(where), esc(dateShort)].filter(Boolean).join(' &middot; ')}</div>
+        </td></tr></table>
     </div>
-    <div class="doc-title">ARTIST AGREEMENT</div>
-    <div class="doc-sub">Agreement ${esc(c.id)} &middot; ${contractDateSentence(c)}, between ${esc(profile.entityName)}, hereafter referred to as "the Artist", and ${esc(c.snapshot.clientName||'the Client')}, hereafter referred to as "the Client".</div>
-    <div class="doc-parties">
-      <div class="doc-party"><h4>Artist</h4><p><strong>${esc(who)}</strong><br/>Represented by ${esc(profile.entityName)}</p></div>
-      <div class="doc-party"><h4>Client</h4><p><strong>${esc(c.snapshot.clientName||'—')}</strong>${c.snapshot.clientEmail?`<br/>${esc(c.snapshot.clientEmail)}`:''}</p></div>
-    </div>
-    <div class="doc-section"><h3>Terms of Engagement</h3>
-      <div class="doc-facts">
-        <div><span class="k">Place of Engagement</span><span>${esc(c.snapshot.venue)||'TBD'}${(c.snapshot.city||c.snapshot.state)? `, ${esc(c.snapshot.city)}${c.snapshot.city&&c.snapshot.state?', ':''}${esc(c.snapshot.state)}` : ''}</span></div>
-        <div><span class="k">Date of Engagement</span><span>${c.snapshot.eventDate? fmtDate(c.snapshot.eventDate) : 'TBD'}</span></div>
-        <div><span class="k">Hours of Engagement</span><span>${esc(c.hoursOfEngagement||'—')}</span></div>
-        <div><span class="k">Occasion</span><span>${esc(c.snapshot.occasion)||'—'}</span></div>
-        <div><span class="k">Payment for Engagement</span><span>${contractFeeDisplayHtml(c, figures)}${c.fee.note?` ${esc(c.fee.note)}`:''}${travelSentence?` ${esc(travelSentence)}`:''}</span></div>
+    ${b.notBindingUntilDeposit? `<div style="background:#FBEFD9;color:#8A5A0F;font-size:10.5px;font-weight:700;letter-spacing:.14em;padding:9px 24px;">NOT BINDING UNTIL THE DEPOSIT IS RECEIVED &middot; DATE IS NOT HELD UNTIL THE DEPOSIT IS RECEIVED</div>` : ''}
+    <table role="presentation" style="border-collapse:collapse;margin:4px 0 0;width:100%;border:none;border-bottom:1px solid #E3E3E8;background:none;"><tr>
+      ${stat('Event date', esc(dateShort))}${stat('Hours', esc(hours))}${stat('Fee', `${contractFeeDisplayHtml(c, figures)}${plusTravel? ' + travel':''}`)}${stat('Deposit', esc(depositLabel))}
+    </tr></table>
+    <div style="padding:6px 0 0;font-size:12.5px;">
+      <p style="margin:14px 0 8px;">This contractual agreement is made on the <strong>${contractMadeOnSentence(c)}</strong>, between <strong>${esc(who)}</strong>, hereafter referred to as "the Artist", and <strong>${esc(c.snapshot.clientName||'the Client')}</strong>, hereafter referred to as "the Client". It is mutually agreed between the parties, as follows:</p>
+      <p style="margin:0 0 4px;">The Client hereby engages the Artist, and the Artist hereby agrees to perform the engagement, the terms and conditions of which are set forth herein:</p>
+      ${label('Engagement')}
+      <table role="presentation" style="border-collapse:collapse;width:100%;">
+        ${row(1,'Place of engagement', esc(place))}
+        ${row(2,'Date of engagement', esc(dateLong))}
+        ${row(3,'Occasion', esc(c.snapshot.occasion||'—'))}
+        ${row(4,'Hours of engagement', esc(hoursLine))}
+        ${row(5,'Payment for engagement', `${contractFeeDisplayHtml(c, figures)}${plusTravel}${c.fee.note?` ${esc(c.fee.note)}`:''}`)}
+        ${row(6,'Terms of engagement', `${esc(who)} as performer for the engagement`)}
+      </table>
+      <p style="margin:12px 0 4px;"><strong>Artist shall provide:</strong> ${esc(c.artistProvides || `Vocal performance for up to ${hours}`)}${/[.!]$/.test(c.artistProvides||'')?'':'.'}</p>
+      <p style="margin:0;"><strong>Client shall provide:</strong> ${esc((c.clientProvides||[]).length ? c.clientProvides.join(', ') : 'Payment')}.</p>
+      ${label('Terms')}
+      <ul style="margin:0;padding-left:18px;">${terms.map(t=>`<li style="margin:0 0 5px;">${esc(t)}</li>`).join('')}</ul>
+      ${b.acceptanceClause? `<p style="margin:12px 0 0;"><strong>Acceptance.</strong> ${esc(contractAcceptanceText(c).replace(/^Acceptance\.\s*/,''))}</p>` : ''}
+      <p style="margin:10px 0 0;">The signatures below confirm that the parties have read and approved all terms above.</p>
+      ${(c.customClauses||[]).map(cc=>`${label(esc(cc.title||'Additional Terms'))}<p style="margin:0;white-space:pre-line;">${esc(cc.body)}</p>`).join('')}
+      ${renderContractSignBlock(c, who)}
+      ${contractClientContactLine(c)? `<p style="margin:12px 0 0;"><strong>Client contact:</strong> ${esc(contractClientContactLine(c).replace(/^Client contact:\s*/,'').replace(/ - /g,' — '))}</p>` : ''}
+      ${label('Payment / Deposit Options')}
+      ${renderPayeeBlock(profile).replace(/<h3>Payment<\/h3>/,'')}
+      ${phone? `<p style="margin:6px 0 0;">For a deposit by check, please send a picture of the front and back of the check by WhatsApp to our office number ${esc(phone)}.</p>` : ''}
+      <div style="margin-top:22px;padding-top:10px;border-top:1px solid #E3E3E8;font-size:10.5px;color:${mute};display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <span>${esc(brand.senderName||'ASP Management')}${brand.email?` &middot; ${esc(brand.email)}`:''}${phone?` &middot; ${esc(phone)}`:''}</span><span>Agreement ${esc(c.id)}</span>
       </div>
     </div>
-    ${c.artistProvides? `<div class="doc-section"><h3>Artist Shall Provide</h3><ul class="doc-terms"><li>${esc(c.artistProvides)}</li></ul></div>` : ''}
-    ${c.clientProvides.length? `<div class="doc-section"><h3>Client Shall Provide</h3><ul class="doc-terms">${c.clientProvides.map(l=>`<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}
-    <div class="doc-section"><h3>Payment Terms</h3>
-      <div class="ledger" style="margin-bottom:8px;">
-        <div class="ledger-row"><span>Total Payment</span><span class="amt">${contractFeeDisplayHtml(c, figures)}</span></div>
-        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${Number(c.deposit.percent)>0?` (${esc(String(c.deposit.percent))}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
-        <div class="ledger-row total"><span>Balance Due</span><span class="amt">${money(figures.balance)}</span></div>
-      </div>
-      <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
-      ${contractOvertimeHtml(c)}
-    </div>
-    ${boilerplate.length? `<div class="doc-section"><h3>Terms &amp; Conditions</h3><ul class="doc-terms">${boilerplate.map(l=>`<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}
-    ${c.boilerplate.acceptanceClause? `<div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractAcceptanceText(c))}</p></div>` : ''}
-    <div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractCancellationText(c))}</p></div>
-    ${c.customClauses.map(cc=>`<div class="doc-section"><h3>${esc(cc.title||'Additional Terms')}</h3><p style="font-size:12.5px;line-height:1.7;margin:0;white-space:pre-line;">${esc(cc.body)}</p></div>`).join('')}
-    ${renderContractSignBlock(c, brand.signer)}
-    ${renderPayeeBlock(profile)}
-    ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
-  `;
+  </div>`;
 }
 function comedianDocContent(c){
   const profile = contractPayeeProfile(c, housePayeeProfile);
