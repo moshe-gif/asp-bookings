@@ -3241,7 +3241,8 @@ async function doAddGmailMailbox(){
   const email = (f.email||'').trim();
   if(!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ toast('Enter a valid mailbox email.', 'system'); return; }
   const { error } = await supabaseClient.from('gmail_mailboxes').insert({
-    mailbox_type: f.mailboxType||'artist_payment', artist_id: f.artistId||null, email,
+    // No artist picked = the office's sending mailbox (the dropdown's first option); it always saved as artist_payment before.
+    mailbox_type: f.artistId ? 'artist_payment' : 'asp_sending', artist_id: f.artistId||null, email,
   });
   if(error){ toast('Could not add mailbox: ' + error.message, 'system'); return; }
   S.newGmailMailboxForm = {};
@@ -3918,7 +3919,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.11'; // bump on every release so a phone can tell it has updated. v1.9.11: ASP logo everywhere (animated A loader/opener); one payment section (pay online, Zelle QR, check/cash line)
+const APP_VERSION = 'v1.9.12'; // bump on every release so a phone can tell it has updated. v1.9.12: sidebar logo full width; office sending mailbox saves with the right type
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);

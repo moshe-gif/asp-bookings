@@ -92,6 +92,9 @@ input,select,textarea{font-family:inherit; font-size:inherit;}
 /* The ASP logo (brandLogoHtml in asp.js): dark ink by default, white ink in the dark theme, dark ink
    on paper when printed. The white image's own inline display:none is what emails see. */
 .brand-logo{ max-width:100%; height:auto; }
+/* Sidebar logo fills the sidebar's width (owner 2026-10-14). */
+.rail .wordmark{ display:block; width:100%; }
+.rail .wordmark .brand-logo{ width:100% !important; }
 .doc-logo{ min-width:0; }
 @media (prefers-color-scheme: dark){
   :root:where(:not([data-theme="light"])) .logo-on-light{ display:none !important; }
