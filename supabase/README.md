@@ -41,6 +41,8 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0053_drop_artist_bookings_rpc | Applied 2026-10-13 — drops `artist_bookings()` (any artist could call it and get their leads + fee columns); activity_log's artist read now scopes through `artist_gig_view`. Isolation check ALL OK. |
 | 0054_rls_auth_uid_once | Applied 2026-10-13 — five RLS policies evaluate auth.uid() once per query (performance advisor); duplicate user_settings read policy dropped. Isolation check ALL OK. |
 | 0055_remove_sing_brand | Applied 2026-10-13 — SING Entertainment removed (owner): its `brand_config` row deleted, brand_key limited to 'asp'. No records used it. |
+| 0056_payment_requests | Applied 2026-10-13 — clients pay online (Stripe): `payment_requests` (deposit on the signing link's token, or a custom invoice's own link), `append_event_log()` (service role only), `payments.source` gains 'stripe'. See `ops/STRIPE_SETUP.md`. |
+| 0057_payment_claims | Applied 2026-10-13 — payments hardened after review: `payment_requests.applied_at` (one admin browser applies a paid deposit), `claim_payment_attempt()` (one pay attempt at a time per contract/invoice; service role only). |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in
@@ -62,6 +64,9 @@ works. Secrets live in Edge Function secrets (names in `.env.example` and each `
 | gcal-status, gcal-create-hold | ON | Settings, contract send | `ops/GOOGLE_CALENDAR_SETUP.md` |
 | gmail-oauth-callback | **OFF** (Google redirect) | Gmail connect | `ops/GMAIL_SETUP.md` |
 | gmail-status | ON | Settings | `ops/GMAIL_SETUP.md` |
+| client-pay | **OFF** (clients have no account; gated by the link token) | `/sign/` deposit, `/pay/` invoice | `ops/STRIPE_SETUP.md` |
+| stripe-webhook | **OFF** (Stripe-Signature verified instead) | Stripe | `ops/STRIPE_SETUP.md` |
+| stripe-status | ON (admin-only) | Settings, Send Contract, invoices | `ops/STRIPE_SETUP.md` |
 
 **QuickBooks / Google go-live checklist** (do all of it before filling in any client ID):
 1. ~~Apply migrations 0033 and 0034~~ — done 2026-10-10.

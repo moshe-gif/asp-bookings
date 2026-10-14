@@ -1,7 +1,7 @@
 # Setup: clients sign contracts online
 
-Live since 2026-10-13. Step 1 of the "one link" flow (sign, then pay); online payment is step 2
-and not built yet.
+Live since 2026-10-13. Step 1 of the "one link" flow (sign, then pay); step 2, paying the deposit
+on the same page, is in `ops/STRIPE_SETUP.md`.
 
 ## How it works
 1. An admin emails a contract from the Contract Builder (or clicks **Signing link** to copy one for

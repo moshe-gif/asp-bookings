@@ -207,11 +207,11 @@ let INVID = 1;
 function invoiceTotal(inv){ return (inv.items||[]).reduce((s,it)=>s+(Number(it.amount)||0),0); }
 function makeInvoice(clientName, clientEmail, items, notes, status, daysAgo){
   const created = addDays(new Date(), -daysAgo);
-  const log = [{ts:created.toISOString(), type:'email', text:`Invoice sent to ${clientName}.`}];
+  const log = [{ts:created.toISOString(), type:'system', text:`Invoice created for ${clientName}.`}];
   const paid = status==='paid';
   if(paid) log.push({ts:addDays(created, Math.max(1,Math.round(daysAgo/2))).toISOString(), type:'success', text:'Marked paid.'});
   return {
-    id:'INV-'+(INVID++), clientName, clientEmail, items, notes: notes||'',
+    id:'INV-'+(INVID++), clientName, clientEmail, items, notes: notes||'', createdTs: created.toISOString(),
     status, createdAt: fmtISO(created), sentAt: fmtISO(created),
     paidAt: paid? fmtISO(addDays(created, Math.max(1,Math.round(daysAgo/2)))) : null,
     log,
@@ -1266,20 +1266,33 @@ async function sha256Hex(str){
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
   return [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,'0')).join('');
 }
-async function createSignLink(c, html, clientEmail){
+// pay: the deposit to collect on the same link ({ amountCents, cardFeeBps, description }, from
+// contractDepositPayment), or null. If only the payment row fails, the link still works for signing.
+async function createSignLink(c, html, clientEmail, pay){
   if(!supabaseClient || !S.realSession) return { ok:false, error:'Sign in with your ASP account to make a signing link.' };
   if(!isContractApproved(c)) return { ok:false, error:'This contract isn\'t approved for sending.' };
   // The server checks the link against the shared copy of the contract, so send this one's latest first.
   if(SHARED.contracts.on) await SHARED.contracts.flush();
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  const token = btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  const token = newLinkToken();
+  const tokenHash = await sha256Hex(token);
   const { error } = await supabaseClient.from('contract_sign_requests').insert({
-    token_hash: await sha256Hex(token), contract_legacy_id: signLinkContractKey(c), contract_created_at: c.createdAt,
+    token_hash: tokenHash, contract_legacy_id: signLinkContractKey(c), contract_created_at: c.createdAt,
     terms_sha256: await sha256Hex(c.approvedTermsFingerprint), event_legacy_id: isHarnessBrowser() ? null : (c.leadId||null),
     brand_key: c.brand||null, client_name: c.snapshot.clientName||null, client_email: clientEmail||null, rendered_html: html,
   });
   if(error) return { ok:false, error:'Could not make a signing link: ' + error.message };
-  return { ok:true, url: `${location.origin}/sign/#${token}` };
+  let payError = null, withPay = false;
+  if(pay){
+    const { error: pErr } = await supabaseClient.from('payment_requests').insert({
+      token_hash: tokenHash, kind:'contract_deposit', contract_legacy_id: signLinkContractKey(c), contract_created_at: c.createdAt,
+      event_legacy_id: isHarnessBrowser() ? null : (c.leadId||null), brand_key: c.brand||null,
+      client_name: c.snapshot.clientName||null, client_email: clientEmail||null,
+      description: pay.description, amount_cents: pay.amountCents, card_fee_bps: pay.cardFeeBps,
+    });
+    if(pErr) payError = 'The online deposit payment couldn\'t be added (' + pErr.message + ') — the client can still sign.';
+    else withPay = true;
+  }
+  return { ok:true, url: `${location.origin}/sign/#${token}`, withPay, payError };
 }
 // Cancels a contract's unsigned links (deleted, voided, approval revoked or replaced by new terms), so a
 // client can't sign terms that no longer stand. Best-effort: the app also refuses to apply a signature
@@ -1290,12 +1303,24 @@ function revokeOpenSignLinks(c){
     .eq('contract_legacy_id', signLinkContractKey(c)).eq('contract_created_at', c.createdAt)
     .is('signed_at', null).is('revoked_at', null)
     .then(({ error })=>{ if(error) console.warn('could not cancel signing links', c.id, error.message); });
+  revokeOpenPaymentLinks({ contract:c });
+}
+// Cancels unpaid payment links: a contract's (with its signing links, above, or once its deposit is
+// verified by hand) or an invoice's (marked paid by hand). Best-effort: the server also refuses to
+// charge a voided/changed contract, a deposit already received, or a paid invoice.
+function revokeOpenPaymentLinks({ contract, invoice }){
+  if(!supabaseClient || !S.realSession || !isAdminUser(S.user)) return;
+  let q = supabaseClient.from('payment_requests').update({ revoked_at: new Date().toISOString() });
+  q = contract ? q.eq('contract_legacy_id', signLinkContractKey(contract)).eq('contract_created_at', contract.createdAt)
+    : q.eq('invoice_legacy_id', invoicePayKey(invoice)).eq('invoice_created_at', invoice.createdTs||'');
+  q.is('revoked_at', null).in('pay_status', ['open','failed'])
+    .then(({ error })=>{ if(error) console.warn('could not cancel payment links', error.message); });
 }
 // What the client receives: the contract as it reads once it has gone out. Rendered from a draft it
 // would carry a "Draft" status pill on the letterhead (every emailed contract did, until 2026-10-13).
 function clientContractHtml(c){ return contractEmailHtml(c.status==='draft' ? { ...c, status:'sent' } : c); }
-function contractEmailWithSignButton(html, url){
-  const button = `<div style="max-width:640px;margin:0 auto 16px;text-align:center;"><a href="${esc(url)}" style="display:inline-block;background:#4C6FA5;color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">Review &amp; sign online</a></div>`;
+function contractEmailWithSignButton(html, url, withPay){
+  const button = `<div style="max-width:640px;margin:0 auto 16px;text-align:center;"><a href="${esc(url)}" style="display:inline-block;background:#4C6FA5;color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">${withPay?'Review, sign &amp; pay online':'Review &amp; sign online'}</a></div>`;
   return html.replace('<body>', '<body>' + button);
 }
 async function doMakeSignLink(id){
@@ -1304,9 +1329,10 @@ async function doMakeSignLink(id){
   if(c.status==='signed'){ toast('This contract is already signed. If you changed its terms, set its status back to Sent to send the new version for signing.', 'system'); return; }
   if(!isContractApproved(c)){ toast(c.approvedAt ? 'Money/terms changed since this contract was approved — re-approve it first.' : 'Approve this contract for sending first — money/terms must be approved before a signing link can go out.', 'system'); return; }
   S.signLinkBusy = id; render();
-  const link = await createSignLink(c, clientContractHtml(c), c.snapshot.clientEmail);
+  const link = await createSignLink(c, clientContractHtml(c), c.snapshot.clientEmail, contractDepositPayment(c));
   S.signLinkBusy = null;
   if(!link.ok){ toast(link.error, 'system'); render(); return; }
+  if(link.payError) toast(link.payError, 'system');
   S.signLinks = { ...(S.signLinks||{}), [id]: link.url };
   // A link made for a draft is going out another way: same as marking it Sent by hand.
   if(c.status==='draft'){ freezeContractPayee(c); c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); advanceLeadForContract(c, `Signing link made for contract ${c.id} (sent outside the app).`); }
@@ -1348,12 +1374,196 @@ function startClientSignatureWatch(){
   if(clientSignatureChannel || !supabaseClient || !S.realSession || !isAdminUser(S.user)) return;
   clientSignatureChannel = supabaseClient.channel('contract-signatures')
     .on('postgres_changes', { event:'UPDATE', schema:'public', table:'contract_sign_requests' }, ()=>applyClientSignatures())
+    .on('postgres_changes', { event:'UPDATE', schema:'public', table:'payment_requests' }, ()=>applyClientPayments())
     .subscribe();
   applyClientSignatures();
+  applyClientPayments();
 }
 function stopClientSignatureWatch(){
   if(clientSignatureChannel){ supabaseClient.removeChannel(clientSignatureChannel); clientSignatureChannel = null; }
   S.earlierClientSignatures = {};
+  S.clientPayments = {};
+}
+
+/* ---- Client online payments (migration 0056, Edge Functions client-pay / stripe-webhook / stripe-status,
+   ops/STRIPE_SETUP.md) ----
+   A contract's deposit rides on its signing link: the same token gets a payment_requests row (amount
+   and card fee frozen), and the client's /sign/ page shows "Pay your deposit" once they've signed. A
+   custom invoice gets its own /pay/#<token> link. The server records the money (payments ledger, gig
+   log, receipt); applyClientPayments() then does what Verify Deposit does -- in every admin browser,
+   idempotently -- marks the deposit received and the gig Booked and sends the booking confirmation, or
+   marks the invoice paid. The card fee (Settings, 0-3%) applies to credit cards only, never to gigs in
+   states that ban surcharges. Owner 2026-10-13. */
+const NO_CARD_FEE_STATES = ['CT','MA'];
+// "Connecticut", "Conn.", "ct", "Mass." … → CT / MA; anything else as typed (upper-cased, no dots).
+function normalizeState(s){
+  const t = String(s||'').trim().toUpperCase().replace(/\./g,'').replace(/\s+/g,' ');
+  if(['CT','CONN','CONNECTICUT'].includes(t)) return 'CT';
+  if(['MA','MASS','MASSACHUSETTS'].includes(t)) return 'MA';
+  return t;
+}
+function cardFeePercentSetting(){ const n = Number(ORG_SETTINGS.cardFeePercent)||0; return Math.min(Math.max(n, 0), 3); }
+// The gig's state, or the contract's; a no-fee state in EITHER wins (contractCardFeeBps).
+function contractGigStates(c){ const ev = getEvent(c.leadId); return [ev && ev.state, c.snapshot && c.snapshot.state].map(normalizeState).filter(Boolean); }
+function contractGigState(c){ const all = contractGigStates(c); return all.find(x=>NO_CARD_FEE_STATES.includes(x)) || all[0] || ''; }
+function stripeReady(){ return !!(S.stripeStatus && S.stripeStatus.connected); }
+function contractCardFeeBps(c){
+  return NO_CARD_FEE_STATES.includes(contractGigState(c)) ? 0 : Math.round(cardFeePercentSetting() * 100);
+}
+async function refreshStripeStatus(){
+  const data = await callEdgeFunction('stripe-status', {});
+  S.stripeStatus = data && data.ok ? data : { connected:false, error:(data && data.error) || 'Could not check Stripe.' };
+  render();
+}
+function contractDepositCents(c){ return Math.round((Number(contractPaymentFigures(c).deposit)||0) * 100); }
+function contractDepositDescription(c){
+  return `Deposit — ${c.snapshot.venue||'your event'}${c.snapshot.eventDate?` (${fmtDateShort(c.snapshot.eventDate)})`:''}`.slice(0, 200);
+}
+// The deposit for a signing link (same token), or null when it can't be paid online.
+function contractDepositPayment(c){
+  const cents = contractDepositCents(c);
+  if(!stripeReady() || cents < 50) return null;
+  return { amountCents: cents, cardFeeBps: contractCardFeeBps(c), description: contractDepositDescription(c) };
+}
+// Exact dollars and cents (money() rounds to whole dollars).
+function moneyCents(n){ return '$' + (Number(n)||0).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
+function newLinkToken(){
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function invoicePayKey(inv){ return isHarnessBrowser() ? `INV-TEST-${inv.id}-${Date.parse(inv.createdTs)||0}` : inv.id; }
+// html(inv) builds the frozen copy AFTER the shared sync has settled the invoice's id.
+async function createInvoicePayLink(inv, html){
+  if(!supabaseClient || !S.realSession) return { ok:false, error:'Sign in with your ASP account to make a payment link.' };
+  const cents = Math.round(invoiceTotal(inv) * 100);
+  if(cents < 50) return { ok:false, error:'The invoice total is too small to pay online.' };
+  if(!inv.createdTs){ inv.createdTs = new Date().toISOString(); saveCustomInvoices(); }
+  // The server checks the link against the shared copy of the invoice, so send this one's latest first.
+  if(SHARED.invoices.on) await SHARED.invoices.flush();
+  if(typeof html==='function') html = html(inv);
+  const token = newLinkToken();
+  const { error } = await supabaseClient.from('payment_requests').insert({
+    token_hash: await sha256Hex(token), kind:'invoice', invoice_legacy_id: invoicePayKey(inv), invoice_created_at: inv.createdTs,
+    rendered_html: html, brand_key:'asp', client_name: inv.clientName||null, client_email: inv.clientEmail||null,
+    description: `Invoice ${inv.id}`, amount_cents: cents, card_fee_bps: inv.noCardFee ? 0 : Math.round(cardFeePercentSetting() * 100),
+  });
+  if(error) return { ok:false, error:'Could not make a payment link: ' + error.message };
+  return { ok:true, url: `${location.origin}/pay/#${token}` };
+}
+function invoiceEmailHtml(inv, payUrl){
+  const brand = getBrandConfig('asp');
+  const rows = (inv.items||[]).map(it=>`<tr><td style="padding:8px 0;border-bottom:1px dashed #E1E1E6;">${esc(it.label)}</td><td style="padding:8px 0;border-bottom:1px dashed #E1E1E6;text-align:right;">${moneyCents(it.amount)}</td></tr>`).join('');
+  const button = payUrl ? `<div style="max-width:640px;margin:0 auto 16px;text-align:center;"><a href="${esc(payUrl)}" style="display:inline-block;background:#4C6FA5;color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">Pay online</a></div>` : '';
+  return `<!doctype html><html><head><meta charset="utf-8"/></head><body style="margin:0;padding:24px;background:#F5F4EF;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17171A;">${button}
+  <div style="max-width:640px;margin:0 auto;background:#fff;padding:32px;border-radius:10px;">
+    <div style="font-size:1.15rem;font-weight:700;padding-bottom:18px;border-bottom:2px solid #17171A;margin-bottom:22px;">${esc(brand.label||'ASP')}</div>
+    <div style="font-size:1.5rem;font-weight:700;text-align:center;margin:6px 0 2px;">INVOICE</div>
+    <div style="text-align:center;font-size:11.5px;color:#9A9AA1;margin-bottom:26px;">${esc(inv.id)} &middot; ${esc(fmtDate(inv.createdAt))}</div>
+    <p style="margin:0 0 18px;font-size:13.5px;"><span style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#9A9AA1;font-weight:700;">Billed to</span><br/><strong>${esc(inv.clientName)}</strong>${inv.clientEmail?`<br/>${esc(inv.clientEmail)}`:''}</p>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">${rows}
+      <tr><td style="padding:10px 0 0;font-weight:700;font-size:14.5px;">Total due</td><td style="padding:10px 0 0;text-align:right;font-weight:700;font-size:14.5px;">${moneyCents(invoiceTotal(inv))}</td></tr></table>
+    ${inv.notes?`<p style="font-size:12.5px;color:#67676D;margin:18px 0 0;">${esc(inv.notes)}</p>`:''}
+    <p style="font-size:12.5px;line-height:1.7;color:#67676D;margin:18px 0 0;">${payUrl?'Pay online with the button above (card or bank transfer), or by ':'Payment by '}Zelle or check made out to ${esc(brand.label||'ASP')}. Questions? ${esc(brand.email||'')}</p>
+  </div></body></html>`;
+}
+async function doMakeInvoicePayLink(id){
+  const inv = getInvoice(id); if(!inv || S.payLinkBusy) return;
+  if(inv.status==='paid'){ toast('This invoice is already paid.', 'system'); return; }
+  if(!stripeReady()){ toast('Online payments aren\'t set up yet — see Settings → Online payments.', 'system'); return; }
+  S.payLinkBusy = id; render();
+  const link = await createInvoicePayLink(inv, x=>invoiceEmailHtml(x, null));
+  S.payLinkBusy = null;
+  if(!link.ok){ toast(link.error, 'system'); render(); return; }
+  S.payLinks = { ...(S.payLinks||{}), [id]: link.url };
+  render();
+  try{ await navigator.clipboard.writeText(link.url); toast('Payment link copied — paste it to the client.', 'success'); }
+  catch(e){ toast('Payment link ready — copy it from the box.', 'system'); }
+}
+function paidOnlineText(r){
+  const how = r.pay_method==='us_bank_account' ? `bank transfer${r.pay_last4?` ••${r.pay_last4}`:''}`
+    : `${r.card_brand ? r.card_brand.charAt(0).toUpperCase()+r.card_brand.slice(1) : 'Card'}${r.card_funding==='credit'?' credit':r.card_funding==='debit'?' debit':''}${r.pay_last4?` ••${r.pay_last4}`:''}`;
+  return `${moneyCents((r.total_cents||0)/100)} by ${how}${r.fee_cents?`, incl. ${moneyCents(r.fee_cents/100)} card fee`:''}`;
+}
+// S.clientPayments: "c|<contract key>|<createdAt>" / "i|<invoice key>|<createdTs>" → the payment row
+// that took money (or is taking it: a bank transfer still processing).
+function contractOnlinePayment(c){ return (S.clientPayments||{})[`c|${signLinkContractKey(c)}|${c.createdAt}`] || null; }
+function invoiceOnlinePayment(inv){ return (S.clientPayments||{})[`i|${invoicePayKey(inv)}|${inv.createdTs}`] || null; }
+function contractPaymentPill(c){
+  const r = contractOnlinePayment(c); if(!r) return '';
+  if(r.pay_status==='processing') return `<span class="pill pill-wrap pill-neutral" data-testid="online-payment">Deposit: bank transfer processing (started ${fmtDateShort(String(r.processing_at||r.created_at).slice(0,10))})</span>`;
+  const warn = r.pay_status==='refunded' ? ' — since refunded' : r.pay_status==='disputed' ? ' — disputed by the client, check Stripe' : '';
+  return `<span class="pill pill-wrap ${warn?'pill-warn':'pill-good'}" data-testid="online-payment">Deposit paid online — ${esc(paidOnlineText(r))}, ${fmtDateShort(String(r.paid_at).slice(0,10))}${warn}</span>`;
+}
+const appliedOnlinePayments = new Set();
+async function applyClientPayments(){
+  if(!supabaseClient || !S.realSession || !isAdminUser(S.user)) return;
+  const { data, error } = await supabaseClient.from('payment_requests')
+    .select('id, kind, contract_legacy_id, contract_created_at, invoice_legacy_id, invoice_created_at, pay_status, pay_method, card_brand, card_funding, pay_last4, fee_cents, total_cents, amount_cents, processing_at, paid_at, applied_at, created_at')
+    .in('pay_status', ['processing','paid','refunded','disputed']).order('created_at');
+  if(error){ console.warn('could not load online payments', error.message); return; }
+  const map = {};
+  for(const r of data||[]){
+    const k = r.kind==='invoice' ? `i|${r.invoice_legacy_id}|${r.invoice_created_at}` : `c|${r.contract_legacy_id}|${r.contract_created_at}`;
+    if(!map[k] || map[k].pay_status==='processing') map[k] = r;
+  }
+  const changed = canon(map)!==canon(S.clientPayments||{});
+  S.clientPayments = map;
+  // Each payment is applied once, by whichever admin browser claims it first (applied_at, 0057).
+  for(const c of CONTRACTS){
+    const r = contractOnlinePayment(c);
+    if(!r || r.pay_status!=='paid' || r.applied_at || appliedOnlinePayments.has(r.id)) continue;
+    const ev = getEvent(c.leadId);
+    if(!ev) continue;   // its gig hasn't loaded yet: try again on the next change
+    if(ev.depositVerification && ev.depositVerification.paymentRequestId===r.id){ appliedOnlinePayments.add(r.id); continue; }
+    if(ev.depositReceived){
+      // Verified another way (Zelle, check) AND paid online: the client paid twice. One browser says so.
+      appliedOnlinePayments.add(r.id);
+      if(await claimOnlinePayment(r)){
+        logEvent(ev, 'system', `The client ALSO paid the deposit online (${paidOnlineText(r)}) after it was verified another way — refund one of the two payments in Stripe.`);
+        reportEventSave(updateEvent(ev.id, {}), 'noting the second deposit payment');
+        toast(`${ev.clientName||'A client'} paid the deposit twice (online and another way) — refund one in Stripe.`, 'system');
+      }
+      continue;
+    }
+    if(!(await claimOnlinePayment(r))){ appliedOnlinePayments.add(r.id); continue; }
+    appliedOnlinePayments.add(r.id);
+    applyOnlineDeposit(ev, c, r);
+  }
+  let invChanged = false;
+  for(const inv of CUSTOM_INVOICES){
+    const r = invoiceOnlinePayment(inv);
+    if(!r || r.pay_status!=='paid' || inv.status==='paid') continue;
+    // Marking the invoice paid is the same in every browser, so no claim is needed for it.
+    inv.status = 'paid'; inv.paidAt = String(r.paid_at).slice(0,10);
+    inv.log = [...(inv.log||[]), { ts:r.paid_at, type:'success', text:`Paid online: ${paidOnlineText(r)}.` }];
+    invChanged = true;
+  }
+  if(invChanged) saveCustomInvoices();
+  if(changed || invChanged) renderPreservingFocus();
+}
+async function claimOnlinePayment(r){
+  const { data, error } = await supabaseClient.from('payment_requests').update({ applied_at: new Date().toISOString() })
+    .eq('id', r.id).is('applied_at', null).select('id');
+  if(error){ console.warn('could not claim the online payment', r.id, error.message); return false; }
+  return !!(data && data.length);
+}
+// What Verify Deposit does, for a deposit the client paid online: the gig is Booked, the deposit
+// received, and the client gets the booking confirmation. Only the admin browser that claimed the
+// payment (claimOnlinePayment) gets here.
+function applyOnlineDeposit(ev, c, r){
+  const text = paidOnlineText(r);
+  logEvent(ev, 'success', `Deposit paid online (${text}) for contract ${c.id} — job officially booked & locked on calendar.`);
+  const depositVerification = { method:'stripe', note:`Paid online: ${text}`, loggedBy:null, loggedAt:r.paid_at, paymentRequestId:r.id };
+  const patch = { depositReceived:true, depositReceivedDate:String(r.paid_at).slice(0,10), depositVerification };
+  if(STATUS_GROUPS.open.includes(ev.status)) patch.status = 'booked';
+  const result = updateEvent(ev.id, patch);
+  if(!result.ok){
+    // Claimed but not saved here: tell the office rather than lose it (the money is recorded in Stripe and the ledger).
+    toast(`${ev.clientName||'A client'} paid the deposit online, but this gig couldn't be updated — reload and use Verify Deposit.`, 'system');
+    return;
+  }
+  toast(`${ev.clientName||'The client'} paid the deposit online — ${patch.status==='booked'?'booked':'deposit recorded'}.`, 'success');
+  if(ev.clientEmail && patch.status==='booked' && !isHarnessBrowser()) doSendBookingConfirmationEmail(ev.id);
 }
 
 /* ---- Send Contract (real email, via the send-contract-email Supabase Edge Function) ---- */
@@ -1379,6 +1589,7 @@ async function doSendContractEmail(){
   const to = (S.sendContractForm.to||'').trim();
   const subject = (S.sendContractForm.subject||'').trim();
   const wantsInvoice = !!S.sendContractInvoice;
+  const payOnline = !!S.sendContractPayOnline;
   const qboAmount = Number(S.sendContractForm.qboAmount)||0;
   const qboDescription = S.sendContractForm.qboDescription||'Deposit';
   if(!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)){ toast('Enter a valid recipient email.', 'system'); return; }
@@ -1401,9 +1612,10 @@ async function doSendContractEmail(){
     // c.qboInvoiceId is the idempotency marker.
     // The sign-online button (the client signs the exact wording below it). If the link can't be
     // made, the contract still goes out -- without the button -- and the admin is told.
-    const link = c.status==='signed' ? { ok:false } : await createSignLink(c, html, to);
+    const link = c.status==='signed' ? { ok:false } : await createSignLink(c, html, to, payOnline ? contractDepositPayment(c) : null);
     if(!link.ok && link.error) toast(link.error + ' The contract will go out without the sign-online button.', 'system');
-    const sent = await sendEmail({ to, subject, html: link.ok ? contractEmailWithSignButton(html, link.url) : html, brand: c.brand });
+    if(link.payError) toast(link.payError, 'system');
+    const sent = await sendEmail({ to, subject, html: link.ok ? contractEmailWithSignButton(html, link.url, link.withPay) : html, brand: c.brand });
     if(!sent.ok){ toast(sent.error, 'system'); return; }
     if(c.status==='draft'){ freezeContractPayee(c); c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); }
     // The real send is what moves the lead along (only forward: lead/negotiating -> contract_sent).
@@ -2584,7 +2796,7 @@ async function linkRealSessionToRosterNow(session){
   // sign-in showed QuickBooks/Calendar as "not connected" until a reload, and an artist's reload
   // called the admin-only status functions.
   loadBrandConfig();
-  if(adminRow){ refreshQboStatus(); refreshGcalStatus(); }
+  if(adminRow){ refreshQboStatus(); refreshGcalStatus(); refreshStripeStatus(); }
   await syncArtistRoster();
   startSharedSync().then(startClientSignatureWatch); // after contracts load, so signatures land on them
 }
@@ -3594,7 +3806,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.6'; // bump on every release so a phone can tell it has updated. v1.9.6: New Lead paste-a-message auto-fill
+const APP_VERSION = 'v1.9.7'; // bump on every release so a phone can tell it has updated. v1.9.7: clients pay deposits and invoices online (Stripe)
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -3834,6 +4046,7 @@ function renderSettingsPage(){
   ${isAdmin ? renderPayeeProfilesCard() : ''}
 
   ${isAdmin ? renderQuickBooksCard() : ''}
+  ${isAdmin ? renderOnlinePaymentsCard() : ''}
 
   ${isAdmin ? renderGoogleCalendarSyncCard() : ''}
 
@@ -6044,8 +6257,10 @@ function renderNewInvoiceModal(){
           </div>
         </div>
         <div class="field"><label>Notes (optional)</label><input data-field="notes" value="${esc(f.notes||'')}" placeholder="Reference / memo"/></div>
-        <div class="ledger" style="margin:4px 0 0;"><div class="ledger-row total"><span>Total</span><span class="amt">${money(total)}</span></div></div>
-        <button class="btn btn-primary btn-block" data-action="submit-invoice" style="margin-top:6px;">Send Invoice</button>
+        <div class="ledger" style="margin:4px 0 0;"><div class="ledger-row total"><span>Total</span><span class="amt">${moneyCents(total)}</span></div></div>
+        ${stripeReady() ? `<p style="font-size:11.5px;color:var(--ink-3);margin:8px 0 0;">The email includes a <strong>Pay online</strong> button (card or bank transfer).</p>
+          ${cardFeePercentSetting() ? `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:6px;"><input type="checkbox" data-action="toggle-invoice-no-card-fee" ${f.noCardFee?'checked':''}/> No credit card fee on this invoice (required if the client is in CT or MA)</label>` : ''}` : ''}
+        <button class="btn btn-primary btn-block" data-action="submit-invoice" style="margin-top:6px;" ${S.invoiceSendBusy?'disabled':''}>${S.invoiceSendBusy?'Sending…':'Send Invoice'}</button>
       </div>
     </div>
   </div>`;
@@ -6260,6 +6475,10 @@ function renderInvoiceDoc(){
 
         <div class="doc-section"><h3>Payment</h3>
           <p style="font-size:12.5px;line-height:1.7;margin:0;">Payment via QuickBooks invoice, Zelle, or check made out to ${esc(getBrandConfig('asp').label)}. Contact <span class="u-mono">${esc(getBrandConfig('asp').email)}</span> with questions.</p>
+          ${invoiceOnlinePayment(inv) ? `<p style="margin:8px 0 0;"><span class="pill pill-wrap pill-good" data-testid="invoice-online-payment">${invoiceOnlinePayment(inv).pay_status==='processing' ? 'Bank transfer processing' : `Paid online — ${esc(paidOnlineText(invoiceOnlinePayment(inv)))}`}</span></p>`
+            : inv.status!=='paid' && stripeReady() ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+              <button class="btn btn-sm btn-ghost" data-action="make-invoice-pay-link" data-id="${inv.id}" ${S.payLinkBusy===inv.id?'disabled':''}>${S.payLinkBusy===inv.id?'Making link…':'Pay link'}</button>
+              ${S.payLinks && S.payLinks[inv.id] ? `<input readonly data-testid="pay-link-url" aria-label="Payment link" value="${esc(S.payLinks[inv.id])}" style="flex:1 1 220px;min-width:0;"/>` : ''}</div>` : ''}
         </div>
 
       </div>
@@ -6382,6 +6601,22 @@ function renderTravelRequestDetailSheet(){
 }
 
 /* ---- Send Contract confirm (calls the send-contract-email Supabase Edge Function) ---- */
+// "Pay online" in Send Contract: the deposit rides on the signing link (contractDepositPayment).
+function renderSendContractPayOption(c, busy){
+  if(c.status==='signed') return '';
+  const cents = contractDepositCents(c);
+  if(!stripeReady()) return `<p style="font-size:11.5px;color:var(--ink-3);margin:0;border-top:1px solid var(--border);padding-top:10px;">Online deposit payment: not set up yet (Settings → Online payments).</p>`;
+  if(cents < 50) return `<p style="font-size:11.5px;color:var(--ink-3);margin:0;border-top:1px solid var(--border);padding-top:10px;">No deposit on this contract, so there's nothing to pay online.</p>`;
+  const bps = contractCardFeeBps(c);
+  const st = contractGigState(c);
+  const feeText = bps ? `Credit cards add a ${bps/100}% card fee (${moneyCents(Math.round(cents*bps/10000)/100)}); bank transfer and debit cards don't.${st?'':' The gig has no state on file — check it isn\'t in CT or MA, where card fees aren\'t allowed.'}`
+    : cardFeePercentSetting() && NO_CARD_FEE_STATES.includes(st) ? `No card fee: card surcharges aren't allowed in ${esc(st)}.`
+    : 'No card fee (set one in Settings → Online payments).';
+  return `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;border-top:1px solid var(--border);padding-top:10px;">
+      <input type="checkbox" data-action="toggle-send-contract-pay" ${S.sendContractPayOnline?'checked':''} ${busy?'disabled':''}/> Let the client pay the ${moneyCents(cents/100)} deposit online after signing (card or bank)
+    </label>
+    ${S.sendContractPayOnline?`<p style="font-size:11.5px;color:var(--ink-3);margin:-4px 0 0 24px;">${feeText}${S.stripeStatus.mode==='test'?' Stripe is in <strong>test mode</strong>: no real money moves.':''}</p>`:''}`;
+}
 function renderSendContractConfirmModal(){
   const c = getContract(S.contractBuilderId); if(!c) return '';
   const f = S.sendContractForm||{};
@@ -6393,6 +6628,7 @@ function renderSendContractConfirmModal(){
         <div class="field"><label>To</label><input data-field="to" type="email" value="${esc(f.to||'')}" placeholder="client@email.com" ${busy?'disabled':''}/></div>
         <div class="field"><label>Subject</label><input data-field="subject" value="${esc(f.subject||'')}" ${busy?'disabled':''}/></div>
         <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Sends the contract exactly as shown in the preview, as an email the client can read directly.</p>
+        ${renderSendContractPayOption(c, busy)}
         ${S.qboStatus && S.qboStatus.connected ? `
         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;border-top:1px solid var(--border);padding-top:10px;">
           <input type="checkbox" data-action="toggle-send-contract-invoice" ${S.sendContractInvoice?'checked':''} ${busy?'disabled':''}/> Also send a QuickBooks invoice for the deposit (payable by credit card)
@@ -6469,6 +6705,7 @@ function renderContractBuilderModal(){
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:8px 10px;border-radius:8px;background:var(--surface-2);">
           ${c.clientSignature ? `<span class="pill pill-wrap ${signedTermsChanged(c) ? 'pill-warn' : 'pill-good'}">Signed online by ${esc(c.clientSignature.name)} — ${fmtDateShort(String(c.clientSignature.at).slice(0,10))}${signedTermsChanged(c) ? ' (terms changed since)' : ''}</span>` : ''}
+          ${contractPaymentPill(c)}
           ${c.clientSignature && !signedTermsChanged(c) ? '' : `${!c.clientSignature && earlierClientSignature(c) ? `<span class="pill pill-wrap pill-warn" style="flex:1 1 100%;">${esc(earlierClientSignature(c).name)} signed an earlier version online (${fmtDateShort(String(earlierClientSignature(c).at).slice(0,10))}) — the terms have changed since, so it isn't marked Signed. Send the current version to sign.</span>` : ''}<span style="font-size:12px;color:var(--ink-2);flex:1 1 220px;min-width:0;">Clients sign online: emailing the contract adds the link, or make one to send yourself.</span>
                <button class="btn btn-sm btn-ghost" style="flex:none;" data-action="make-sign-link" data-id="${c.id}" ${S.signLinkBusy===c.id?'disabled':''}>${S.signLinkBusy===c.id?'Making link…':'Signing link'}</button>
                ${S.signLinks && S.signLinks[c.id] ? `<input readonly data-testid="sign-link-url" aria-label="Signing link" value="${esc(S.signLinks[c.id])}" style="flex:1 1 100%;min-width:0;"/>` : ''}`}
@@ -7080,6 +7317,25 @@ function renderPayeeProfilesCard(){
     </div>`; }).join('')}
   </div>`;
 }
+function renderOnlinePaymentsCard(){
+  const st = S.stripeStatus;
+  const status = !st ? `<span class="pill pill-neutral">Checking…</span>`
+    : st.connected ? `<span class="pill ${st.mode==='live'?'pill-good':'pill-warn'}">Connected${st.mode==='test'?' — test mode':''}</span>${st.accountName?` <span style="font-size:12.5px;">${esc(st.accountName)}</span>`:''}`
+    : `<span class="pill pill-neutral">Not set up</span>`;
+  const warnings = st && st.connected ? [
+    st.mode==='test' ? 'Test mode: clients see a test-card note and no real money moves. Swap in the live keys when ready.' : '',
+    !st.webhook ? 'The Stripe webhook isn\'t set up yet: bank transfers won\'t be marked paid when they clear.' : '',
+    st.mode==='live' && !st.chargesEnabled ? 'Stripe hasn\'t enabled charges on this account yet — finish the account setup in Stripe.' : '',
+  ].filter(Boolean) : [];
+  return `<div class="card card-pad" style="margin-bottom:20px;" data-testid="online-payments-card">
+    <h3 style="margin-bottom:12px;">Online payments (Stripe)</h3>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">${status}</div>
+    ${st && st.connected ? '' : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">${st && st.error ? `Stripe didn't accept the key: ${esc(st.error)}. ` : ''}Clients pay deposits and invoices by card or bank transfer from the email link. Setup: <code>ops/STRIPE_SETUP.md</code>.</p>`}
+    ${warnings.map(w=>`<p style="font-size:11.5px;color:var(--warn-ink);margin:0 0 6px;">${w}</p>`).join('')}
+    <div class="field" style="margin-top:8px;max-width:260px;"><label>Credit card fee (%)</label><input data-field="cardFeePercent" data-form="orgsettings" type="number" min="0" max="3" step="0.1" value="${esc(String(ORG_SETTINGS.cardFeePercent||0))}"/></div>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:4px 0 0;">Added to <strong>credit</strong> card payments only (never debit cards or bank transfer), shown to the client before they pay, max 3%. Notify Visa and Mastercard at least 30 days before turning it on. Never charged for gigs in CT or MA. Bank transfers cost ASP 0.8% (max $5).</p>
+  </div>`;
+}
 function renderQuickBooksCard(){
   const st = S.qboStatus;
   const configured = !!QBO_CLIENT_ID;
@@ -7441,6 +7697,8 @@ function doMarkDeposit(id, extra={}){
     toast(result.error==='conflict' ? 'This booking changed elsewhere since you loaded it — reload before marking the deposit received.' : 'Could not save.', 'system');
     return false;
   }
+  // Paid another way: the emailed online-payment link must not take the deposit a second time.
+  contractsForLead(id).forEach(c=>revokeOpenPaymentLinks({ contract:c }));
   S.showBookingConfirmation = true;
   render();
   if(ev.clientEmail) doSendBookingConfirmationEmail(id);
@@ -7651,23 +7909,42 @@ function doSaveEditEvent(id){
   if(reportEventSave(updateEvent(id, p), 'saving these changes')) toast('Changes saved.', 'success');
   openEvent(id);
 }
-function doSubmitInvoice(){
+async function doSubmitInvoice(){
   const f = S.newInvoiceForm;
   const clientName = (f.clientName||'').trim();
   const clientEmail = (f.clientEmail||'').trim();
   const items = f.items || [];
   if(!clientName){ toast('Enter who this invoice is billed to.', 'error'); return; }
   if(!items.length){ toast('Add at least one line item.', 'error'); return; }
+  if(clientEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clientEmail)){ toast('That email address doesn\'t look right.', 'error'); return; }
+  if(S.invoiceSendBusy) return;
   const inv = makeInvoice(clientName, clientEmail, items, (f.notes||'').trim(), 'open', 0);
+  if(f.noCardFee) inv.noCardFee = true;
   CUSTOM_INVOICES.unshift(inv);
   saveCustomInvoices();
-  toast(`Invoice sent to ${clientName}.`, 'success');
-  S.showNewInvoice=false; S.newInvoiceForm={}; render();
+  S.showNewInvoice=false; S.newInvoiceForm={};
+  // Really emailed (2026-10-13: it used to only say "sent"), with a Pay online button when Stripe is set up.
+  if(!clientEmail || !supabaseClient || !S.realSession){ toast(`Invoice ${inv.id} created${clientEmail?' — sign in with your ASP account to email it':' (no email address, so not sent)'}.`, 'system'); render(); return; }
+  S.invoiceSendBusy = true; render();
+  try{
+    let link = { ok:false };
+    if(stripeReady() && invoiceTotal(inv) >= 0.5){
+      link = await createInvoicePayLink(inv, x=>invoiceEmailHtml(x, null));
+      if(!link.ok) toast(link.error + ' The invoice will go out without the Pay online button.', 'system');
+    }
+    const sent = await sendEmail({ to: clientEmail, subject: `Invoice ${inv.id} from ${getBrandConfig('asp').label||'ASP'}`, html: invoiceEmailHtml(inv, link.ok ? link.url : null), brand:'asp' });
+    if(!sent.ok){ inv.log.push({ ts:new Date().toISOString(), type:'system', text:`Invoice email failed: ${sent.error}` }); saveCustomInvoices(); toast('Invoice saved, but the email failed: ' + sent.error, 'system'); return; }
+    if(link.ok) S.payLinks = { ...(S.payLinks||{}), [inv.id]: link.url };
+    inv.log.push({ ts:new Date().toISOString(), type:'email', text:`Invoice emailed to ${clientEmail}${link.ok?' with a Pay online link':''}.` });
+    saveCustomInvoices();
+    toast(`Invoice sent to ${clientEmail}.`, 'success');
+  } finally { S.invoiceSendBusy = false; render(); }
 }
 function doMarkInvoicePaid(id){
   const inv = getInvoice(id); if(!inv) return;
   inv.status = 'paid'; inv.paidAt = todayISO();
   inv.log.push({ts:new Date().toISOString(), type:'success', text:'Marked paid.'});
+  if(inv.createdTs) revokeOpenPaymentLinks({ invoice:inv });
   saveCustomInvoices();
   toast('Invoice marked paid.', 'success');
   render();
@@ -8689,11 +8966,14 @@ function bindGlobal(){
       case 'add-gmail-mailbox': doAddGmailMailbox(); break;
       case 'migrate-payee-profiles': doMigratePayeeProfilesToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
       case 'migrate-contracts': doMigrateContractsToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
-      case 'open-send-contract': { const c=getContract(id); if(c){ const figures=contractPaymentFigures(c); S.contractBuilderId=id; S.showSendContractConfirm=true; S.sendContractInvoice=true; S.sendContractForm={ to:c.snapshot.clientEmail||'', subject:`${contractTemplateLabel(c.template)} — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` — ${fmtDateShort(c.snapshot.eventDate)}`:''}`, qboAmount: figures.deposit||'', qboDescription: `Deposit — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` (${fmtDateShort(c.snapshot.eventDate)})`:''}` }; } render(); break; }
+      case 'open-send-contract': { const c=getContract(id); if(c){ const figures=contractPaymentFigures(c); S.contractBuilderId=id; S.showSendContractConfirm=true; S.sendContractPayOnline=!!contractDepositPayment(c); S.sendContractInvoice=!S.sendContractPayOnline; S.sendContractForm={ to:c.snapshot.clientEmail||'', subject:`${contractTemplateLabel(c.template)} — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` — ${fmtDateShort(c.snapshot.eventDate)}`:''}`, qboAmount: figures.deposit||'', qboDescription: `Deposit — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` (${fmtDateShort(c.snapshot.eventDate)})`:''}` }; } render(); break; }
       case 'close-send-contract-confirm': if(!S.sendContractBusy){ S.showSendContractConfirm=false; S.sendContractForm={}; render(); } break;
       case 'sendcontract-overlay-close': if(e.target===t && !S.sendContractBusy){ S.showSendContractConfirm=false; S.sendContractForm={}; render(); } break;
       case 'confirm-send-contract': doSendContractEmail(); break;
-      case 'toggle-send-contract-invoice': S.sendContractInvoice = !S.sendContractInvoice; render(); break;
+      case 'toggle-send-contract-invoice': S.sendContractInvoice = !S.sendContractInvoice; if(S.sendContractInvoice) S.sendContractPayOnline = false; render(); break;
+      case 'toggle-send-contract-pay': S.sendContractPayOnline = !S.sendContractPayOnline; if(S.sendContractPayOnline) S.sendContractInvoice = false; render(); break;
+      case 'make-invoice-pay-link': doMakeInvoicePayLink(id); break;
+      case 'toggle-invoice-no-card-fee': S.newInvoiceForm.noCardFee = !S.newInvoiceForm.noCardFee; render(); break;
       case 'open-verify-deposit': S.verifyDepositEventId=id; S.showVerifyDeposit=true; S.verifyDepositForm={method:'zelle', note:''}; render(); break;
       case 'close-verify-deposit': S.showVerifyDeposit=false; S.verifyDepositForm={}; render(); break;
       case 'verifydeposit-overlay-close': if(e.target===t){ S.showVerifyDeposit=false; S.verifyDepositForm={}; render(); } break;

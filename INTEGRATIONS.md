@@ -15,6 +15,7 @@
 | Sign-in | Supabase Auth: passkeys + emailed one-time code, from office@aspmgmt.com via Google SMTP | §4 below | **Live** |
 | Client email (contracts, confirmations, reminders, travel requests) | `send-contract-email` Edge Function → Google Apps Script mail relay | `ops/SEND_CONTRACT_SETUP.md` | **Live** (admin-only) |
 | Client e-signature (contracts signed online, no login) | `contract-sign` Edge Function (public, token-gated) + `frontend/sign/` | `ops/CONTRACT_SIGN_SETUP.md` | **Live** (2026-10-13) |
+| Client online payments (Stripe: card + ACH, credit-card fee) | `client-pay` (public, token-gated), `stripe-webhook` (signature-gated), `stripe-status` + `frontend/sign/pay.js`, `frontend/pay/` | `ops/STRIPE_SETUP.md` | **Built, waiting on Stripe keys** (2026-10-13) |
 | QuickBooks invoices + payment webhook | `qbo-*` Edge Functions | `ops/QUICKBOOKS_SETUP.md` | **Built, not connected** (client ID empty). Complete the go-live checklist (2026-10-09 audit W2-1) before connecting |
 | Google Calendar holds | `gcal-*` Edge Functions | `ops/GOOGLE_CALENDAR_SETUP.md` | **Built, not connected**; holds also stay paused until the app passes the gig's `events` row id (gigs are shared since 2026-10-10; the hold code still checks for a uuid — audit 4.5) |
 | Gmail (Zelle notice matching) | `gmail-*` Edge Functions | `ops/GMAIL_SETUP.md` | **Built, not connected** |

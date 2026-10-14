@@ -10,7 +10,8 @@
      purpose: clients aren't ASP users, so this page loads none of the app, no sign-in and no
      supabase-js -- just the contract (in a sandboxed frame that can't run scripts) and the signing
      form. The link's token is after the "#", so the browser never sends it to any server except in
-     the POST body to contract-sign. -->
+     the POST body to contract-sign. When the link also carries a deposit (migration 0056), pay.js
+     adds the Pay panel below (Stripe's own card/bank fields), active once the contract is signed. -->
 <style>
   :root{
     --page:#F5F4EF; --surface:#FFFFFF; --ink:#17171A; --ink-2:#67676D; --ink-3:#9A9AA1;
@@ -45,9 +46,10 @@
   .done strong{ color:var(--ink); }
   .msg{ padding:32px 20px; text-align:center; }
   .msg h1{ font-size:1.25rem; margin:0 0 6px; }
-  @media print{ .top, .panel, .done .btn{ display:none !important; } body{ background:#fff; } .wrap{ padding:0; max-width:none; } iframe{ border-radius:0; } }
+  @media print{ .top, .panel, #pay, .done .btn{ display:none !important; } body{ background:#fff; } .wrap{ padding:0; max-width:none; } iframe{ border-radius:0; } }
 </style>
 
+<script src="pay.js"></script>
 <div class="wrap" id="root"><div class="card msg"><p class="muted">Loading your contract…</p></div></div>
 
 <script>
@@ -103,8 +105,10 @@
         <label class="consent"><input type="checkbox" id="agree"/><span>${esc(d.consentText)}</span></label>
         <button class="btn btn-primary" id="signbtn" type="submit">Sign contract</button>
         <p class="err" id="err" role="alert"></p>
-      </form>`}`;
+      </form>`}
+      <div id="pay"></div>`;
     document.getElementById('doc').appendChild(frame(d.html));
+    showPayment();
     const p = document.getElementById('print');
     // The page prints itself (its print styles hide everything but the contract); the sandboxed frame
     // isn't allowed to open a print dialog.
@@ -130,6 +134,14 @@
       }
       load();
     });
+  }
+
+  // The deposit, if this link has one. Best-effort: signing never waits on it.
+  async function showPayment(){
+    if(!window.ASPPay) return;
+    const res = await window.ASPPay.call(token, { action:'view' });
+    const el = document.getElementById('pay');
+    if(el && res.ok && res.payment) window.ASPPay.mount(el, token, res.payment);
   }
 
   async function load(){

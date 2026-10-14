@@ -78,6 +78,7 @@ Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM
 | Event balance / artist payout | `eventBalance()` / `artistPayout()` (derived, next to each other) | same |
 | Contract money | `contractPaymentFigures()` (derived) | same |
 | Client e-signatures | Supabase `contract_sign_requests` (0052; server-written by `contract-sign`); the contract's Signed status is applied from it by `applyClientSignatures()` | done (2026-10-13) |
+| Client online payments | Supabase `payment_requests` (0056; payment columns server-written by `client-pay` / `stripe-webhook`); deposit received / invoice paid applied from it by `applyClientPayments()`; money in the `payments` ledger (source `stripe`) | built (2026-10-13); needs Stripe keys |
 | Commission rate | `artists.commission_pct` (0042; 15%, Dovie 10%) via `commissionRateFor()`; prefills each gig's own `commission` | done (2026-10-12) |
 | Overtime | `suggestedOvertimeRate()`: fee ÷ booked hours per half hour, auto until typed (`overtime.manual`) | done (2026-10-12) |
 | Event statuses | `EVENT_PIPELINE` + `STATUS_GROUPS` (+ `statusMeta()` labels); contracts `CONTRACT_STATUSES`; `ev.bookingStatus` no longer written | done (2026-10-12) |
