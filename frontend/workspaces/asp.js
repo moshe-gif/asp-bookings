@@ -2813,6 +2813,47 @@ if(supabaseClient){
     if(event==='SIGNED_OUT' && (S.user || S.realSession)) resetAfterSignOut();
   });
 }
+// One way to call an Edge Function as the signed-in user (CLAUDE.md: hand-rolled fetches are being
+// phased out into this). Returns the function's JSON, or { ok:false, error } when there is no
+// session, the network fails, or the reply isn't JSON.
+async function callEdgeFunction(name, body){
+  if(!supabaseClient) return { ok:false, error:'Not connected.' };
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(!session) return { ok:false, error:'Sign in again to do that.' };
+  try{
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+      method:'POST',
+      headers:{ 'Authorization':`Bearer ${session.access_token}`, 'apikey':SUPABASE_PUBLISHABLE_KEY, 'Content-Type':'application/json' },
+      body: JSON.stringify(body||{}),
+    });
+    const data = await resp.json().catch(()=>null);
+    return data || { ok:false, error:`Server error (${resp.status}).` };
+  }catch(err){ return { ok:false, error:'Network error: ' + String(err && err.message || err) }; }
+}
+// New Lead "paste a message" auto-fill (owner 2026-10-13): parse-lead (Claude) suggests the fields;
+// only empty answers are skipped, and the office reviews the form before saving.
+async function doParseLeadPaste(){
+  const f = S.newLeadForm;
+  const text = (f.pasteText||'').trim();
+  if(!text){ toast('Paste a message first.', 'system'); return; }
+  S.parseLeadBusy = true; render();
+  try{
+    const res = await callEdgeFunction('parse-lead', { text, today: todayISO(), eventTypes: EVENT_TYPES });
+    if(!res.ok){ toast(res.error || 'Could not read that message.', 'system'); return; }
+    const x = res.fields || {};
+    const set = (k, v)=>{ if(v) f[k] = v; };
+    set('clientName', x.clientName); set('clientEmail', x.clientEmail); set('clientPhone', x.clientPhone);
+    set('date', x.date); set('venue', x.venue); set('city', x.city); set('state', x.state); set('price', x.price);
+    if(x.type && EVENT_TYPES.includes(x.type)) f.type = x.type;
+    if(x.artistName){ const a = ARTISTS.find(a=>a.name===x.artistName); if(a) f.artistId = a.id; }
+    if(x.time){ f.time = x.time; f.timeTbd = false; }
+    if(x.endTime){ f.endTime = x.endTime; f.endTimeManual = true; } else if(!f.endTimeManual) delete f.endTime;
+    if(x.notes) f.pasteNotes = x.notes;
+    toast('Filled from the message — check everything before saving.', 'success');
+  } finally {
+    S.parseLeadBusy = false; render();
+  }
+}
 async function refreshQboStatus(){
   if(!supabaseClient) return;
   try{
@@ -3553,7 +3594,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.5'; // bump on every release so a phone can tell it has updated. v1.9.5: Other Bookings; one Gig Info; SING removed
+const APP_VERSION = 'v1.9.6'; // bump on every release so a phone can tell it has updated. v1.9.6: New Lead paste-a-message auto-fill
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -5185,6 +5226,11 @@ function renderNewLeadModal(){
           <button class="filter-chip" data-action="switch-to-outside-booking">Other Booking</button>
         </div>
         <p style="font-size:12px;color:var(--ink-3);margin:0;">${isInternal? 'For recording days, filming days, rehearsals — no client, no payment, just pencils the artist’s time in.' : "Only the artist, client name, and date are required — everything else can be filled in once it's known."}</p>
+        ${!isInternal? `<div class="field"><label>Paste a message (optional)</label>
+          <textarea data-field="pasteText" rows="3" placeholder="Paste the client's WhatsApp or email message and the fields fill themselves" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);font:inherit;">${esc(f.pasteText||'')}</textarea>
+          <button type="button" class="btn btn-sm" style="margin-top:6px;align-self:flex-start;" data-action="parse-lead-paste" ${S.parseLeadBusy?'disabled':''}>${S.parseLeadBusy? 'Reading…' : 'Fill from message'}</button>
+          ${f.pasteNotes? `<p style="font-size:11.5px;color:var(--ink-3);margin:6px 0 0;">Also in the message: ${esc(f.pasteNotes)}</p>` : ''}
+        </div>` : ''}
         <div class="field"><label>Artist</label>
           <div class="chip-row">${ARTISTS.map(a=>`<button type="button" class="filter-chip ${f.artistId===a.id?'sel':''}" data-action="pick-artist" data-id="${a.id}"><span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${esc(a.initials)}</span>${esc(a.name.split(' ')[0])}</button>`).join('')}</div>
         </div>
@@ -8102,6 +8148,7 @@ function doSubmitLead(){
     bandSize: f.type==='Wedding' && f.bandSize ? Number(f.bandSize) : null,
     log:[{ts:new Date().toISOString(), type:'system', text: isInternal? `${resolvedType} scheduled for ${artistById(f.artistId).name}.` : `Lead created for ${artistById(f.artistId).name} — client info entered by management.`}],
   };
+  if(!isInternal && f.pasteNotes) ev.log.push({ts:new Date().toISOString(), type:'system', text:`From the pasted message: ${f.pasteNotes}`});
   S.events.unshift(ev); saveEvents();
   toast(isInternal? `Internal day added — penciled in on ${artistById(f.artistId).name}'s calendar.` : `Lead added — penciled in on ${artistById(f.artistId).name}'s calendar.`, 'success');
   if(findConflicts(ev).length) toast(`⚠ Scheduling conflict — ${artistById(f.artistId).name} already has something at that time.`, 'system');
@@ -8199,6 +8246,7 @@ function registerAction(name, fn){
 registerAction('download-backup', ()=>doDownloadBackup());
 registerAction('make-sign-link', ({ id })=>doMakeSignLink(id));
 registerAction('edit-contract-from-doc', ({ id })=>{ S.showContractBuilderDoc = false; S.showContractBuilder = true; S.contractBuilderId = id; render(); });
+registerAction('parse-lead-paste', ()=>doParseLeadPaste());
 registerAction('unmark-flight', ({ id })=>doUnmarkFlight(id));
 registerAction('unmark-ground-transport', ({ id })=>doUnmarkGroundTransport(id));
 registerAction('external-link', ()=>{}); // the browser follows the link; nothing else happens

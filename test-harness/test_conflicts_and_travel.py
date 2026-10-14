@@ -74,3 +74,28 @@ def test_new_lead_end_time_autofills_and_time_tbd(live_server, page):
     page.locator('[data-action="submit-lead"]').click()
     assert "Time TBD" in page.locator(".sheet").inner_text(), "lead saved with a time despite Time TBD"
     assert not errors, f"console errors: {errors}"
+
+
+def test_paste_message_fills_new_lead(live_server, page):
+    """The parse-lead function's reply is stubbed here so the harness never calls the paid AI API;
+    this checks the New Lead wiring: paste -> Fill from message -> fields filled -> notes kept on the lead."""
+    import json as _json
+    errors = collect_console_errors(page)
+    fields = {"clientName": "Paste Test Client", "clientEmail": "paste@example.com", "clientPhone": "555-0100",
+              "date": "2027-12-15", "time": "", "endTime": "", "type": "Wedding", "artistName": "Benny Friedman",
+              "venue": "Test Paste Hall", "city": "Lakewood", "state": "NJ", "price": "4500", "notes": "Band is TBD"}
+    page.route("**/functions/v1/parse-lead", lambda route: route.fulfill(
+        status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"},
+        body=_json.dumps({"ok": True, "fields": fields})))
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    page.locator('[data-action="open-new-lead"]').click()
+    page.locator('textarea[data-field="pasteText"]').fill("Paste Test Client\nDecember 15\npaste@example.com\nTest Paste Hall, lakewood\n4500\nWedding")
+    page.locator('[data-action="parse-lead-paste"]').click()
+    page.wait_for_function("() => document.querySelector('input[data-field=\"clientName\"]')?.value === 'Paste Test Client'", timeout=10000)
+    assert page.locator('input[data-field="venue"]').input_value() == "Test Paste Hall"
+    assert page.locator('input[data-field="date"]').input_value() == "2027-12-15"
+    assert page.locator('[data-action="pick-artist"][data-id="benny"]').get_attribute("class").count("sel") == 1
+    page.locator('[data-action="submit-lead"]').click()
+    assert "From the pasted message: Band is TBD" in page.locator(".sheet").inner_text()
+    assert not errors, f"console errors: {errors}"
