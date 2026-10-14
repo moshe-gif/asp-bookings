@@ -13,6 +13,8 @@ case "$NAME" in
   STRIPE_SECRET_KEY)      [[ "$VALUE" =~ ^(sk|rk)_(test|live)_ ]] || { echo "That isn't a Stripe secret key (sk_test_… / sk_live_…)."; exit 1; } ;;
   STRIPE_PUBLISHABLE_KEY) [[ "$VALUE" =~ ^pk_(test|live)_ ]]      || { echo "That isn't a Stripe publishable key (pk_test_… / pk_live_…)."; exit 1; } ;;
   STRIPE_WEBHOOK_SECRET)  [[ "$VALUE" =~ ^whsec_ ]]               || { echo "That isn't a Stripe webhook signing secret (whsec_…)."; exit 1; } ;;
+  RESEND_API_KEY)         [[ "$VALUE" =~ ^re_ ]]                  || { echo "That isn't a Resend API key (re_…)."; exit 1; } ;;
+  ANTHROPIC_API_KEY)      [[ "$VALUE" =~ ^sk-ant- ]]              || { echo "That isn't an Anthropic API key (sk-ant-…)."; exit 1; } ;;
 esac
 python3 -c 'import json,sys; print(json.dumps([{"name": sys.argv[1], "value": sys.argv[2]}]))' "$NAME" "$VALUE" |
   curl -sS -X POST "https://api.supabase.com/v1/projects/psgpxbkncuavlnpplykf/secrets" \
