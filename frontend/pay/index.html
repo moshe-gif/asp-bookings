@@ -20,7 +20,8 @@
   body{ margin:0; background:var(--page); color:var(--ink); font:15px/1.5 Inter,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
   .wrap{ max-width:720px; margin:0 auto; padding:24px 16px calc(32px + env(safe-area-inset-bottom)); }
   .top{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
-  .brand{ font-weight:700; font-size:1.05rem; }
+  .brandhead{ display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .logo{ display:block; width:220px; max-width:100%; height:auto; }
   .label{ font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-3); font-weight:700; }
   .card{ background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 1px 2px rgba(23,23,26,.04),0 4px 14px rgba(23,23,26,.04); }
   iframe{ display:block; width:100%; border:0; border-radius:10px; min-height:300px; background:var(--page); }
@@ -66,7 +67,7 @@
       return;
     }
     const p = res.payment;
-    root.innerHTML = `<div class="top"><div><div class="label">Invoice ${esc(p.reference)}</div><div class="brand">${esc(p.brandName)}</div></div>
+    root.innerHTML = `<div class="top"><div class="brandhead"><img class="logo" src="../assets/brand/asp-horizontal-dark.png" alt="${esc(p.brandName)}" width="220" height="29"/><div class="label">Invoice ${esc(p.reference)}</div></div>
       <button class="btn btn-ghost" id="print" type="button">Print / Save PDF</button></div>
       <div id="doc"></div><div id="pay"></div>`;
     document.getElementById('doc').appendChild(frame(p.html));

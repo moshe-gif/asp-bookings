@@ -66,8 +66,12 @@ def test_standard_contract_doc_preview_shows_payee_and_cancellation(live_server,
     assert "$7,500" in doc_text
     # Default cancellation policy on Standard is flat 80%, matching every real ASP-format contract.
     assert "80% of the payment" in doc_text
-    # Eli Marcus's real payment info (Zelle) should appear via his resolved payee profile.
-    assert "elimarcusmusic@gmail.com" in doc_text
+    # The deposit goes to ASP (owner 2026-10-14): the payment section offers ASP's Zelle (its house payee
+    # profile until Settings has ASP's QR), never the artist's, plus the check/cash footnote.
+    assert "paying the deposit" in doc_text.lower()
+    assert "billing@aspmgmt.com" in doc_text
+    assert "elimarcusmusic@gmail.com" not in doc_text
+    assert "To pay by check or cash" in doc_text
 
     assert not errors, f"console errors during standard doc preview: {errors}"
 
@@ -465,5 +469,9 @@ def test_sent_contract_keeps_the_payee_it_was_sent_with(live_server, page):
     doc = page.locator('#contractBuilderPrintHost .doc')
     doc.wait_for(state='visible')
     text = doc.inner_text()
-    assert original in text and "CHANGED AFTER SENDING LLC" not in text, "sent contract was rewritten by a later payee edit"
+    # The payee no longer prints on the standard contract (the deposit section is ASP's), so check the
+    # frozen copy itself: a later edit to the profile must not reach a sent contract.
+    c2 = page.evaluate("""() => JSON.parse(localStorage.getItem('asp_mock_contracts_v1')).find(x => x.snapshot.clientName === 'Frozen Payee Client')""")
+    assert c2["payeeSnapshot"]["entityName"] == original, "sent contract's payee was rewritten by a later payee edit"
+    assert "CHANGED AFTER SENDING LLC" not in text, "sent contract was rewritten by a later payee edit"
     assert not errors, f"console errors: {errors}"

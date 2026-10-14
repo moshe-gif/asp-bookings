@@ -40,6 +40,20 @@ Rules worth knowing:
 - Bank transfers use instant verification only (the client logs in to their bank in Stripe's window).
 - Links expire after 90 days, like signing links.
 
+## Zelle and check/cash (owner 2026-10-14)
+Every contract, invoice, signing/pay page and balance email shows the same payment section
+(`paymentOptionsEmailBlock` in asp.js; its server twin `_shared/payblock.ts`): **Pay online** first,
+then a Zelle box ("Scan here to pay the deposit" / "…the balance"), then one footnote line, "To pay by
+check or cash, please call our office at …" (the phone in `brand_config`).
+- **Deposits and invoices** go to ASP: Settings → Online payments → *Zelle for deposits and
+  invoices* (upload ASP's Zelle QR from the bank app, or type the Zelle email/phone). Until it's set,
+  ASP's house payee profile's Zelle address is shown, never an artist's.
+- **Balances** go to the artist: the QR on their payee profile (Settings → Payee Profiles). Without a
+  QR the email shows their Zelle address.
+- QR images are stored in the public `brand-public` bucket (migration 0059) because Gmail and other
+  email clients don't show images embedded in the message. The client's bank app shows the
+  recipient's registered Zelle name when they scan.
+
 ## Card fee: before turning it on
 The fee is **0% until you set it** (Settings → Online payments). Before setting it above 0:
 - Notify Visa and Mastercard at least 30 days ahead (ask Stripe support how; there's a short form).

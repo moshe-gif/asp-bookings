@@ -7,6 +7,11 @@ export function appUrl(): string {
   return (Deno.env.get("APP_URL") || "https://app.aspmgmt.com").replace(/\/+$/, "");
 }
 
+// The ASP logo for emails (dark ink, for white paper), served by the app itself.
+export function brandLogoHtml(width = 200): string {
+  return `<img src="${appUrl()}/assets/brand/asp-horizontal-dark.png" alt="ASP Management" width="${width}" style="display:block;width:${width}px;max-width:100%;height:auto;border:0;"/>`;
+}
+
 export type Brand = { key: string; senderName: string; replyTo: string | null };
 
 // The sender for one brand key (only 'asp' since SING was removed, 0055); unknown keys get the default brand. Falls back to

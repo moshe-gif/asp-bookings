@@ -3,7 +3,9 @@
 //
 // Function Secrets: STRIPE_SECRET_KEY (sk_test_… / sk_live_…), STRIPE_PUBLISHABLE_KEY (pk_…, shown to
 // the client's browser), STRIPE_WEBHOOK_SECRET (whsec_…, for stripe-webhook).
-import { brandFor } from "./config.ts";
+import { serviceClient } from "./auth.ts";
+import { sendRelayEmail } from "./mail.ts";
+import { brandFor, brandLogoHtml } from "./config.ts";
 
 export function stripeConfigured(): boolean {
   return !!(Deno.env.get("STRIPE_SECRET_KEY") && Deno.env.get("STRIPE_PUBLISHABLE_KEY"));
@@ -79,21 +81,12 @@ function escapeHtml(s: string): string {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
 
-export async function relay(to: string, subject: string, html: string, fromName: string, replyTo: string | null): Promise<boolean> {
-  const url = Deno.env.get("RELAY_URL"), secret = Deno.env.get("RELAY_SECRET");
-  if (!url || !secret) { console.error("payments: mail relay not configured"); return false; }
-  try {
-    const resp = await fetch(url, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ secret, to, subject, html, fromName, replyTo: replyTo || undefined }),
-    });
-    const out = await resp.json().catch(() => ({ ok: false }));
-    if (!resp.ok || !out.ok) { console.error("payments: relay failed", out.error || resp.status); return false; }
-    return true;
-  } catch (err) {
-    console.error("payments: relay unreachable", String(err));
-    return false;
-  }
+// Sends through the app's one mail path (_shared/mail.ts: Resend, else the Apps Script relay) as the
+// brand's sender. Never throws: a failed email is logged, the payment/signature is already recorded.
+export async function relay(to: string, subject: string, html: string, _fromName: string, _replyTo: string | null, brandKey?: string): Promise<boolean> {
+  const out = await sendRelayEmail(serviceClient(), { to, subject, html, brand: brandKey });
+  if (!out.ok) console.error("email failed", subject, out.error);
+  return out.ok;
 }
 
 const isTestRow = (r: { contract_legacy_id?: string | null; invoice_legacy_id?: string | null }) =>
@@ -184,6 +177,7 @@ export async function recordPaymentIntent(sb: any, pi: any): Promise<void> {
   const brand = await brandFor(sb, p.brand_key || undefined);
   const rows = [[p.description, dollars(p.amount_cents)], ...(fee ? [["Credit card fee", dollars(fee)]] : []), ["Total paid", dollars(total)]];
   const receipt = `<div style="max-width:520px;margin:0 auto;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;color:#17171A;">
+<div style="padding-bottom:14px;border-bottom:2px solid #17171A;margin-bottom:18px;">${brandLogoHtml(200)}</div>
 <p style="font-size:18px;font-weight:600;margin:0 0 4px;">Payment received — thank you!</p>
 <p style="color:#67676D;margin:0 0 16px;">${escapeHtml(brand.senderName)} received your payment on ${escapeHtml(new Date(now).toUTCString())}.</p>
 <table style="width:100%;border-collapse:collapse;">${rows.map(([k, v], i) => `<tr><td style="padding:8px 0;border-top:1px solid #E1E1E6;${i === rows.length - 1 ? "font-weight:600;" : ""}">${escapeHtml(k)}</td><td style="padding:8px 0;border-top:1px solid #E1E1E6;text-align:right;${i === rows.length - 1 ? "font-weight:600;" : ""}">${v}</td></tr>`).join("")}</table>

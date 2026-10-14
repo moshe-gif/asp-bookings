@@ -16,7 +16,7 @@ def test_document_from_other_booking_is_asp_only(live_server, page):
     page.locator('[data-action="open-outside-doc-builder"]').first.click()
     assert page.locator('[data-action="pick-document-brand"]').count() == 0, "letterhead picker still offered"
     page.locator('[data-action="save-document"]').click()
-    assert page.locator("#documentPrintHost .doc-letterhead .wordmark").count() == 1, "ASP wordmark missing"
+    assert page.locator("#documentPrintHost .doc-letterhead .doc-logo img.logo-on-light").count() == 1, "ASP logo missing"
     assert "SING" not in page.locator("#documentPrintHost").inner_text()
     assert page.locator("#documentPrintHost .doc-sign-line").count() == 2, "expected exactly two signature lines"
     assert not errors, f"console errors while saving document: {errors}"
@@ -45,6 +45,6 @@ def test_document_on_behalf_of_artist(live_server, page):
     )
     # Letterhead stays ASP's own even though the document is "for" Shmili -- only the sender
     # line changes, per the confirmed design.
-    assert page.locator("#documentPrintHost .doc-letterhead .wordmark").count() == 1
+    assert page.locator("#documentPrintHost .doc-letterhead .doc-logo img.logo-on-light").count() == 1
 
     assert not errors, f"console errors during artist-attribution document flow: {errors}"

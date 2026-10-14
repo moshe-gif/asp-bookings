@@ -14,6 +14,7 @@
 // best-effort -- the signature is already recorded, and the page also lets the client print/save it.
 //
 // Function Secrets: RELAY_URL, RELAY_SECRET (shared with send-contract-email).
+import { sendRelayEmail } from "../_shared/mail.ts";
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { serviceClient } from "../_shared/auth.ts";
 import { brandFor } from "../_shared/config.ts";
@@ -59,21 +60,12 @@ function signedCopy(html: string, cert: string): string {
   return html.includes("</body>") ? html.replace("</body>", cert + "</body>") : html + cert;
 }
 
-async function relay(to: string, subject: string, html: string, fromName: string, replyTo: string | null) {
-  const url = Deno.env.get("RELAY_URL"), secret = Deno.env.get("RELAY_SECRET");
-  if (!url || !secret) { console.error("contract-sign: mail relay not configured"); return false; }
-  try {
-    const resp = await fetch(url, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ secret, to, subject, html, fromName, replyTo: replyTo || undefined }),
-    });
-    const out = await resp.json().catch(() => ({ ok: false }));
-    if (!resp.ok || !out.ok) { console.error("contract-sign: relay failed", out.error || resp.status); return false; }
-    return true;
-  } catch (err) {
-    console.error("contract-sign: relay unreachable", String(err));
-    return false;
-  }
+// Sends through the app's one mail path (_shared/mail.ts: Resend, else the Apps Script relay) as the
+// brand's sender. Never throws: a failed email is logged, the payment/signature is already recorded.
+async function relay(to: string, subject: string, html: string, _fromName: string, _replyTo: string | null, brandKey?: string): Promise<boolean> {
+  const out = await sendRelayEmail(serviceClient(), { to, subject, html, brand: brandKey });
+  if (!out.ok) console.error("email failed", subject, out.error);
+  return out.ok;
 }
 
 Deno.serve(async (req) => {

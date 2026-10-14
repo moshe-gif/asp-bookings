@@ -18,6 +18,7 @@ import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { serviceClient } from "../_shared/auth.ts";
 import { brandFor } from "../_shared/config.ts";
 import { cardFeeCents, recordPaymentIntent, stripeApi, stripeConfigured, stripeMode } from "../_shared/stripe.ts";
+import { depositZelle, officePhone } from "../_shared/payblock.ts";
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 const CT_RE = /^ctoken_[A-Za-z0-9]{8,}$/;
@@ -80,6 +81,18 @@ async function blocker(sb: any, r: Row, tokenHash: string): Promise<string | nul
 // deno-lint-ignore no-explicit-any
 async function viewOf(sb: any, r: Row, tokenHash: string) {
   const brand = await brandFor(sb, r.brand_key || undefined);
+  // The Zelle box under the card form (ASP's deposit/invoice Zelle, as on the contract) and the office
+  // phone for the check/cash line.
+  let zelle = await depositZelle(sb);
+  // A creative contract's deposit goes to its production company's payee, as its contract says.
+  if (r.kind === "contract_deposit" && !isTest(r)) {
+    const { data: rec } = await sb.from("app_records").select("app_doc").eq("collection", "contracts").eq("legacy_id", r.contract_legacy_id).maybeSingle();
+    const c = rec?.app_doc, p = c?.payeeSnapshot;
+    if (c?.template === "creative" && p && p.zelleActive !== false && (p.zelle || p.zelleQrUrl)) {
+      zelle = { qrUrl: typeof p.zelleQrUrl === "string" && /^https:\/\//.test(p.zelleQrUrl) ? p.zelleQrUrl : null, handle: (p.zelle || "").trim() };
+    }
+  }
+  const phone = await officePhone(sb, brand.key);
   const block = await blocker(sb, r, tokenHash);
   return {
     kind: r.kind,
@@ -95,6 +108,9 @@ async function viewOf(sb: any, r: Row, tokenHash: string) {
     clientName: r.client_name || "",
     brandName: brand.senderName,
     replyTo: brand.replyTo,
+    zelle,
+    officePhone: phone,
+    memo: r.kind === "contract_deposit" ? r.contract_legacy_id : r.invoice_legacy_id,
     html: r.kind === "invoice" ? r.rendered_html : undefined,
     failureMessage: r.pay_status === "failed" ? r.failure_message : null,
     paid: ["paid", "refunded", "disputed"].includes(r.pay_status)

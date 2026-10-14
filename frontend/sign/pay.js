@@ -30,7 +30,12 @@
     .pay-link{ background:none; border:0; padding:0; color:var(--accent); font:inherit; font-size:13.5px; cursor:pointer; text-decoration:underline; margin-top:12px; }
     .pay-done{ display:block; background:var(--good-wash); border-color:transparent; color:var(--ink); }
     .pay-done strong{ color:var(--good); }
-    #pay-element{ margin-bottom:16px; min-height:40px; }`;
+    #pay-element{ margin-bottom:16px; min-height:40px; }
+    .pay-zelle{ display:flex; gap:14px; align-items:center; border:1px solid var(--border); border-radius:10px; padding:12px; margin-top:16px; font-size:13px; color:var(--ink-2); }
+    .pay-zelle img{ width:104px; height:104px; border-radius:6px; background:#fff; flex:none; }
+    .pay-zelle strong{ display:block; color:var(--ink); font-size:14px; margin-bottom:2px; }
+    .pay-foot{ font-size:11.5px; color:var(--ink-3); margin:10px 0 0; }
+    @media (max-width:420px){ .pay-zelle{ flex-direction:column; align-items:flex-start; } }`;
   function addStyle(){ if(document.getElementById('pay-css')) return; const s = document.createElement('style'); s.id = 'pay-css'; s.textContent = css; document.head.appendChild(s); }
 
   let stripeLoad = null;
@@ -68,6 +73,13 @@
     const title = p.kind==='invoice' ? 'Pay this invoice' : 'Pay your deposit';
     const contact = p.replyTo ? ` Questions? Email <a href="mailto:${esc(p.replyTo)}">${esc(p.replyTo)}</a>.` : '';
     const card = inner => { el.innerHTML = `<div class="card pay-card" data-testid="pay-panel">${inner}</div>`; };
+    // Zelle under the card form: "Or scan here to pay the deposit" (the same box as in the email).
+    const zelleBox = ()=>{
+      const z = p.zelle; if(!z) return '';
+      const qr = z.qrUrl && /^https:\/\//.test(z.qrUrl) ? z.qrUrl : '';
+      const memo = p.memo ? ` Put “${esc(p.memo)}” in the memo so we can match your payment.` : '';
+      return `<div class="pay-zelle" data-testid="pay-zelle">${qr?`<img src="${esc(qr)}" alt="Zelle QR code"/>`:''}<div><strong>${qr?'Or scan here to pay':'Or pay'} ${p.kind==='invoice'?'this invoice':'the deposit'} with Zelle</strong>${qr?'Open your bank app, choose Zelle, and scan.':`Send it with Zelle to <strong style="display:inline;">${esc(z.handle)}</strong>.`}${memo}</div></div>`;
+    };
 
     if(p.paid){
       const m = p.paid.method==='us_bank_account' ? 'bank transfer' : 'card';
@@ -81,7 +93,7 @@
     if(p.blocked==='unsigned'){ card(`<h2>${title}</h2><div class="pay-amount">${money(p.amountCents)}</div><p class="pay-note" style="margin:0;">Sign the contract above first; then you can pay the deposit here.</p>`); return; }
     if(p.blocked==='paid_elsewhere' || p.blocked==='paid'){ card(`<h2>Already paid</h2><p class="pay-note" style="margin:0;">Our records show this ${what} is paid. Thank you!${contact}</p>`); return; }
     if(p.blocked){ card(`<h2>Online payment closed</h2><p class="pay-note" style="margin:0;">This payment link is no longer active.${contact || ' Please contact us.'}</p>`); return; }
-    if(!p.available || !p.publishableKey){ card(`<h2>${title}</h2><div class="pay-amount">${money(p.amountCents)}</div><p class="pay-note" style="margin:0;">Online payment isn’t available yet — please pay by Zelle or check.${contact}</p>`); return; }
+    if(!p.available || !p.publishableKey){ card(`<h2>${title}</h2><div class="pay-amount">${money(p.amountCents)}</div>${zelleBox()}<p class="pay-foot">* To pay by check or cash, please call our office${p.officePhone?` at ${esc(p.officePhone)}`:''}.</p>`); return; }
 
     const feeNote = p.cardFeeBps>0
       ? `No fee for bank transfer or debit cards. Credit cards have a ${pct(p.cardFeeBps)} card fee — you’ll see the total before you pay.`
@@ -91,7 +103,9 @@
       <p class="pay-note">${esc(p.description)} · ${feeNote}</p>
       ${p.testMode?'<p class="pay-test">Test mode — no real money moves. Test card: 4242 4242 4242 4242, any future date, any CVC.</p>':''}
       ${p.failureMessage?`<p class="err" style="margin:0 0 12px;">Last attempt: ${esc(p.failureMessage)}</p>`:''}
-      <div id="pay-step"></div>`);
+      <div id="pay-step"></div>
+      ${zelleBox()}
+      <p class="pay-foot">* To pay by check or cash, please call our office${p.officePhone?` at ${esc(p.officePhone)}`:''}.</p>`);
     const step = el.querySelector('#pay-step');
     let stripe = null, elements = null;
 

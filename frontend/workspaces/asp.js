@@ -48,9 +48,31 @@ const ICO = {
 // Photo mic used specifically in the artist "My Gigs" area (nav icon + Today's Gig card) in place
 // of the generic ICO.mic line-art icon -- same .ico sizing rules apply since width/height are CSS.
 const MIC_PHOTO_ICON = '<img class="ico" src="assets/mic-artist.jpg" alt="Microphone" style="object-fit:cover;border-radius:3px;vertical-align:middle;"/>';
-// The animated 5-bar mark, reused as the app's loading indicator wherever something needs a moment.
+// The ASP logo (the owner's brand files, assets/brand/, 2026-10-14). brandLogoHtml() gives two images:
+// dark ink for light paper and white ink for the app's dark theme (styles.css swaps them). The white
+// one carries an inline display:none, so an email -- which never sees the app's CSS -- shows only the
+// dark-ink logo. Documents and emails use the production address (the same HTML is emailed and frozen
+// into signing links, so it must never point at a test or preview host); the app's own chrome uses
+// the copy it was loaded from (local: true).
+const BRAND_ASSET_BASE = 'https://app.aspmgmt.com/assets/brand/';
+function brandLogoHtml({ width=170, kind='horizontal', alt='ASP Management', local=false } = {}){
+  const base = local ? 'assets/brand/' : BRAND_ASSET_BASE;
+  const st = `width:${width}px;max-width:100%;height:auto;border:0;`;
+  return `<img class="brand-logo logo-on-light" src="${base}asp-${kind}-dark.png" alt="${esc(alt)}" width="${width}" style="display:block;${st}"/>`
+    + `<img class="brand-logo logo-on-dark" src="${base}asp-${kind}-light.png" alt="" aria-hidden="true" width="${width}" style="display:none;${st}"/>`;
+}
+// Email-only HTML (always white paper): just the dark-ink logo.
+function brandLogoEmailHtml(width=170){
+  return `<img src="${BRAND_ASSET_BASE}asp-horizontal-dark.png" alt="ASP Management" width="${width}" style="display:block;width:${width}px;max-width:100%;height:auto;border:0;"/>`;
+}
+// The logo's "A" with its eight blue bars, drawn as SVG (traced from the owner's logo file) so the
+// bars can move: the loading indicator wherever something needs a moment, and the opener.
+function aspIconSvg({ height=16, animate=false } = {}){
+  const h = height, w = Math.round(height * 780 / 586);
+  return `<svg class="asp-a${animate?' asp-a-live':''}" viewBox="0 0 780 586" width="${w}" height="${h}" aria-hidden="true" focusable="false"><path fill="currentColor" d="M5 582 L330 18 Q336 6 350 6 L438 6 Q452 6 458 18 L775 582 L659 582 L404 110 Q394 96 384 110 L109 582 Z"/><g class="asp-bars" fill="#80A0D0"><rect x="229" y="394" width="25" height="81" rx="12.5"/><rect x="271" y="325" width="25" height="188" rx="12.5"/><rect x="311" y="397" width="25" height="77" rx="12.5"/><rect x="353" y="226" width="26" height="338" rx="13"/><rect x="406" y="287" width="27" height="216" rx="13.5"/><rect x="447" y="394" width="24" height="82" rx="12"/><rect x="489" y="324" width="24" height="192" rx="12"/><rect x="529" y="394" width="25" height="80" rx="12.5"/></g></svg>`;
+}
 function markLoader(heightPx){
-  return `<span class="mark" style="height:${heightPx||16}px;"><i></i><i></i><i></i><i></i><i></i></span>`;
+  return `<span class="mark-loader" role="img" aria-label="Loading">${aspIconSvg({ height: heightPx||16, animate:true })}</span>`;
 }
 
 /* ============ LOCAL PERSISTENCE ============ */
@@ -1085,7 +1107,7 @@ function doSavePayeeProfile(){
       wireRoutingNumber:(f.wireRoutingNumber||'').trim(), wireSwift:(f.wireSwift||'').trim(), notes:(f.notes||'').trim(),
       defaultOvertimeInterval: f.defaultOvertimeInterval||'half_hour',
       zelleRecipientLabel:(f.zelleRecipientLabel||'').trim(), zelleInstructions:(f.zelleInstructions||'').trim(),
-      zelleActive: f.zelleActive!==false, zelleQrDataUrl: f.zelleQrDataUrl||null,
+      zelleActive: f.zelleActive!==false, zelleQrDataUrl: f.zelleQrDataUrl||null, zelleQrUrl: f.zelleQrDataUrl ? (f.zelleQrUrl||null) : null,
       defaultFee: f.defaultFee? Number(f.defaultFee) : 0,
       defaultHours: (f.defaultHours||'').trim(),
       defaultDepositAmount: f.defaultDepositAmount? Number(f.defaultDepositAmount) : 0,
@@ -1098,7 +1120,7 @@ function doSavePayeeProfile(){
       wireRoutingNumber:(f.wireRoutingNumber||'').trim(), wireSwift:(f.wireSwift||'').trim(), notes:(f.notes||'').trim(),
       defaultBoilerplate: blankBoilerplateDefaults(), defaultOvertimeInterval: f.defaultOvertimeInterval||'half_hour',
       zelleRecipientLabel:(f.zelleRecipientLabel||'').trim(), zelleInstructions:(f.zelleInstructions||'').trim(),
-      zelleActive: f.zelleActive!==false, zelleQrDataUrl: f.zelleQrDataUrl||null,
+      zelleActive: f.zelleActive!==false, zelleQrDataUrl: f.zelleQrDataUrl||null, zelleQrUrl: f.zelleQrDataUrl ? (f.zelleQrUrl||null) : null,
       defaultFee: f.defaultFee? Number(f.defaultFee) : 0,
       defaultHours: (f.defaultHours||'').trim(),
       defaultDepositAmount: f.defaultDepositAmount? Number(f.defaultDepositAmount) : 0,
@@ -1458,17 +1480,16 @@ async function createInvoicePayLink(inv, html){
 function invoiceEmailHtml(inv, payUrl){
   const brand = getBrandConfig('asp');
   const rows = (inv.items||[]).map(it=>`<tr><td style="padding:8px 0;border-bottom:1px dashed #E1E1E6;">${esc(it.label)}</td><td style="padding:8px 0;border-bottom:1px dashed #E1E1E6;text-align:right;">${moneyCents(it.amount)}</td></tr>`).join('');
-  const button = payUrl ? `<div style="max-width:640px;margin:0 auto 16px;text-align:center;"><a href="${esc(payUrl)}" style="display:inline-block;background:#4C6FA5;color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">Pay online</a></div>` : '';
-  return `<!doctype html><html><head><meta charset="utf-8"/></head><body style="margin:0;padding:24px;background:#F5F4EF;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17171A;">${button}
+  return `<!doctype html><html><head><meta charset="utf-8"/></head><body style="margin:0;padding:24px;background:#F5F4EF;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17171A;">
   <div style="max-width:640px;margin:0 auto;background:#fff;padding:32px;border-radius:10px;">
-    <div style="font-size:1.15rem;font-weight:700;padding-bottom:18px;border-bottom:2px solid #17171A;margin-bottom:22px;">${esc(brand.label||'ASP')}</div>
+    <div style="padding-bottom:18px;border-bottom:2px solid #17171A;margin-bottom:22px;">${brandLogoEmailHtml(180)}</div>
     <div style="font-size:1.5rem;font-weight:700;text-align:center;margin:6px 0 2px;">INVOICE</div>
     <div style="text-align:center;font-size:11.5px;color:#9A9AA1;margin-bottom:26px;">${esc(inv.id)} &middot; ${esc(fmtDate(inv.createdAt))}</div>
     <p style="margin:0 0 18px;font-size:13.5px;"><span style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#9A9AA1;font-weight:700;">Billed to</span><br/><strong>${esc(inv.clientName)}</strong>${inv.clientEmail?`<br/>${esc(inv.clientEmail)}`:''}</p>
     <table style="width:100%;border-collapse:collapse;font-size:13px;">${rows}
       <tr><td style="padding:10px 0 0;font-weight:700;font-size:14.5px;">Total due</td><td style="padding:10px 0 0;text-align:right;font-weight:700;font-size:14.5px;">${moneyCents(invoiceTotal(inv))}</td></tr></table>
     ${inv.notes?`<p style="font-size:12.5px;color:#67676D;margin:18px 0 0;">${esc(inv.notes)}</p>`:''}
-    <p style="font-size:12.5px;line-height:1.7;color:#67676D;margin:18px 0 0;">${payUrl?'Pay online with the button above (card or bank transfer), or by ':'Payment by '}Zelle or check made out to ${esc(brand.label||'ASP')}. Questions? ${esc(brand.email||'')}</p>
+    ${paymentOptionsEmailBlock({ kind:'invoice', payUrl, amount:invoiceTotal(inv), memo:inv.id, zelle:depositZelle() })}
   </div></body></html>`;
 }
 async function doMakeInvoicePayLink(id){
@@ -1905,7 +1926,7 @@ function travelRequestEmailHtml(tr){
     .doc-facts > div > span:last-child{ display:table-cell; padding:5px 0; }
     .doc-foot{ margin-top:22px; padding-top:12px; border-top:1px solid #E1E1E6; font-size:10.5px; color:#9A9AA1; }
   </style></head><body><div class="doc">
-    <div class="wordmark">${esc(brand.label||'ASP')} — Travel Request</div>
+    <div class="wordmark">${brandLogoEmailHtml(170)}<div style="margin-top:8px;">Travel Request</div></div>
     <p style="font-size:13.5px;">Hi Rivky, could you help arrange travel for the following${ev?` (${esc(ev.type)})`:''}?</p>
     <div class="doc-facts">${rows.map(([k,v])=>`<div><span class="k">${esc(k)}</span><span>${esc(String(v))}</span></div>`).join('')}</div>
     ${d.notes? `<p style="font-size:13px;margin-top:16px;"><strong>Notes:</strong> ${esc(d.notes)}</p>` : ''}
@@ -1928,6 +1949,72 @@ function zelleQrEmailBlock(ev, artist){
     ${profile && profile.zelleInstructions? `<div style="font-size:11px;color:#9A9AA1;margin-top:4px;">${esc(profile.zelleInstructions)}</div>` : ''}
   </div>`;
 }
+/* ---- The client payment section (owner 2026-10-14; mockup "ASP Payment Mockup") ----
+   One look wherever a client is asked to pay (contract, invoice, booking confirmation, reminders):
+     1. Pay online (card or bank transfer): the main button, when there's a link;
+     2. Zelle: "Scan here to pay the deposit/balance", with the right account's QR -- ASP's for
+        deposits and invoices (Settings → Online payments), the artist's payee profile for balances;
+     3. one footnote line: to pay by check or cash, call the office.
+   Inline styles and plain blocks only, so it survives email clients. The server's twin for scheduled
+   emails is supabase/functions/_shared/payblock.ts -- keep the two in step. */
+function paymentOptionsEmailBlock({ kind='deposit', payUrl=null, amount=null, memo='', zelle=null }){
+  const what = kind==='balance' ? 'the balance' : kind==='invoice' ? 'this invoice' : 'the deposit';
+  const amt = amount ? ` ${moneyCents(amount)}` : '';
+  const phone = getBrandConfig('asp').phone;
+  const label = kind==='invoice' ? `Pay${amt} online` : `Pay ${what}${amt ? ' of'+amt : ''} online`;
+  const button = payUrl ? `<div style="text-align:center;margin:0 0 6px;"><a href="${esc(payUrl)}" style="display:inline-block;background:#4C6FA5;color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px;">${label}</a></div>
+    <p style="text-align:center;font-size:11.5px;color:#67676D;margin:0 0 14px;">Card or bank transfer. No fee for bank transfer or debit cards.</p>` : '';
+  const qr = zelle && /^https:\/\//.test(zelle.qrUrl||'') ? esc(zelle.qrUrl) : '';
+  const memoLine = memo ? ` Put “${esc(memo)}” in the memo so we can match your payment.` : '';
+  const heading = qr ? `${payUrl?'Or scan':'Scan'} here to pay ${what} with Zelle` : `${payUrl?'Or pay':'Pay'} ${what} with Zelle`;
+  const zelleBox = !zelle || (!qr && !zelle.handle) ? '' : `<table role="presentation" style="width:100%;border-collapse:separate;border:1px solid #E1E1E6;border-radius:10px;margin:0 0 10px;"><tr>
+      ${qr ? `<td style="width:132px;padding:12px;vertical-align:middle;"><img src="${qr}" alt="Zelle QR code" width="120" height="120" style="display:block;width:120px;height:120px;border-radius:6px;background:#fff;"/></td>` : ''}
+      <td style="padding:12px;vertical-align:middle;font-size:13px;color:#67676D;line-height:1.5;">
+        <strong style="display:block;color:#17171A;font-size:14px;margin-bottom:2px;">${heading}</strong>
+        ${qr ? 'Open your bank app, choose Zelle, and scan.' : `Send it with Zelle to <strong style="color:#17171A;">${esc(zelle.handle)}</strong>.`}${memoLine}
+        ${zelle.note ? `<div style="margin-top:4px;font-size:12px;color:#9A9AA1;">${esc(zelle.note)}</div>` : ''}
+      </td></tr></table>`;
+  const foot = `<p style="font-size:11.5px;color:#9A9AA1;margin:0;">* To pay by check or cash, please call our office${phone?` at ${esc(phone)}`:''}.</p>`;
+  return `<div class="pay-options" style="margin:18px 0 0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">${button}${zelleBox}${foot}</div>`;
+}
+// Zelle for deposits and invoices: ASP's own (Settings → Online payments), else ASP's house payee
+// profile. Never the artist's: the deposit (ASP's fee) goes to ASP; only the balance goes to the artist.
+function aspHousePayeeProfile(){ return PAYEE_PROFILES.find(x=>!x.artistId && /^ASP\b/i.test(x.entityName||'')) || null; }
+// A contract's deposit Zelle: ASP's (depositZelle), except a creative contract, whose deposit goes to
+// its production company's payee (e.g. Airschnitz), as before.
+function contractDepositZelle(c, profile){
+  if(c.template==='creative' && profile && profile.zelleActive!==false && (profile.zelle || profile.zelleQrUrl)) return { qrUrl: profile.zelleQrUrl||null, handle: profile.zelle||'', label: profile.zelleRecipientLabel||profile.zelle||'' };
+  return depositZelle();
+}
+function depositZelle(){
+  const qrUrl = ORG_SETTINGS.depositZelleQrUrl || null, handle = (ORG_SETTINGS.depositZelleHandle||'').trim();
+  if(qrUrl || handle) return { qrUrl, handle, label: handle };
+  const p = aspHousePayeeProfile();
+  if(p && p.zelleActive!==false && (p.zelle || p.zelleQrUrl)) return { qrUrl: p.zelleQrUrl||null, handle: p.zelle||'', label: p.zelleRecipientLabel||p.zelle||'' };
+  return null;
+}
+// Zelle for a gig's balance: the artist's payee profile (never another artist's -- zellePayeeFor).
+function balanceZelle(ev){
+  const payee = zellePayeeFor(ev); if(!payee) return null;
+  const prof = payee.profile;
+  // Only the public copy (https): an email can't show an image embedded as data:, so without one the
+  // client gets the Zelle address instead.
+  const qrUrl = /^https:\/\//.test(prof.zelleQrUrl||'') ? prof.zelleQrUrl : null;
+  return { qrUrl, handle: payee.identifier, label: payee.label, note: prof.zelleInstructions||'' };
+}
+// Puts an image the office uploads (a Zelle QR) in the public "brand-public" store (0059) and returns
+// its https:// address: email clients won't show images embedded in the message itself.
+async function uploadBrandImage(file, prefix){
+  if(!supabaseClient || !S.realSession) return { ok:false, error:'Sign in with your ASP account to upload.' };
+  if(!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) return { ok:false, error:'Upload a PNG, JPG, WebP or GIF image.' };
+  if(file.size > 2*1024*1024) return { ok:false, error:'That image is over 2 MB — use a smaller one.' };
+  const ext = { 'image/png':'png', 'image/jpeg':'jpg', 'image/webp':'webp', 'image/gif':'gif' }[file.type];
+  const path = `${prefix}-${crypto.randomUUID()}.${ext}`;   // unguessable: QRs carry a Zelle email/phone
+  const { error } = await supabaseClient.storage.from('brand-public').upload(path, file, { contentType:file.type, upsert:false });
+  if(error) return { ok:false, error:'Upload failed: ' + error.message };
+  return { ok:true, url: supabaseClient.storage.from('brand-public').getPublicUrl(path).data.publicUrl };
+}
+function gigPaymentMemo(ev){ return `${ev.clientName||'Event'} ${fmtDateShort(ev.date)}`.trim(); }
 // Client-facing notice emails (booking confirmation + balance reminder, ops automation spec item
 // 5): same branded wrapper as travelRequestEmailHtml, parameterized by the one paragraph that
 // actually differs between the two.
@@ -1940,10 +2027,10 @@ function clientNoticeEmailHtml(ev, artist, introHtml){
     .wordmark{ font-size:1.1rem; font-weight:700; border-bottom:2px solid #17171A; padding-bottom:14px; margin-bottom:18px; }
     .doc-foot{ margin-top:22px; padding-top:12px; border-top:1px solid #E1E1E6; font-size:10.5px; color:#9A9AA1; }
   </style></head><body><div class="doc">
-    <div class="wordmark">${esc(brand.label||'ASP')}</div>
+    <div class="wordmark">${brandLogoEmailHtml(170)}</div>
     ${introHtml}
     ${hasLocation(ev)? `<p style="margin:0 0 8px;font-size:13px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:#4C6FA5;">Open in Maps</a></p>` : ''}
-    ${isStandardPayment(ev)? zelleQrEmailBlock(ev, artist) : ''}
+    ${isStandardPayment(ev) && balance>0 ? paymentOptionsEmailBlock({ kind:'balance', amount:balance, memo:gigPaymentMemo(ev), zelle:balanceZelle(ev) }) : ''}
     <div class="doc-foot">Sent from ${esc(brand.label||'ASP')}. Remaining balance: ${money(balance)}.</div>
   </div></body></html>`;
 }
@@ -2204,7 +2291,7 @@ async function doOAuthConnect(provider, mailboxId){
     });
     const data = await resp.json().catch(()=>({ ok:false, error:'Unexpected response from the server.' }));
     if(!resp.ok || data.ok===false || !data.state){ toast('Could not start the connection: ' + (data.error||'unknown error'), 'system'); return; }
-    location.href = provider==='qbo' ? qboAuthorizeUrl(data.state) : provider==='gcal' ? gcalAuthorizeUrl(data.state) : gmailAuthorizeUrl(data.state);
+    location.href = provider==='qbo' ? qboAuthorizeUrl(data.state) : provider==='gcal' ? gcalAuthorizeUrl(data.state) : gmailAuthorizeUrl(data.state, mailboxId);
   } catch(err){ toast('Could not start the connection: ' + String(err), 'system'); }
 }
 function qboAuthorizeUrl(state){
@@ -2225,10 +2312,15 @@ function gcalAuthorizeUrl(state){
 // Unlike QBO/Google Calendar (one ASP-wide account), each mailbox here is authorized by its own
 // owner -- state carries WHICH gmail_mailboxes row this consent is for (see gmail-oauth-callback).
 // Narrowest read-only scope, per "narrowest scope" in the spec.
-const GMAIL_CLIENT_ID = '';
+const GMAIL_CLIENT_ID = '139081512285-ehvftl99a7o8mkcmg1vsir2lr9ep802c.apps.googleusercontent.com';   // public (owner 2026-10-14)
 const GMAIL_REDIRECT_URI = SUPABASE_URL + '/functions/v1/gmail-oauth-callback';
-function gmailAuthorizeUrl(state){
-  const scope = 'https://www.googleapis.com/auth/gmail.readonly';
+// The office's sending mailbox (type asp_sending) also needs gmail.send; other mailboxes are
+// read-only. mailboxId is the gmail_mailboxes row id; its type comes from the gmail-status list.
+function gmailAuthorizeUrl(state, mailboxId){
+  const box = (S.gmailMailboxes||[]).find(m=>m.id===mailboxId);
+  const scope = box && (box.mailbox_type||box.mailboxType)==='asp_sending'
+    ? 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly'
+    : 'https://www.googleapis.com/auth/gmail.readonly';
   return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(GMAIL_CLIENT_ID)}&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(GMAIL_REDIRECT_URI)}&response_type=code&access_type=offline&prompt=consent&state=${encodeURIComponent(state)}`;
 }
 
@@ -3826,7 +3918,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.10'; // bump on every release so a phone can tell it has updated. v1.9.10: Gig Info lineup + drop-in band sheet; ASP gig sheet
+const APP_VERSION = 'v1.9.11'; // bump on every release so a phone can tell it has updated. v1.9.11: ASP logo everywhere (animated A loader/opener); one payment section (pay online, Zelle QR, check/cash line)
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -3835,7 +3927,7 @@ function isNavActive(v){ return S.view===v || (v==='artists' && S.view==='artist
 
 function renderRail(){
   return `<div class="rail">
-    <div class="wordmark"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
+    <div class="wordmark">${brandLogoHtml({ width:150, local:true })}</div>
     <div class="rail-nav">
       ${mgmtNavItemsFor(S.user).map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span>${l}</a>`).join('')}
       <a href="#" class="rail-link ${isNavActive('settings')?'active':''}" data-action="nav" data-view="settings">${ICO.settings}Settings</a>
@@ -3849,7 +3941,7 @@ function renderRail(){
 function renderArtistTopTabs(){
   return `<div class="artist-top-tabs">
   <div class="topbar" style="border-bottom:none;padding-bottom:0;">
-    <div class="wordmark"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
+    <div class="wordmark">${brandLogoHtml({ width:140, local:true })}</div>
     <button class="icon-btn artist-settings-btn" data-action="nav" data-view="settings" title="Settings" aria-label="Settings">${ICO.settings}</button>
   </div>
   <div style="padding:0 28px;">
@@ -3872,7 +3964,7 @@ function renderMobileMenu(isAdmin){
   return `<div class="overlay left" data-action="mobilemenu-close">
     <div class="mobile-menu-panel" data-stop>
       <div style="display:flex;align-items:center;justify-content:space-between;">
-        <div class="wordmark"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
+        <div class="wordmark">${brandLogoHtml({ width:140, local:true })}</div>
         <button class="icon-btn" data-action="close-mobile-menu" aria-label="Close">${ICO.x}</button>
       </div>
       <div class="rail-nav">
@@ -4129,9 +4221,9 @@ function renderSettingsPage(){
 // zero behavior change there.
 function loginWordmark(){
   const brand = window.ASP_BRAND_OVERRIDE || {};
-  const name = brand.name || 'ASP';
   const tagline = brand.tagline || 'Bookings';
-  return `<div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(name)}<small>${esc(tagline)}</small></div>`;
+  if(!brand.name) return `<div class="wordmark" style="flex-direction:column;gap:8px;align-items:center;justify-content:center;">${brandLogoHtml({ width:240, local:true })}<small>${esc(tagline)}</small></div>`;
+  return `<div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(brand.name)}<small>${esc(tagline)}</small></div>`;
 }
 function renderLogin(){
   if(S.showRealSignIn) return renderRealSignIn();
@@ -4188,7 +4280,7 @@ function renderRealSignInNotFound(){
 /* ============ MGMT DASHBOARD ============ */
 function renderWelcomeHeader(name){
   return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
-    <span class="mark" style="height:22px;"><i></i><i></i><i></i><i></i><i></i></span>
+    <span style="flex:none;">${brandLogoHtml({ kind:'icon', width:30, alt:'', local:true })}</span>
     <h2 style="font-family:var(--font-display);font-size:1.4rem;margin:0;">Welcome, ${esc(name)}</h2>
   </div>`;
 }
@@ -5649,6 +5741,8 @@ function zelleQrUrl(ev, artist, profile){
 }
 function renderZelleQrBlock(ev, artist){
   const payee = zellePayeeFor(ev);
+  if(payee) return `<div style="background:#fff;color:#17171A;border-radius:var(--r-md);padding:4px 12px 12px;">${paymentOptionsEmailBlock({ kind:'balance', amount:artistPayout(ev), memo:gigPaymentMemo(ev), zelle:balanceZelle(ev) })}</div>
+    ${balanceZelle(ev).qrUrl ? '' : `<p style="font-size:10.5px;color:var(--ink-3);margin:10px 0 0;text-align:center;">No Zelle QR uploaded for this artist yet, so the email shows their Zelle address instead. Upload it in Settings → Payee Profiles.</p>`}`;
   if(!payee) return `<p style="font-size:12px;color:var(--warn-ink);background:var(--warn-wash);padding:10px 12px;border-radius:var(--r-md);margin:0;">${esc(artist.name)} ${esc(zellePayeeReason(ev))} — the client will be told to contact the office for Zelle details. Fix it in Settings → Payee Profiles.</p>`;
   const profile = payee.profile;
   const usingRealQr = !!profile.zelleQrDataUrl;
@@ -6513,7 +6607,7 @@ function renderDocumentDoc(doc){
       <div class="sheet-head"><h2 style="font-size:1.1rem;">Document Preview</h2><button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button></div>
       <div class="doc-body">
         <div class="doc-letterhead">
-          <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
+          <div class="doc-logo">${brandLogoHtml({ width:170 })}</div>
           <span class="pill ${doc.signedAt?'pill-good':'pill-neutral'}">${doc.signedAt?'Signed':'Unsigned'}</span>
         </div>
         <div class="doc-title">${esc((doc.title||'Document').toUpperCase())}</div>
@@ -6550,7 +6644,7 @@ function renderInvoiceDoc(){
       </div>
       <div class="doc-body">
         <div class="doc-letterhead">
-          <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
+          <div class="doc-logo">${brandLogoHtml({ width:170 })}</div>
           <span class="pill ${inv.status==='paid'?'pill-good':'pill-warn'}">${inv.status==='paid'?'Paid':'Open'}</span>
         </div>
         <div class="doc-title">INVOICE</div>
@@ -6570,7 +6664,7 @@ function renderInvoiceDoc(){
         ${inv.notes? `<div class="doc-section"><p style="font-size:12.5px;color:var(--ink-2);margin:0;">${esc(inv.notes)}</p></div>` : ''}
 
         <div class="doc-section"><h3>Payment</h3>
-          <p style="font-size:12.5px;line-height:1.7;margin:0;">Payment via QuickBooks invoice, Zelle, or check made out to ${esc(getBrandConfig('asp').label)}. Contact <span class="u-mono">${esc(getBrandConfig('asp').email)}</span> with questions.</p>
+          <div style="background:#fff;color:#17171A;border-radius:var(--r-md);padding:2px 12px 12px;">${paymentOptionsEmailBlock({ kind:'invoice', amount:total, memo:inv.id, zelle:depositZelle() })}</div>
           ${invoiceOnlinePayment(inv) ? `<p style="margin:8px 0 0;"><span class="pill pill-wrap pill-good" data-testid="invoice-online-payment">${invoiceOnlinePayment(inv).pay_status==='processing' ? 'Bank transfer processing' : `Paid online — ${esc(paidOnlineText(invoiceOnlinePayment(inv)))}`}</span></p>`
             : inv.status!=='paid' && stripeReady() ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
               <button class="btn btn-sm btn-ghost" data-action="make-invoice-pay-link" data-id="${inv.id}" ${S.payLinkBusy===inv.id?'disabled':''}>${S.payLinkBusy===inv.id?'Making link…':'Pay link'}</button>
@@ -7136,17 +7230,15 @@ function renderContractBuilderDoc(c){
 // which default from that artist's payee profile.
 // ASP document header band (contracts, gig sheets): dark band, ASP mark, kicker, big title, subtitle.
 // Inline styles so it prints and emails the same.
+// The dark band at the top of contracts and gig sheets: the logo (version 1, white and blue on dark)
+// on its own line, then the document's title -- stacked, so it fits a phone and an email alike.
 function aspDocHeaderHtml({ kicker, title, subtitle, bsd }){
-  const bars = [10,22,16,20,13].map(h=>`<span style="display:inline-block;width:5px;height:${h}px;margin-right:3px;border-radius:3px;background:#7FA0D1;vertical-align:bottom;"></span>`).join('');
-  return `<div style="background:#14161C;color:#fff;border-radius:10px 10px 0 0;padding:20px 24px;position:relative;">
+  return `<div style="background:#14161C;color:#fff;border-radius:10px 10px 0 0;padding:20px 24px;position:relative;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
       ${bsd? `<div style="position:absolute;top:10px;right:16px;font-size:11px;color:#9FB3D6;">BS"D</div>` : ''}
-      <table role="presentation" style="border-collapse:collapse;border:none;background:none;"><tr>
-        <td style="padding:0 18px 0 0;border:none;border-right:1px solid #333845;text-align:center;vertical-align:middle;background:none;"><div style="height:24px;">${bars}</div><div style="font-weight:700;font-size:18px;margin-top:4px;">ASP</div></td>
-        <td style="padding:0 0 0 18px;border:none;vertical-align:middle;background:none;">
-          <div style="font-size:10.5px;letter-spacing:.22em;color:#9FB3D6;">${kicker}</div>
-          <div style="font-size:24px;font-weight:700;line-height:1.2;">${title}</div>
-          <div style="font-size:12.5px;color:#C9CFDA;">${subtitle}</div>
-        </td></tr></table>
+      <img src="${BRAND_ASSET_BASE}asp-horizontal-light.png" alt="ASP Management" width="190" style="display:block;width:190px;max-width:100%;height:auto;border:0;margin:0 0 14px;"/>
+      <div style="font-size:10.5px;letter-spacing:.22em;color:#9FB3D6;">${kicker}</div>
+      <div style="font-size:24px;font-weight:700;line-height:1.2;overflow-wrap:anywhere;">${title}</div>
+      <div style="font-size:12.5px;color:#C9CFDA;">${subtitle}</div>
     </div>`;
 }
 function contractMadeOnSentence(c){
@@ -7216,9 +7308,8 @@ function standardDocContent(c){
       ${(c.customClauses||[]).map(cc=>`${label(esc(cc.title||'Additional Terms'))}<p style="margin:0;white-space:pre-line;">${esc(cc.body)}</p>`).join('')}
       ${renderContractSignBlock(c, who)}
       ${contractClientContactLine(c)? `<p style="margin:12px 0 0;"><strong>Client contact:</strong> ${esc(contractClientContactLine(c).replace(/^Client contact:\s*/,'').replace(/ - /g,' — '))}</p>` : ''}
-      ${label('Payment / Deposit Options')}
-      ${renderPayeeBlock(profile).replace(/<h3>Payment<\/h3>/,'')}
-      ${phone? `<p style="margin:6px 0 0;">For a deposit by check, please send a picture of the front and back of the check by WhatsApp to our office number ${esc(phone)}.</p>` : ''}
+      ${label('Paying the Deposit')}
+      ${paymentOptionsEmailBlock({ kind:'deposit', amount:figures.deposit, memo:c.id, zelle:contractDepositZelle(c, profile) })}
       <div style="margin-top:22px;padding-top:10px;border-top:1px solid #E3E3E8;font-size:10.5px;color:${mute};display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
         <span>${esc(brand.senderName||'ASP Management')}${brand.email?` &middot; ${esc(brand.email)}`:''}${phone?` &middot; ${esc(phone)}`:''}</span><span>Agreement ${esc(c.id)}</span>
       </div>
@@ -7236,7 +7327,7 @@ function comedianDocContent(c){
   return `
     ${docBsdHeader(c)}
     <div class="doc-letterhead">
-      <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(brand.label)}</div>
+      <div class="doc-logo">${brandLogoHtml({ width:170 })}</div>
       <span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span>
     </div>
     <div class="doc-title">COMEDIAN AGREEMENT</div>
@@ -7276,7 +7367,7 @@ function comedianDocContent(c){
     ${c.boilerplate.acceptanceClause? `<div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractAcceptanceText(c))}</p></div>` : ''}
     ${c.customClauses.map(cc=>`<div class="doc-section"><h3>${esc(cc.title||'Additional Terms')}</h3><p style="font-size:12.5px;line-height:1.7;margin:0;white-space:pre-line;">${esc(cc.body)}</p></div>`).join('')}
     ${renderContractSignBlock(c, brand.signer)}
-    ${renderPayeeBlock(profile)}
+    <div class="doc-section"><h3>Paying the Deposit</h3><div style="background:#fff;color:#17171A;border-radius:10px;padding:2px 12px 12px;">${paymentOptionsEmailBlock({ kind:'deposit', amount:contractPaymentFigures(c).deposit, memo:c.id, zelle:contractDepositZelle(c, profile) })}</div></div>
     ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
   `;
 }
@@ -7289,7 +7380,7 @@ function multilineDocContent(c){
   return `
     ${docBsdHeader(c)}
     <div class="doc-letterhead">
-      <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(brand.label)}</div>
+      <div class="doc-logo">${brandLogoHtml({ width:170 })}</div>
       <span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span>
     </div>
     <div class="doc-title">ARTIST AGREEMENT</div>
@@ -7327,7 +7418,7 @@ function multilineDocContent(c){
     <div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractCancellationText(c))}</p></div>
     ${c.customClauses.map(cc=>`<div class="doc-section"><h3>${esc(cc.title||'Additional Terms')}</h3><p style="font-size:12.5px;line-height:1.7;margin:0;white-space:pre-line;">${esc(cc.body)}</p></div>`).join('')}
     ${renderContractSignBlock(c, brand.signer)}
-    ${renderPayeeBlock(profile)}
+    <div class="doc-section"><h3>Paying the Deposit</h3><div style="background:#fff;color:#17171A;border-radius:10px;padding:2px 12px 12px;">${paymentOptionsEmailBlock({ kind:'deposit', amount:contractPaymentFigures(c).deposit, memo:c.id, zelle:contractDepositZelle(c, profile) })}</div></div>
     ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
   `;
 }
@@ -7339,7 +7430,7 @@ function creativeDocContent(c){
   return `
     ${docBsdHeader(c)}
     <div class="doc-letterhead">
-      <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(brand.label)}</div>
+      <div class="doc-logo">${brandLogoHtml({ width:170 })}</div>
       <span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span>
     </div>
     <div class="doc-title">CREATIVE / VIDEO PRODUCTION AGREEMENT</div>
@@ -7375,7 +7466,7 @@ function creativeDocContent(c){
     </div>
     ${c.customClauses.map(cc=>`<div class="doc-section"><h3>${esc(cc.title||'Additional Terms')}</h3><p style="font-size:12.5px;line-height:1.7;margin:0;white-space:pre-line;">${esc(cc.body)}</p></div>`).join('')}
     ${renderContractSignBlock(c, brand.signer)}
-    ${renderPayeeBlock(profile)}
+    <div class="doc-section"><h3>Paying the Deposit</h3><div style="background:#fff;color:#17171A;border-radius:10px;padding:2px 12px 12px;">${paymentOptionsEmailBlock({ kind:'deposit', amount:contractPaymentFigures(c).deposit, memo:c.id, zelle:contractDepositZelle(c, profile) })}</div></div>
     ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
   `;
 }
@@ -7480,6 +7571,16 @@ function renderOnlinePaymentsCard(){
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">${status}</div>
     ${st && st.connected ? '' : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">${st && st.error ? `Stripe didn't accept the key: ${esc(st.error)}. ` : ''}Clients pay deposits and invoices by card or bank transfer from the email link. Setup: <code>ops/STRIPE_SETUP.md</code>.</p>`}
     ${warnings.map(w=>`<p style="font-size:11.5px;color:var(--warn-ink);margin:0 0 6px;">${w}</p>`).join('')}
+    <h4 style="margin:16px 0 6px;font-size:.95rem;">Zelle for deposits and invoices (ASP)</h4>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 8px;">Shown under the Pay online button as “Scan here to pay the deposit”. Balances use each artist's own Zelle QR (Payee Profiles). Get the QR from your bank app: Zelle → your QR code → save the picture.</p>
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
+      ${ORG_SETTINGS.depositZelleQrUrl ? `<img src="${esc(ORG_SETTINGS.depositZelleQrUrl)}" alt="ASP Zelle QR" width="88" height="88" data-testid="deposit-zelle-qr" style="border-radius:6px;background:#fff;border:1px solid var(--border);"/>` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <label class="btn btn-sm" style="cursor:pointer;display:inline-flex;">${S.depositQrBusy?'Uploading…':(ORG_SETTINGS.depositZelleQrUrl?'Replace QR image':'Upload QR image')}<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-action="upload-deposit-zelle-qr" style="display:none;" ${S.depositQrBusy?'disabled':''}/></label>
+        ${ORG_SETTINGS.depositZelleQrUrl ? `<button class="btn btn-sm btn-ghost" data-action="remove-deposit-zelle-qr">Remove</button>` : ''}
+      </div>
+    </div>
+    <div class="field" style="margin-top:8px;max-width:320px;"><label>Zelle email or phone (shown if there's no QR)</label><input data-field="depositZelleHandle" data-form="orgsettings" value="${esc(ORG_SETTINGS.depositZelleHandle||'')}" placeholder="billing@aspmgmt.com"/></div>
     <div class="field" style="margin-top:8px;max-width:260px;"><label>Credit card fee (%)</label><input data-field="cardFeePercent" data-form="orgsettings" type="number" min="0" max="3" step="0.1" value="${esc(String(ORG_SETTINGS.cardFeePercent||0))}"/></div>
     <p style="font-size:11.5px;color:var(--ink-3);margin:4px 0 0;">Added to <strong>credit</strong> card payments only (never debit cards or bank transfer), shown to the client before they pay, max 3%. Notify Visa and Mastercard at least 30 days before turning it on. Never charged for gigs in CT or MA. Bank transfers cost ASP 0.8% (max $5).</p>
   </div>`;
@@ -7789,7 +7890,7 @@ function renderItineraryDoc(){
       </div>
       <div class="doc-body">
         <div class="doc-letterhead">
-          <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
+          <div class="doc-logo">${brandLogoHtml({ width:170 })}</div>
           <span class="pill pill-good">Itinerary</span>
         </div>
         <div class="doc-title">${esc(artist.name.toUpperCase())}<br/><span style="font-size:.62em;letter-spacing:.06em;">${esc((ev.type||'').toUpperCase())}${ev.unpaid?'':` — ${esc((ev.clientName||'').toUpperCase())}`}</span></div>
@@ -9109,13 +9210,13 @@ function bindGlobal(){
       case 'contractbuilderdoc-overlay-close': if(e.target===t){ S.showContractBuilderDoc=false; render(); } break;
       case 'print-contract-builder': window.print(); break;
       case 'filter-contracts-status': S.contractsStatusFilter = t.getAttribute('data-status'); render(); break;
-      case 'open-payee-profile-form': S.showPayeeProfileForm=true; S.editingPayeeProfileId=id||null; S.payeeProfileForm = id? (()=>{ const p=getPayeeProfile(id); return p? {entityName:p.entityName, artistId:p.artistId, zelle:p.zelle, checkPayee:p.checkPayee, checkAddress:p.checkAddress, wireBankName:p.wireBankName, wireAccountName:p.wireAccountName, wireAccountNumber:p.wireAccountNumber, wireRoutingNumber:p.wireRoutingNumber, wireSwift:p.wireSwift, notes:p.notes, defaultOvertimeInterval:p.defaultOvertimeInterval, zelleRecipientLabel:p.zelleRecipientLabel, zelleInstructions:p.zelleInstructions, zelleActive:p.zelleActive, zelleQrDataUrl:p.zelleQrDataUrl} : {}; })() : {defaultOvertimeInterval:'half_hour', zelleActive:true};
+      case 'open-payee-profile-form': S.showPayeeProfileForm=true; S.editingPayeeProfileId=id||null; S.payeeProfileForm = id? (()=>{ const p=getPayeeProfile(id); return p? {entityName:p.entityName, artistId:p.artistId, zelle:p.zelle, checkPayee:p.checkPayee, checkAddress:p.checkAddress, wireBankName:p.wireBankName, wireAccountName:p.wireAccountName, wireAccountNumber:p.wireAccountNumber, wireRoutingNumber:p.wireRoutingNumber, wireSwift:p.wireSwift, notes:p.notes, defaultOvertimeInterval:p.defaultOvertimeInterval, zelleRecipientLabel:p.zelleRecipientLabel, zelleInstructions:p.zelleInstructions, zelleActive:p.zelleActive, zelleQrDataUrl:p.zelleQrDataUrl, zelleQrUrl:p.zelleQrUrl||null} : {}; })() : {defaultOvertimeInterval:'half_hour', zelleActive:true};
       render(); break;
       case 'close-payee-profile-form': S.showPayeeProfileForm=false; S.payeeProfileForm={}; S.editingPayeeProfileId=null; render(); break;
       case 'payeeprofileform-overlay-close': if(e.target===t){ S.showPayeeProfileForm=false; S.payeeProfileForm={}; S.editingPayeeProfileId=null; render(); } break;
       case 'pick-payee-overtime-interval': S.payeeProfileForm.defaultOvertimeInterval = t.getAttribute('data-value'); render(); break;
       case 'save-payee-profile': doSavePayeeProfile(); break;
-      case 'remove-payee-zelle-qr': S.payeeProfileForm.zelleQrDataUrl = null; render(); break;
+      case 'remove-payee-zelle-qr': S.payeeProfileForm.zelleQrDataUrl = null; S.payeeProfileForm.zelleQrUrl = null; render(); break;
       case 'delete-payee-profile': doDeletePayeeProfile(id); break;
       case 'preview-data-migration': S.migrationPreview = computeMigrationCounts(); render(); break;
       case 'check-reconciliation-queue': loadReconciliationQueue(); break;
@@ -9132,6 +9233,7 @@ function bindGlobal(){
       case 'toggle-send-contract-invoice': S.sendContractInvoice = !S.sendContractInvoice; if(S.sendContractInvoice) S.sendContractPayOnline = false; render(); break;
       case 'toggle-send-contract-pay': S.sendContractPayOnline = !S.sendContractPayOnline; if(S.sendContractPayOnline) S.sendContractInvoice = false; render(); break;
       case 'make-invoice-pay-link': doMakeInvoicePayLink(id); break;
+      case 'remove-deposit-zelle-qr': ORG_SETTINGS.depositZelleQrUrl = null; saveOrgSettings(); render(); break;
       case 'toggle-invoice-no-card-fee': S.newInvoiceForm.noCardFee = !S.newInvoiceForm.noCardFee; render(); break;
       case 'open-verify-deposit': S.verifyDepositEventId=id; S.showVerifyDeposit=true; S.verifyDepositForm={method:'zelle', note:''}; render(); break;
       case 'close-verify-deposit': S.showVerifyDeposit=false; S.verifyDepositForm={}; render(); break;
@@ -9307,11 +9409,29 @@ function bindGlobal(){
   document.querySelectorAll('[data-action="set-included-hours"]').forEach(inp=>{
     inp.addEventListener('change', ()=>{ setPricing(inp.getAttribute('data-artist'), inp.getAttribute('data-type'), {includedHours:Number(inp.value)||0}); toast('Rate updated.', 'system'); render(); });
   });
+  document.querySelectorAll('[data-action="upload-deposit-zelle-qr"]').forEach(inp=>{
+    if(inp.tagName!=='INPUT') return;
+    inp.addEventListener('change', async ()=>{
+      if(!inp.files.length) return;
+      S.depositQrBusy = true; render();
+      const up = await uploadBrandImage(inp.files[0], 'zelle/asp-deposit');
+      S.depositQrBusy = false;
+      if(!up.ok){ toast(up.error, 'system'); render(); return; }
+      ORG_SETTINGS.depositZelleQrUrl = up.url; saveOrgSettings();
+      toast('Zelle QR saved — it now shows on contracts and invoices.', 'success'); render();
+    });
+  });
   document.querySelectorAll('[data-action="upload-payee-zelle-qr"]').forEach(inp=>{
     if(inp.tagName!=='INPUT') return;
     inp.addEventListener('change', ()=>{
       if(!inp.files.length) return;
       const file = inp.files[0];
+      // Also stored publicly (zelleQrUrl) so emails can show it; the in-app copy stays as before.
+      const form = S.payeeProfileForm;
+      form.zelleQrUrl = null;
+      uploadBrandImage(file, 'zelle/payee').then(up=>{
+        if(up.ok) form.zelleQrUrl = up.url; else toast(up.error + ' The QR will show in the app but not in emails.', 'system');
+      });
       const reader = new FileReader();
       reader.onload = ()=>{ S.payeeProfileForm.zelleQrDataUrl = reader.result; render(); };
       reader.onerror = ()=>{ toast(`Could not read ${file.name}.`, 'system'); };

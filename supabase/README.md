@@ -43,6 +43,8 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0055_remove_sing_brand | Applied 2026-10-13 — SING Entertainment removed (owner): its `brand_config` row deleted, brand_key limited to 'asp'. No records used it. |
 | 0056_payment_requests | Applied 2026-10-13 — clients pay online (Stripe): `payment_requests` (deposit on the signing link's token, or a custom invoice's own link), `append_event_log()` (service role only), `payments.source` gains 'stripe'. See `ops/STRIPE_SETUP.md`. |
 | 0057_payment_claims | Applied 2026-10-13 — payments hardened after review: `payment_requests.applied_at` (one admin browser applies a paid deposit), `claim_payment_attempt()` (one pay attempt at a time per contract/invoice; service role only). |
+| 0058_client_followups | Applied 2026-10-14 — log of automatic client reminders (deposit / balance, every 7 days) written by the client-followups job; enables pg_cron. Service role writes, admins read. |
+| 0059_brand_public_storage | Applied 2026-10-14 — public Storage bucket `brand-public` (admins upload; anyone reads) for images that go out in client emails: the Zelle QR codes (Gmail won't show data: images). |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in
