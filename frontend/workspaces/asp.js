@@ -3826,7 +3826,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.9'; // bump on every release so a phone can tell it has updated. v1.9.9: contract defaults (15%, Mechitza, travel only with a flight, pre-signed); flight needed emails Rivky
+const APP_VERSION = 'v1.9.10'; // bump on every release so a phone can tell it has updated. v1.9.10: Gig Info lineup + drop-in band sheet; ASP gig sheet
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -5994,7 +5994,53 @@ function renderAddChargeRow(ev){
 // Paste/write free-text gig info + a contact list (name/role/phone/email, click-to-copy),
 // available from the event sheet the same place Prep Sheets is -- printable via the same
 // print-host pattern as the Contract/Itinerary docs (renderItineraryDoc above).
-function gigInfoSheetOf(ev){ return ev.gigInfoSheet || {text:'', contacts:[], updatedAt:null}; }
+function gigInfoSheetOf(ev){
+  // Lineup + run of the night + songs added 2026-10-14 (additive: older sheets just lack them).
+  return { text:'', contacts:[], choir:'', otherSingers:'', startTime:'', schedule:[], songs:[], updatedAt:null, ...(ev.gigInfoSheet||{}) };
+}
+const gigScheduleText = sheet=>(sheet.schedule||[]).map(r=>`${r.time? r.time+' ' : ''}${r.item}`).join('\n');
+const gigSongsText = sheet=>(sheet.songs||[]).map(r=>r.moment? `${r.moment} — ${r.song}` : r.song).join('\n');
+function parseGigScheduleText(t){
+  return String(t||'').split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{
+    const m = l.match(/^(\d{1,2}:\d{2})\s*[—–-]?\s*(.*)$/); return m ? { time:m[1].padStart(5,'0'), item:m[2] } : { time:'', item:l };
+  });
+}
+function parseGigSongsText(t){
+  return String(t||'').split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{
+    const m = l.match(/^(.+?)\s+[—–-]\s+(.+)$/); return m ? { moment:m[1], song:m[2] } : { moment:'', song:l };
+  });
+}
+function gigLineupRows(ev, sheet){
+  return [['Band', ev.band? `${ev.band}${ev.bandSize?` (${ev.bandSize} piece${Number(ev.bandSize)===1?'':'s'})`:''}` : ''],
+          ['Choir', sheet.choir], ['Other singers', sheet.otherSingers], ['Artist starts', sheet.startTime? fmtTime(sheet.startTime) : '']]
+    .filter(([,v])=>v);
+}
+// Drop-in (owner 2026-10-14): the band's message or file -> parse-gig-info (Claude) -> the form.
+// Nothing is saved until the office presses Save.
+async function doBuildGigSheet(){
+  const f = S.gigInfoForm;
+  const text = (f.dropText||'').trim();
+  if(!text && !S.gigInfoFile){ toast("Paste the band's info or attach their file first.", 'system'); return; }
+  S.gigInfoBusy = true; render();
+  try{
+    const res = await callEdgeFunction('parse-gig-info', { text, file: S.gigInfoFile ? { mediaType:S.gigInfoFile.mediaType, data:S.gigInfoFile.data } : null });
+    if(!res.ok){ toast(res.error || 'Could not read that.', 'system'); return; }
+    const x = res.sheet || {};
+    if(x.band) f.band = x.band;
+    if(x.bandSize) f.bandSize = x.bandSize;
+    if(x.choir) f.choir = x.choir;
+    if((x.otherSingers||[]).length) f.otherSingers = x.otherSingers.join(', ');
+    if(/^\d{2}:\d{2}$/.test(x.startTime||'')) f.startTime = x.startTime;
+    if((x.schedule||[]).length) f.scheduleText = gigScheduleText({ schedule:x.schedule });
+    if((x.songs||[]).length) f.songsText = gigSongsText({ songs:x.songs });
+    if(x.notes) f.text = [f.text, x.notes].filter(Boolean).join('\n');
+    f.newContacts = (x.contacts||[]).filter(c=>c.name||c.phone||c.email);
+    toast('Gig sheet filled in — check it and press Save.', 'success');
+  } finally {
+    S.gigInfoBusy = false; render();
+  }
+}
+
 function renderContactCopyRow(c, ev){
   return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border);font-size:12.5px;">
     <span style="flex:1;min-width:0;"><strong>${esc(c.name)}</strong>${c.role?` <span style="color:var(--ink-3);">· ${esc(c.role)}</span>`:''}</span>
@@ -6010,7 +6056,8 @@ function renderContactCopyRow(c, ev){
 function renderPrepAndGigInfoCard(ev, isAdmin){
   const sheet = gigInfoSheetOf(ev);
   const files = ev.prepSheets||[];
-  const hasNotes = !!(sheet.text || (sheet.contacts||[]).length);
+  const lineup = gigLineupRows(ev, sheet);
+  const hasNotes = !!(sheet.text || (sheet.contacts||[]).length || lineup.length || (sheet.schedule||[]).length || (sheet.songs||[]).length);
   const canNote = isAdmin && !ev.unpaid;
   return `<div class="card card-pad">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
@@ -6021,6 +6068,9 @@ function renderPrepAndGigInfoCard(ev, isAdmin){
       </span>` : ''}
     </div>
     ${!hasNotes && !files.length? `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No gig info yet.</p>` : ''}
+    ${lineup.length? `<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">${lineup.map(([k,v])=>`<div class="kv-row"><span style="color:var(--ink-2);">${esc(k)}</span><strong style="text-align:right;">${esc(v)}</strong></div>`).join('')}</div>` : ''}
+    ${(sheet.schedule||[]).length? `<div class="u-label" style="margin:6px 0 4px;">Run of the night</div><div style="font-size:12.5px;margin-bottom:10px;">${sheet.schedule.map(r=>`<div><span class="u-mono" style="color:var(--ink-3);display:inline-block;min-width:62px;">${r.time? esc(fmtTime(r.time)) : ''}</span>${esc(r.item)}</div>`).join('')}</div>` : ''}
+    ${(sheet.songs||[]).length? `<div class="u-label" style="margin:6px 0 4px;">Songs</div><div style="font-size:12.5px;margin-bottom:10px;">${sheet.songs.map(r=>`<div>${r.moment? `<span style="color:var(--ink-3);">${esc(r.moment)}:</span> ` : ''}${esc(r.song)}</div>`).join('')}</div>` : ''}
     ${sheet.text? `<p style="font-size:12.5px;color:var(--ink);white-space:pre-wrap;margin:0 0 10px;">${esc(sheet.text)}</p>` : ''}
     ${(sheet.contacts||[]).length? `<div style="margin-bottom:10px;">${sheet.contacts.map(c=>renderContactCopyRow(c, ev)).join('')}</div>` : ''}
     ${files.length? `<div class="log" style="margin-bottom:10px;">${files.map(f=>`
@@ -6044,8 +6094,28 @@ function renderGigInfoFormOverlay(){
     <div class="modal" data-stop data-form="giginfo" style="width:480px;">
       <div class="sheet-head"><h2 style="font-size:1.2rem;">Gig Info</h2><button class="icon-btn" data-action="close-giginfo-form" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
-        <div class="field"><label>Gig Info</label>
-          <textarea data-field="text" rows="8" placeholder="Paste or write everything the artist needs to know — schedule, sound check, meal info, special requests...">${esc(f.text!==undefined?f.text:sheet.text)}</textarea>
+        <div class="card card-pad" style="display:flex;flex-direction:column;gap:8px;background:var(--accent-wash);">
+          <div class="u-label">Drop in the band's info</div>
+          <textarea data-field="dropText" rows="4" placeholder="Paste what the band or planner sent: lineup, times, songs, contacts…" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);font:inherit;">${esc(f.dropText||'')}</textarea>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <label class="btn btn-sm" style="cursor:pointer;">${S.gigInfoFile? esc(S.gigInfoFile.name) : 'Attach PDF / screenshot'}<input type="file" data-action="giginfo-file" accept="application/pdf,image/*" style="display:none;"/></label>
+            <button class="btn btn-sm btn-primary" data-action="build-gig-sheet" ${S.gigInfoBusy?'disabled':''}>${S.gigInfoBusy? 'Reading…' : 'Build sheet'}</button>
+          </div>
+          ${(f.newContacts||[]).length? `<p style="font-size:11.5px;color:var(--ink-3);margin:0;">${f.newContacts.length} contact${f.newContacts.length===1?'':'s'} found — added when you save.</p>` : ''}
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Band</label><input data-field="band" value="${esc(f.band||'')}" placeholder="Band name"/></div>
+          <div class="field" style="max-width:110px;"><label>Band size</label><input type="number" data-field="bandSize" value="${esc(String(f.bandSize||''))}" placeholder="8"/></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Choir</label><input data-field="choir" value="${esc(f.choir||'')}" placeholder="Choir, if any"/></div>
+          <div class="field"><label>Other singers</label><input data-field="otherSingers" value="${esc(f.otherSingers||'')}" placeholder="Names, comma separated"/></div>
+        </div>
+        <div class="field" style="max-width:180px;"><label>Artist starts</label><input type="time" data-field="startTime" value="${esc(f.startTime||'')}"/></div>
+        <div class="field"><label>Run of the night</label><textarea data-field="scheduleText" rows="4" placeholder="18:30 Kabbalas Panim&#10;19:15 Chuppah" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);font:inherit;">${esc(f.scheduleText||'')}</textarea></div>
+        <div class="field"><label>Songs</label><textarea data-field="songsText" rows="4" placeholder="Chuppah walk — Mi Adir&#10;First dance — Od Yishama" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);font:inherit;">${esc(f.songsText||'')}</textarea></div>
+        <div class="field"><label>Notes</label>
+          <textarea data-field="text" rows="4" placeholder="Anything else the artist needs — sound check, meal, dress, parking..." style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);font:inherit;">${esc(f.text!==undefined?f.text:sheet.text)}</textarea>
         </div>
         <div class="field">
           <label>Contacts</label>
@@ -6067,6 +6137,30 @@ function renderGigInfoFormOverlay(){
     </div>
   </div>`;
 }
+// The ASP gig sheet (owner 2026-10-14): what the artist needs on the day, branded like the contract.
+function gigSheetDocHtml(ev){
+  const artist = artistById(ev.artistId) || {name:''};
+  const sheet = gigInfoSheetOf(ev);
+  const lineup = gigLineupRows(ev, sheet);
+  const mute = '#6B6B72', accent = '#5B78A8';
+  const label = t=>`<div style="font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:${accent};font-weight:700;margin:22px 0 8px;padding-bottom:6px;border-bottom:2px solid #17171A;">${t}</div>`;
+  const cell = 'padding:7px 12px 7px 0;border:none;border-bottom:1px solid #E3E3E8;background:none;font-size:12.5px;vertical-align:top;';
+  const where = [ev.venue, [ev.city, ev.state].filter(Boolean).join(', ')].filter(Boolean).join(', ');
+  const facts = [['Date', ev.date? fmtDate(ev.date) : 'TBD'], ['Time', fmtTimeRange(ev.time, ev.endTime)], ['Venue', where || 'TBD'], ...lineup];
+  const empty = !lineup.length && !(sheet.schedule||[]).length && !(sheet.songs||[]).length && !sheet.text && !(sheet.contacts||[]).length;
+  return `<div style="background:#fff;color:#17171A;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.55;">
+    ${aspDocHeaderHtml({ kicker:'GIG SHEET', title:esc(artist.name), subtitle:[esc(ev.type||''), ev.unpaid? '' : esc(ev.clientName||''), ev.date? esc(fmtDateShort(ev.date)) : ''].filter(Boolean).join(' &middot; ') })}
+    <table role="presentation" style="border-collapse:collapse;width:100%;margin-top:6px;border:none;background:none;">
+      ${facts.map(([k,v])=>`<tr><td style="${cell}color:${mute};white-space:nowrap;width:130px;">${esc(k)}</td><td style="${cell}font-weight:700;">${esc(v)}</td></tr>`).join('')}
+    </table>
+    ${(sheet.schedule||[]).length? `${label('Run of the night')}<table role="presentation" style="border-collapse:collapse;width:100%;border:none;background:none;">${sheet.schedule.map(r=>`<tr><td style="${cell}color:${mute};white-space:nowrap;width:90px;">${r.time? esc(fmtTime(r.time)) : ''}</td><td style="${cell}">${esc(r.item)}</td></tr>`).join('')}</table>` : ''}
+    ${(sheet.songs||[]).length? `${label('Songs')}<table role="presentation" style="border-collapse:collapse;width:100%;border:none;background:none;">${sheet.songs.map(r=>`<tr><td style="${cell}color:${mute};width:180px;">${esc(r.moment||'')}</td><td style="${cell}font-weight:700;">${esc(r.song)}</td></tr>`).join('')}</table>` : ''}
+    ${sheet.text? `${label('Notes')}<p style="font-size:12.5px;white-space:pre-wrap;margin:0;">${esc(sheet.text)}</p>` : ''}
+    ${(sheet.contacts||[]).length? `${label('Contacts')}<table role="presentation" style="border-collapse:collapse;width:100%;border:none;background:none;">${sheet.contacts.map(c=>`<tr><td style="${cell}font-weight:700;">${esc(c.name)}${c.role?` <span style="color:${mute};font-weight:400;">(${esc(c.role)})</span>`:''}</td><td style="${cell}">${esc(c.phone||'')}${c.phone&&c.email?' &middot; ':''}${esc(c.email||'')}</td></tr>`).join('')}</table>` : ''}
+    ${empty? `<p style="font-size:13px;color:${mute};margin-top:16px;">No gig info added yet.</p>` : ''}
+    <div style="margin-top:22px;padding-top:10px;border-top:1px solid #E3E3E8;font-size:10.5px;color:${mute};">ASP Management${getBrandConfig('asp').phone? ` &middot; ${esc(getBrandConfig('asp').phone)}` : ''}</div>
+  </div>`;
+}
 function renderGigInfoDoc(){
   const ev = getEvent(S.gigInfoDocEventId); if(!ev) return '';
   const artist = artistById(ev.artistId);
@@ -6080,25 +6174,7 @@ function renderGigInfoDoc(){
           <button class="icon-btn" data-action="close-giginfo-doc" aria-label="Close">${ICO.x}</button>
         </div>
       </div>
-      <div class="doc-body">
-        <div class="doc-letterhead">
-          <div class="wordmark" style="font-size:1.1rem;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>ASP</div>
-          <span class="pill pill-good">Gig Info</span>
-        </div>
-        <div class="doc-title">${esc(artist.name.toUpperCase())}<br/><span style="font-size:.62em;letter-spacing:.06em;">${esc((ev.type||'').toUpperCase())}${ev.unpaid?'':` — ${esc((ev.clientName||'').toUpperCase())}`}</span></div>
-        <div class="doc-sub">${fmtDate(ev.date)}${ev.venue? ` &middot; ${esc(ev.venue)}` : ''}${(ev.city||ev.state)? `, ${esc(ev.city)}${ev.city&&ev.state?', ':''}${esc(ev.state)}` : ''}</div>
-
-        ${sheet.text? `<div class="doc-section"><h3>Details</h3><p style="font-size:12.5px;color:var(--ink-2);white-space:pre-wrap;margin:0;">${esc(sheet.text)}</p></div>` : ''}
-
-        ${(sheet.contacts||[]).length? `<div class="doc-section"><h3>Contacts</h3>
-          <div class="doc-facts">
-            ${sheet.contacts.map(c=>`<div><span class="k">${esc(c.name)}${c.role?` (${esc(c.role)})`:''}</span><span>${esc(c.phone||'')}${c.phone&&c.email?' · ':''}${esc(c.email||'')}</span></div>`).join('')}
-          </div>
-        </div>` : ''}
-
-        ${!sheet.text && !(sheet.contacts||[]).length? `<p style="font-size:13px;color:var(--ink-3);">No gig info added yet.</p>` : ''}
-
-      </div>
+      <div class="doc-body">${gigSheetDocHtml(ev)}</div>
     </div>
   </div>`;
 }
@@ -7058,6 +7134,21 @@ function renderContractBuilderDoc(c){
 // copy and the client signing page all look the same (the email never loads styles.css). The
 // artist-specific lines (Mechitza, approvals, ...) still come from the contract's boilerplate flags,
 // which default from that artist's payee profile.
+// ASP document header band (contracts, gig sheets): dark band, ASP mark, kicker, big title, subtitle.
+// Inline styles so it prints and emails the same.
+function aspDocHeaderHtml({ kicker, title, subtitle, bsd }){
+  const bars = [10,22,16,20,13].map(h=>`<span style="display:inline-block;width:5px;height:${h}px;margin-right:3px;border-radius:3px;background:#7FA0D1;vertical-align:bottom;"></span>`).join('');
+  return `<div style="background:#14161C;color:#fff;border-radius:10px 10px 0 0;padding:20px 24px;position:relative;">
+      ${bsd? `<div style="position:absolute;top:10px;right:16px;font-size:11px;color:#9FB3D6;">BS"D</div>` : ''}
+      <table role="presentation" style="border-collapse:collapse;border:none;background:none;"><tr>
+        <td style="padding:0 18px 0 0;border:none;border-right:1px solid #333845;text-align:center;vertical-align:middle;background:none;"><div style="height:24px;">${bars}</div><div style="font-weight:700;font-size:18px;margin-top:4px;">ASP</div></td>
+        <td style="padding:0 0 0 18px;border:none;vertical-align:middle;background:none;">
+          <div style="font-size:10.5px;letter-spacing:.22em;color:#9FB3D6;">${kicker}</div>
+          <div style="font-size:24px;font-weight:700;line-height:1.2;">${title}</div>
+          <div style="font-size:12.5px;color:#C9CFDA;">${subtitle}</div>
+        </td></tr></table>
+    </div>`;
+}
 function contractMadeOnSentence(c){
   const d = new Date((c.createdAt||new Date().toISOString()).slice(0,10)+'T00:00:00');
   return `${ordinal(d.getDate())} day of the month of ${d.toLocaleString('en-US',{month:'long'})} ${d.getFullYear()}`;
@@ -7097,19 +7188,9 @@ function standardDocContent(c){
   const label = t=>`<div style="font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:${accent};font-weight:700;margin:22px 0 8px;padding-bottom:6px;border-bottom:2px solid ${rule};">${t}</div>`;
   const row = (n,k,v)=>`<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #E3E3E8;color:${mute};font-size:12.5px;vertical-align:top;white-space:nowrap;">${n}. ${k}</td><td style="padding:8px 0;border-bottom:1px solid #E3E3E8;font-weight:700;font-size:12.5px;">${v}</td></tr>`;
   const stat = (k,v)=>`<td style="padding:10px 18px 10px 0;vertical-align:top;border:none;background:none;"><div style="font-size:10.5px;color:${mute};">${k}</div><div style="font-size:13px;font-weight:700;">${v}</div></td>`;
-  const bars = [10,22,16,20,13].map(h=>`<span style="display:inline-block;width:5px;height:${h}px;margin-right:3px;border-radius:3px;background:#7FA0D1;vertical-align:bottom;"></span>`).join('');
   const phone = brand.phone || '';
   return `<div style="background:#fff;color:${ink};font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.55;">
-    <div style="background:#14161C;color:#fff;border-radius:10px 10px 0 0;padding:20px 24px;position:relative;">
-      ${c.bsdHeader? `<div style="position:absolute;top:10px;right:16px;font-size:11px;color:#9FB3D6;">BS"D</div>` : ''}
-      <table role="presentation" style="border-collapse:collapse;border:none;background:none;"><tr>
-        <td style="padding:0 18px 0 0;border:none;border-right:1px solid #333845;text-align:center;vertical-align:middle;background:none;"><div style="height:24px;">${bars}</div><div style="font-weight:700;font-size:18px;margin-top:4px;">ASP</div></td>
-        <td style="padding:0 0 0 18px;border:none;vertical-align:middle;background:none;">
-          <div style="font-size:10.5px;letter-spacing:.22em;color:#9FB3D6;">ARTIST AGREEMENT${c.status==='draft'?' &nbsp;|&nbsp; DRAFT':''}</div>
-          <div style="font-size:24px;font-weight:700;line-height:1.2;">${esc(who)}</div>
-          <div style="font-size:12.5px;color:#C9CFDA;">${[esc(c.snapshot.occasion||''), esc(where), esc(dateShort)].filter(Boolean).join(' &middot; ')}</div>
-        </td></tr></table>
-    </div>
+    ${aspDocHeaderHtml({ kicker:`ARTIST AGREEMENT${c.status==='draft'?' &nbsp;|&nbsp; DRAFT':''}`, title:esc(who), subtitle:[esc(c.snapshot.occasion||''), esc(where), esc(dateShort)].filter(Boolean).join(' &middot; '), bsd:c.bsdHeader })}
     ${b.notBindingUntilDeposit? `<div style="background:#FBEFD9;color:#8A5A0F;font-size:10.5px;font-weight:700;letter-spacing:.14em;padding:9px 24px;">NOT BINDING UNTIL THE DEPOSIT IS RECEIVED &middot; DATE IS NOT HELD UNTIL THE DEPOSIT IS RECEIVED</div>` : ''}
     <table role="presentation" style="border-collapse:collapse;margin:4px 0 0;width:100%;border:none;border-bottom:1px solid #E3E3E8;background:none;"><tr>
       ${stat('Event date', esc(dateShort))}${stat('Hours', esc(hours))}${stat('Fee', `${contractFeeDisplayHtml(c, figures)}${plusTravel? ' + travel':''}`)}${stat('Deposit', esc(depositLabel))}
@@ -7917,11 +7998,20 @@ function doRemoveGigContact(id, contactId){
 function doSaveGigInfo(id){
   const ev = getEvent(id); if(!ev) return;
   const f = S.gigInfoForm;
-  const prevSheet = ev.gigInfoSheet || {text:'', contacts:[], updatedAt:null};
-  const gigInfoSheet = { ...prevSheet, text: (f.text!==undefined? f.text : prevSheet.text).trim(), updatedAt: todayISO() };
+  const prevSheet = gigInfoSheetOf(ev);
+  const added = (f.newContacts||[]).map(c=>({ id:'GC-'+Math.random().toString(36).slice(2,8), name:c.name||'', role:c.role||'', phone:c.phone||'', email:c.email||'' }));
+  const gigInfoSheet = { ...prevSheet,
+    text: (f.text!==undefined? f.text : prevSheet.text).trim(),
+    choir: (f.choir||'').trim(), otherSingers: (f.otherSingers||'').trim(), startTime: f.startTime||'',
+    schedule: parseGigScheduleText(f.scheduleText), songs: parseGigSongsText(f.songsText),
+    contacts: [...(prevSheet.contacts||[]), ...added],
+    updatedAt: todayISO() };
+  const patch = { gigInfoSheet };
+  if(f.band!==undefined) patch.band = (f.band||'').trim() || null;
+  if(f.bandSize!==undefined) patch.bandSize = f.bandSize ? Number(f.bandSize) : null;
   logEvent(ev, 'system', 'Gig info updated.');
-  S.showGigInfoForm=false; S.gigInfoForm={}; S.newGigContactForm={};
-  if(reportEventSave(updateEvent(id, { gigInfoSheet }), 'saving the gig info')) toast('Gig info saved.', 'success');
+  S.showGigInfoForm=false; S.gigInfoForm={}; S.gigInfoFile=null; S.newGigContactForm={};
+  if(reportEventSave(updateEvent(id, patch), 'saving the gig info')) toast('Gig info saved.', 'success');
   openEvent(id);
 }
 function doCopyText(value){
@@ -8591,6 +8681,7 @@ function registerAction(name, fn){
 registerAction('download-backup', ()=>doDownloadBackup());
 registerAction('make-sign-link', ({ id })=>doMakeSignLink(id));
 registerAction('edit-contract-from-doc', ({ id })=>{ S.showContractBuilderDoc = false; S.showContractBuilder = true; S.contractBuilderId = id; render(); });
+registerAction('build-gig-sheet', ()=>doBuildGigSheet());
 registerAction('parse-lead-paste', ()=>doParseLeadPaste());
 registerAction('unmark-flight', ({ id })=>doUnmarkFlight(id));
 registerAction('unmark-ground-transport', ({ id })=>doUnmarkGroundTransport(id));
@@ -8967,7 +9058,7 @@ function bindGlobal(){
       case 'dresscode-overlay-close': if(e.target===t) { S.showDressCodeForm=false; render(); } break;
       case 'pick-dresscode': S.dressCodeForm.dressCode = t.getAttribute('data-value'); render(); break;
       case 'save-dresscode': doSaveDressCode(id); break;
-      case 'open-giginfo-form': { const ev=getEvent(S.eventId); const sheet=gigInfoSheetOf(ev||{}); S.gigInfoForm={text:sheet.text}; S.newGigContactForm={}; S.showGigInfoForm=true; render(); break; }
+      case 'open-giginfo-form': { const ev=getEvent(S.eventId)||{}; const sheet=gigInfoSheetOf(ev); S.gigInfoForm={ text:sheet.text, band:ev.band||'', bandSize:ev.bandSize||'', choir:sheet.choir, otherSingers:sheet.otherSingers, startTime:sheet.startTime, scheduleText:gigScheduleText(sheet), songsText:gigSongsText(sheet) }; S.gigInfoFile=null; S.newGigContactForm={}; S.showGigInfoForm=true; render(); break; }
       case 'close-giginfo-form': S.showGigInfoForm=false; S.newGigContactForm={}; render(); break;
       case 'giginfo-overlay-close': if(e.target===t) { S.showGigInfoForm=false; S.newGigContactForm={}; render(); } break;
       case 'add-gig-contact': doAddGigContact(id); break;
@@ -9191,6 +9282,15 @@ function bindGlobal(){
   });
   document.querySelectorAll('[data-action="pick-event-type"]').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.newLeadForm.type = sel.value; applyStandardPricing(); render(); });
+  });
+  document.querySelectorAll('[data-action="giginfo-file"]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const file = inp.files && inp.files[0]; if(!file) return;
+      if(file.size > 5*1024*1024){ toast('That file is too big (5 MB max).', 'system'); return; }
+      const reader = new FileReader();
+      reader.onload = ()=>{ const url = String(reader.result||''); S.gigInfoFile = { name:file.name, mediaType:file.type, data:url.slice(url.indexOf(',')+1) }; render(); };
+      reader.readAsDataURL(file);
+    });
   });
   document.querySelectorAll('[data-action="upload-prep"]').forEach(inp=>{
     inp.addEventListener('change', ()=>{ if(inp.files.length) doUploadPrep(inp.getAttribute('data-id'), inp.files); });

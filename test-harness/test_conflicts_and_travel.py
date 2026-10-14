@@ -143,3 +143,34 @@ def test_flight_needed_creates_travel_request(live_server, page):
     n = page.evaluate("() => JSON.parse(localStorage.getItem('asp_mock_travel_requests_v1') || '[]').filter(t => t.eventId === 'EV-9503').length")
     assert n == 1, f"expected one travel request for the gig, found {n}"
     assert not errors, f"console errors: {errors}"
+
+
+def test_gig_info_drop_in_builds_sheet(live_server, page):
+    """Gig Info drop-in: the parse-gig-info reply is stubbed (no paid AI call); the form fills, saves,
+    and the card + ASP gig sheet show the lineup, run of the night and songs."""
+    import json as _json
+    errors = collect_console_errors(page)
+    sheet = {"band": "Test Band Orchestra", "bandSize": "8", "choir": "Test Choir", "otherSingers": ["Guest Singer"],
+             "startTime": "19:30", "schedule": [{"time": "18:30", "item": "Kabbalas Panim"}, {"time": "19:15", "item": "Chuppah"}],
+             "songs": [{"moment": "Chuppah walk", "song": "Mi Adir"}],
+             "contacts": [{"name": "Band Leader", "role": "Bandleader", "phone": "555-0101", "email": ""}], "notes": "Black suit"}
+    page.route("**/functions/v1/parse-gig-info", lambda route: route.fulfill(
+        status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"},
+        body=_json.dumps({"ok": True, "sheet": sheet})))
+    seed_events(page, [fake_gig("EV-9601", "benny", "2027-09-20", clientName="Gig Sheet Client")])
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    goto_nav(page, "leads")
+    page.locator('[data-action="open-event"][data-id="EV-9601"]').first.click()
+    page.locator('.sheet [data-action="open-giginfo-form"]').click()
+    page.locator('textarea[data-field="dropText"]').fill("Band: Test Band Orchestra, 8 piece. Chuppah 7:15 Mi Adir")
+    page.locator('[data-action="build-gig-sheet"]').click()
+    page.wait_for_function("() => document.querySelector('input[data-field=\"band\"]')?.value === 'Test Band Orchestra'", timeout=10000)
+    page.locator('[data-action="save-giginfo"]').click()
+    card = page.locator(".sheet").first.inner_text()
+    for want in ("Test Band Orchestra (8 pieces)", "Test Choir", "Guest Singer", "Kabbalas Panim", "Mi Adir", "Band Leader"):
+        assert want in card, f"gig info card is missing {want!r}"
+    page.locator('.sheet [data-action="view-giginfo"]').click()
+    doc = page.locator("#gigInfoPrintHost .doc").inner_text()
+    assert "GIG SHEET" in doc and "Run of the night".upper() in doc.upper() and "Mi Adir" in doc
+    assert not errors, f"console errors: {errors}"
