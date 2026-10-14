@@ -2,7 +2,7 @@
 //  - Deposit reminder every 7 days while a gig's contract has gone out (contract_sent) and no deposit is
 //    recorded -- with a fresh link to the same contract + deposit payment (old links keep working).
 //  - Balance reminder every 7 days while a confirmed date (booked) has its balance due, until it's paid.
-// Upcoming gigs only; never when the client has no email. Every send (or failure) is logged in
+// Upcoming gigs only; never when the client has no email, and never for gigs still flagged needsReview. Every send (or failure) is logged in
 // client_followups (0058), which is also how the 7-day rhythm is kept.
 //
 // Auth: the cron call sends header x-cron-secret = CRON_SECRET; an admin can also call it (dryRun:true
@@ -51,6 +51,8 @@ Deno.serve(async (req) => {
   // deno-lint-ignore no-explicit-any
   const body = (await readJson<any>(req)) || {};
   const dryRun = !!body.dryRun;
+  // previewTo (admin only): send one sample of each kind to that address instead of the clients; nothing logged.
+  const previewTo = !fromCron && typeof body.previewTo === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.previewTo) ? body.previewTo : "";
   const sb = serviceClient();
   const today = new Date().toISOString().slice(0, 10);
   const now = Date.now();
@@ -87,16 +89,22 @@ Deno.serve(async (req) => {
       const charges = (Array.isArray(ev.charges) ? ev.charges : []).reduce((n: number, c: Row) => n + (Number(c.amount) || 0), 0);
       const balance = (Number(ev.price) || 0) + charges - (Number(ev.commission) || 0);
       if (balance <= 0) continue;
-      const since = lastSent.get(`${e.legacy_id}|balance_reminder`) ?? Date.parse(ev.depositReceivedDate || e.date);
-      if (now - since < EVERY_DAYS * DAY) continue;
+      // Weekly from the deposit on (owner 2026-10-14: "right after the deposit"); a gig with no deposit
+      // date (imported) is due at once. Gigs still flagged for review keep their reminders until reviewed.
+      if (ev.needsReview) continue;
+      const last = lastSent.get(`${e.legacy_id}|balance_reminder`);
+      if (last !== undefined && now - last < EVERY_DAYS * DAY) continue;
       planned.push({ kind: "balance_reminder", gig: e.legacy_id, to, greeting, when, balance, ev });
     }
   }
 
-  if (dryRun) return json({ ok: true, dryRun: true, wouldSend: planned.map((p) => ({ kind: p.kind, gig: p.gig, to: p.to })) });
+  if (dryRun) return json({ ok: true, dryRun: true, wouldSend: planned.map((p) => ({ kind: p.kind, gig: p.gig, to: p.to, balance: p.balance ?? null, client: p.ev.clientName || '', price: p.ev.price, commission: p.ev.commission })) });
 
   const results: Row[] = [];
-  for (const p of planned.slice(0, MAX_SENDS_PER_RUN)) {
+  const batch = previewTo
+    ? ["deposit_reminder", "balance_reminder"].map((k) => planned.find((p) => p.kind === k)).filter(Boolean).map((p) => ({ ...p, to: previewTo }))
+    : planned.slice(0, MAX_SENDS_PER_RUN);
+  for (const p of batch) {
     let subject = "", html = "", contract: string | null = p.contract || null;
     try {
       if (p.kind === "deposit_reminder") {
@@ -119,7 +127,8 @@ Deno.serve(async (req) => {
           payment: paymentOptionsHtml({ kind: "balance", payUrl: null, amount: p.balance, memo: `${p.ev.clientName || ""} ${p.when}`.trim(), zelle: await balanceZelle(sb, p.gig), officePhone: phone }),
         });
       }
-      const sent = await sendRelayEmail(sb, { to: p.to, subject, html, brand: "asp" });
+      const sent = await sendRelayEmail(sb, { to: p.to, subject: previewTo ? `[Preview] ${subject}` : subject, html, brand: "asp" });
+      if (previewTo) { results.push({ kind: p.kind, gig: p.gig, ok: sent.ok, error: sent.error, preview: true }); continue; }
       await sb.from("client_followups").insert({ event_legacy_id: p.gig, contract_legacy_id: contract, kind: p.kind, sent_to: p.to, ok: sent.ok, error: sent.ok ? null : sent.error, provider_id: sent.id || null });
       results.push({ kind: p.kind, gig: p.gig, ok: sent.ok, error: sent.error });
     } catch (err) {
