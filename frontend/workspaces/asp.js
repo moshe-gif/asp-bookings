@@ -3920,7 +3920,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.13'; // bump on every release so a phone can tell it has updated. v1.9.13: travel confirmations drop-in -> ASP itinerary
+const APP_VERSION = 'v1.9.14'; // bump on every release so a phone can tell it has updated. v1.9.14: opener is only the A; app icon A (new file names); Mezumin on New Lead
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -5584,7 +5584,8 @@ function renderNewLeadModal(){
           <div class="field"><label>State</label><input data-field="state" value="${esc(f.state||'')}" placeholder="NJ"/></div>
         </div>
         <div class="field-row">
-          ${!isInternal? `<div class="field"><label>Price</label><input type="number" data-field="price" value="${f.price||''}" placeholder="4500"/></div>` : ''}
+          ${!isInternal? `<div class="field"><label>Price</label><input type="number" data-field="price" value="${f.price||''}" placeholder="4500"/>
+            <button type="button" class="filter-chip ${f.mezumin?'sel':''}" style="margin-top:6px;align-self:flex-start;" data-action="toggle-lead-mezumin">Mezumin (cash)</button></div>` : ''}
           <div class="field" style="justify-content:flex-end;flex-direction:row;align-items:center;gap:8px;padding-top:18px;">
             <input type="checkbox" id="flightck" data-field="flightNeeded" ${f.flightNeeded?'checked':''} style="width:16px;height:16px;"/>
             <label for="flightck" style="text-transform:none;font-size:13px;color:var(--ink);font-weight:500;">Flight needed</label>
@@ -5689,7 +5690,7 @@ function renderAddArtistModal(){
 // so existing saved events never need a migration.
 const PAYMENT_METHODS = [
   ['standard', 'Standard (QuickBooks + Zelle)'],
-  ['cash', 'Cash'],
+  ['cash', 'Mezumin (cash)'],
   ['check', 'Check'],
   ['other', 'Other'],
 ];
@@ -8767,6 +8768,7 @@ function doSubmitLead(){
       const fee = Number(x.feeAmount)||0; const cut = standardCommission(fee, x.artistId);
       return { artistId:x.artistId, feeAmount:fee, aspCut:cut, netAmount:fee-cut };
     }),
+    ...(f.mezumin && !isInternal ? { paymentMethod:'cash' } : {}), // Mezumin = paid in cash (owner 2026-10-14)
     band: f.type==='Wedding' ? (f.band||'').trim()||null : null,
     bandSize: f.type==='Wedding' && f.bandSize ? Number(f.bandSize) : null,
     log:[{ts:new Date().toISOString(), type:'system', text: isInternal? `${resolvedType} scheduled for ${artistById(f.artistId).name}.` : `Lead created for ${artistById(f.artistId).name} — client info entered by management.`}],
@@ -8870,6 +8872,7 @@ function registerAction(name, fn){
 registerAction('download-backup', ()=>doDownloadBackup());
 registerAction('make-sign-link', ({ id })=>doMakeSignLink(id));
 registerAction('edit-contract-from-doc', ({ id })=>{ S.showContractBuilderDoc = false; S.showContractBuilder = true; S.contractBuilderId = id; render(); });
+registerAction('toggle-lead-mezumin', ()=>{ S.newLeadForm.mezumin = !S.newLeadForm.mezumin; render(); });
 registerAction('open-travel-drop', ()=>{ S.showTravelDrop=true; S.travelDropForm={}; S.travelDropFiles=[]; S.travelDropResult=null; render(); });
 registerAction('close-travel-drop', ()=>{ S.showTravelDrop=false; render(); });
 registerAction('travel-drop-overlay-close', ({ t, e })=>{ if(e.target===t){ S.showTravelDrop=false; render(); } });

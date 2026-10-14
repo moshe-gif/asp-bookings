@@ -526,9 +526,9 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
 #opener.leaving{ transform:translateY(-100%); }
 /* The opener is the logo (version 1, white and blue on dark): the traced "A" whose bars rise into
    place one by one and keep moving, then the rest of the logo fades in beside it. */
-.opener-mark{ display:flex; align-items:flex-end; gap:0; height:64px; max-width:calc(100vw - 32px); }
-.opener-a{ height:64px; width:auto; flex:none; }
-.opener-rest{ height:64px; width:auto; min-width:0; max-width:calc(100vw - 32px - 85px); object-fit:contain; object-position:left bottom; opacity:0; transform:translateY(10px); animation:openerFadeUp .6s ease forwards; animation-delay:.85s; }
+.opener-mark{ display:flex; align-items:center; justify-content:center; }
+/* Only the A, centered (owner 2026-10-14). */
+.opener-a{ height:clamp(96px, 22vw, 150px); width:auto; flex:none; }
 @keyframes openerBar{ to{ transform:scaleY(1); } }
 .opener-mark.activate{ animation:openerDip .4s ease; }
 .opener-mark.activate .opener-a{ animation:openerGlow 1.4s ease; }

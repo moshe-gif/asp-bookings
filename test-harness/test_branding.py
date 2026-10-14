@@ -10,9 +10,9 @@ from helpers import login_as, collect_console_errors, create_lead, pick_template
 def test_logo_on_login_opener_and_rail(live_server, page):
     errors = collect_console_errors(page)
     page.goto(live_server)
-    # The opener is the logo: the traced A (eight bars) beside the rest of the horizontal logo.
+    # The opener is only the logo's A (owner 2026-10-14), its eight bars animating.
     assert page.locator('#opener .opener-a .asp-bars rect').count() == 8
-    assert page.locator('#opener img.opener-rest').count() == 1
+    assert page.locator('#opener img').count() == 0, "opener should show only the A"
     login_as(page, "admin_bookings")
     rail = page.locator('.rail .wordmark')
     assert rail.locator('img.logo-on-light').count() == 1 and rail.locator('img.logo-on-dark').count() == 1

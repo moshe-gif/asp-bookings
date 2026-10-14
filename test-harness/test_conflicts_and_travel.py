@@ -207,3 +207,18 @@ def test_travel_confirmations_build_itinerary(live_server, page):
     for want in ("TRAVEL ITINERARY", "DL1234", "DL4321", "Test Bay Hotel", "Test Cars", "Bring passport"):
         assert want in doc, f"itinerary is missing {want!r}"
     assert not errors, f"console errors: {errors}"
+
+
+def test_new_lead_mezumin_marks_cash(live_server, page):
+    """New Lead 'Mezumin (cash)' button (owner 2026-10-14) saves the lead with the cash payment method."""
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    page.locator('[data-action="open-new-lead"]').click()
+    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
+    page.locator('input[data-field="clientName"]').fill("Mezumin Client")
+    page.locator('input[data-field="date"]').fill("2027-08-08")
+    page.locator('[data-action="toggle-lead-mezumin"]').click()
+    page.locator('[data-action="submit-lead"]').click()
+    assert "Mezumin (cash)" in page.locator(".sheet").first.inner_text(), "lead isn't marked Mezumin (cash)"
+    assert not errors, f"console errors: {errors}"
