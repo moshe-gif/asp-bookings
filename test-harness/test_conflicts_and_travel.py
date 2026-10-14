@@ -174,3 +174,36 @@ def test_gig_info_drop_in_builds_sheet(live_server, page):
     doc = page.locator("#gigInfoPrintHost .doc").inner_text()
     assert "GIG SHEET" in doc and "Run of the night".upper() in doc.upper() and "Mi Adir" in doc
     assert not errors, f"console errors: {errors}"
+
+
+def test_travel_confirmations_build_itinerary(live_server, page):
+    """Travel drop-in: parse-travel-docs is stubbed (no paid AI call). Pasted confirmations -> the list ->
+    Save fills the gig's flight + driver and the ASP itinerary shows every flight, hotel and car."""
+    import json as _json
+    errors = collect_console_errors(page)
+    travel = {"flights": [{"passenger": "Benny Friedman", "airline": "Delta", "flightNumber": "DL1234", "confirmation": "ABC123",
+                           "departAirport": "JFK", "arriveAirport": "MIA", "departAt": "2027-12-01T08:00", "arriveAt": "2027-12-01T11:05", "cabin": "Business", "seat": "2A"},
+                          {"passenger": "Benny Friedman", "airline": "Delta", "flightNumber": "DL4321", "confirmation": "ABC123",
+                           "departAirport": "MIA", "arriveAirport": "JFK", "departAt": "2027-12-02T13:00", "arriveAt": "2027-12-02T16:10", "cabin": "", "seat": ""}],
+              "hotels": [{"name": "Test Bay Hotel", "address": "1 Ocean Dr, Miami", "phone": "", "checkIn": "2027-12-01", "checkOut": "2027-12-02", "confirmation": "H778", "guest": ""}],
+              "ground": [{"company": "Test Cars", "driver": "Sam", "phone": "555-0199", "pickupAt": "2027-12-01T11:30", "pickupLocation": "MIA arrivals", "dropoffLocation": "Test Bay Hotel", "confirmation": ""}],
+              "notes": "Bring passport"}
+    page.route("**/functions/v1/parse-travel-docs", lambda route: route.fulfill(
+        status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"},
+        body=_json.dumps({"ok": True, "travel": travel})))
+    seed_events(page, [fake_gig("EV-9701", "benny", "2027-12-01", clientName="Itinerary Client", flightNeeded=True, city="Miami", state="FL")])
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    goto_nav(page, "leads")
+    page.locator('[data-action="open-event"][data-id="EV-9701"]').first.click()
+    page.locator('.sheet [data-action="open-travel-drop"]').first.click()
+    page.locator('[data-form="traveldrop"] textarea[data-field="text"]').fill("Delta DL1234 JFK-MIA ... Test Bay Hotel ...")
+    page.locator('[data-action="read-travel-docs"]').click()
+    page.locator('[data-action="save-travel-docs"]').click()
+    sheet = page.locator(".sheet").first.inner_text()
+    assert "Flight booked" in sheet and "Driver booked" in sheet, "flight/driver cards not filled from the confirmations"
+    page.locator('.sheet [data-action="view-itinerary"]').click()
+    doc = page.locator("#itineraryPrintHost .doc").inner_text()
+    for want in ("TRAVEL ITINERARY", "DL1234", "DL4321", "Test Bay Hotel", "Test Cars", "Bring passport"):
+        assert want in doc, f"itinerary is missing {want!r}"
+    assert not errors, f"console errors: {errors}"

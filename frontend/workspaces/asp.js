@@ -3555,6 +3555,7 @@ function closeAllOverlays(){
   S.showTransportForm=false; S.showItinerary=false; S.itineraryEventId=null; S.showBlockTime=false; S.showAskAI=false; S.showDressCodeForm=false;
   S.showEditEvent=false;
   S.showGigInfoForm=false; S.gigInfoForm={}; S.newGigContactForm={}; S.showGigInfoDoc=false; S.gigInfoDocEventId=null;
+  S.showTravelDrop=false; S.travelDropForm={}; S.travelDropFiles=[]; S.travelDropResult=null;
   S.showNewInvoice=false; S.showInvoiceDoc=false; S.invoiceDocId=null; S.showNewOutsideBooking=false;
   S.showOutsideBookingDetail=false; S.outsideBookingDetailId=null;
   S.showDocumentBuilder=false; S.documentId=null; S.showAiEditNotice=false;
@@ -3919,7 +3920,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.12'; // bump on every release so a phone can tell it has updated. v1.9.12: sidebar logo full width; office sending mailbox saves with the right type
+const APP_VERSION = 'v1.9.13'; // bump on every release so a phone can tell it has updated. v1.9.13: travel confirmations drop-in -> ASP itinerary
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -5900,7 +5901,7 @@ function renderEventSheet(ev){
         ${renderFlightBlock(ev, isAdmin)}
         ${renderGroundTransportBlock(ev, isAdmin)}
         ${isAdmin && (ev.flightNeeded || ev.groundTransportNeeded) ? renderTravelRequestSummary(ev) : ''}
-        ${(ev.flightBooked || ev.groundTransportBooked) ? `<div style="display:flex;gap:8px;">
+        ${(ev.flightBooked || ev.groundTransportBooked || travelOf(ev).hotels.length) ? `<div style="display:flex;gap:8px;">
           <button class="btn" style="flex:1;justify-content:flex-start;" data-action="view-itinerary" data-id="${ev.id}">${ICO.suitcase} View Itinerary</button>
         </div>` : ''}
         ${renderPrepAndGigInfoCard(ev, isAdmin)}
@@ -5961,6 +5962,7 @@ function renderFlightBlock(ev, isAdmin){
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
         <button class="btn btn-sm" data-action="open-flight-form" data-id="${ev.id}">Add flight info</button>
         <button class="btn btn-sm btn-ghost" data-action="unmark-flight" data-id="${ev.id}">Not needed</button>
+        <button class="btn btn-sm" data-action="open-travel-drop" data-id="${ev.id}">Drop in confirmations</button>
       </div>
     </div>`;
   }
@@ -5969,7 +5971,7 @@ function renderFlightBlock(ev, isAdmin){
   const checking = S.checkingFlightId===ev.id;
   return `<div class="card card-pad">
     <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--good-ink);">${ICO.plane} Flight booked
-      ${isAdmin? `<button class="btn btn-sm btn-ghost" style="margin-left:auto;" data-action="unmark-flight" data-id="${ev.id}">Remove flight</button>` : ''}</div>
+      ${isAdmin? `<span style="margin-left:auto;display:flex;gap:6px;"><button class="btn btn-sm btn-ghost" data-action="open-travel-drop" data-id="${ev.id}">+ Confirmations</button><button class="btn btn-sm btn-ghost" data-action="unmark-flight" data-id="${ev.id}">Remove flight</button></span>` : ''}</div>
     <div class="ledger" style="margin-top:8px;">
       <div class="ledger-row"><span>Airline</span><span class="amt">${esc(f.airline)}</span></div>
       ${f.flightNumber?`<div class="ledger-row"><span>Flight #</span><span class="amt">${esc(f.flightNumber)}</span></div>`:''}
@@ -7876,6 +7878,121 @@ function renderPayeeProfileFormModal(){
   </div>`;
 }
 
+/* ============ TRAVEL CONFIRMATIONS -> ITINERARY (owner 2026-10-14) ============ */
+// Rivky drops in what the concierge sent (PDFs, screenshots, pasted text); parse-travel-docs (Claude)
+// lists every flight, hotel and car; the office checks the list and saves it on the gig as ev.travel
+// (additive). The first flight / car also fill ev.flight / ev.groundTransport, so flight tracking,
+// conflicts and the existing cards keep working. The itinerary below shows everything.
+function travelOf(ev){ return { flights:[], hotels:[], ground:[], notes:'', updatedAt:null, ...(ev.travel||{}) }; }
+const travelDT = v=>String(v||'').replace('T',' ').slice(0,16);
+async function doReadTravelDocs(){
+  const f = S.travelDropForm || {};
+  const files = S.travelDropFiles || [];
+  if(!(f.text||'').trim() && !files.length){ toast('Attach the confirmations or paste their text first.', 'system'); return; }
+  S.travelDropBusy = true; render();
+  try{
+    const res = await callEdgeFunction('parse-travel-docs', { text:(f.text||'').trim(), files: files.map(x=>({ mediaType:x.mediaType, data:x.data })) });
+    if(!res.ok){ toast(res.error || 'Could not read those confirmations.', 'system'); return; }
+    S.travelDropResult = res.travel || { flights:[], hotels:[], ground:[], notes:'' };
+    const n = (S.travelDropResult.flights||[]).length + (S.travelDropResult.hotels||[]).length + (S.travelDropResult.ground||[]).length;
+    toast(n ? 'Read — check the list and save it to the itinerary.' : 'No flights, hotels or cars found in that.', n ? 'success' : 'system');
+  } finally {
+    S.travelDropBusy = false; render();
+  }
+}
+function doSaveTravelDocs(id){
+  const ev = getEvent(id); const x = S.travelDropResult; if(!ev || !x) return;
+  const prev = travelOf(ev);
+  const travel = { flights:[...prev.flights, ...(x.flights||[])], hotels:[...prev.hotels, ...(x.hotels||[])], ground:[...prev.ground, ...(x.ground||[])],
+    notes: [prev.notes, x.notes].filter(Boolean).join('\n'), updatedAt: new Date().toISOString() };
+  const patch = { travel };
+  const f0 = travel.flights[0];
+  if(f0){
+    patch.flightNeeded = true; patch.flightBooked = true;
+    patch.flight = { ...(ev.flight||{}), airline:f0.airline||'—', flightNumber:(f0.flightNumber||'').replace(/\s+/g,''), confirmation:f0.confirmation||'—',
+      depart: travelDT(f0.departAt)||'—', arrive: travelDT(f0.arriveAt)||'—', notes:(ev.flight&&ev.flight.notes)||'' };
+  }
+  const g0 = travel.ground[0];
+  if(g0){
+    patch.groundTransportNeeded = true; patch.groundTransportBooked = true;
+    patch.groundTransport = { driverName:g0.driver||g0.company||'—', driverPhone:g0.phone||'—', pickupTime:travelDT(g0.pickupAt)||'—', pickupLocation:g0.pickupLocation||'—',
+      dropoffTime:'—', dropoffLocation:g0.dropoffLocation||'—', notes:g0.company && g0.driver ? g0.company : '' };
+  }
+  const n = (x.flights||[]).length, h = (x.hotels||[]).length, c = (x.ground||[]).length;
+  logEvent(ev, 'system', `Travel confirmations added to the itinerary: ${n} flight${n===1?'':'s'}, ${h} hotel${h===1?'':'s'}, ${c} car${c===1?'':'s'}.`);
+  S.showTravelDrop=false; S.travelDropForm={}; S.travelDropFiles=[]; S.travelDropResult=null;
+  if(reportEventSave(updateEvent(id, patch), 'saving the travel confirmations')) toast('Saved to the itinerary.', 'success');
+  openEvent(id);
+}
+function renderTravelDropModal(){
+  const ev = getEvent(S.eventId); if(!ev) return '';
+  const f = S.travelDropForm || {}, files = S.travelDropFiles || [], x = S.travelDropResult, busy = !!S.travelDropBusy;
+  const box = 'width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);font:inherit;';
+  const line = (t,sub)=>`<div style="padding:8px 0;border-bottom:1px dashed var(--border);font-size:12.5px;"><strong>${t}</strong>${sub?`<div style="color:var(--ink-3);">${sub}</div>`:''}</div>`;
+  return `<div class="overlay center" data-action="travel-drop-overlay-close">
+    <div class="modal" data-stop data-form="traveldrop" style="width:520px;">
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Travel Confirmations</h2><button class="icon-btn" data-action="close-travel-drop" aria-label="Close">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <p style="font-size:12px;color:var(--ink-3);margin:0;">Attach the flight, hotel and car confirmations (PDFs or screenshots) or paste their text. Nothing is saved until you press Save.</p>
+        <label class="btn btn-sm" style="cursor:pointer;align-self:flex-start;">${files.length? `${files.length} file${files.length===1?'':'s'} attached` : 'Attach confirmations'}<input type="file" data-action="travel-drop-files" accept="application/pdf,image/*" multiple style="display:none;"/></label>
+        <textarea data-field="text" rows="4" placeholder="…or paste the confirmation emails here" style="${box}">${esc(f.text||'')}</textarea>
+        <button class="btn btn-primary btn-sm" style="align-self:flex-start;" data-action="read-travel-docs" ${busy?'disabled':''}>${busy?'Reading…':'Read confirmations'}</button>
+        ${x? `<div class="card card-pad">
+          ${(x.flights||[]).map(fl=>line(`${ICO.plane} ${esc(fl.airline)} ${esc(fl.flightNumber)} &middot; ${esc(fl.departAirport)} → ${esc(fl.arriveAirport)}`, `${esc(fmtFlightDateTime(travelDT(fl.departAt)))}${fl.arriveAt?` → ${esc(fmtFlightDateTime(travelDT(fl.arriveAt)))}`:''}${fl.confirmation?` &middot; Conf. ${esc(fl.confirmation)}`:''}${fl.passenger?` &middot; ${esc(fl.passenger)}`:''}`)).join('')}
+          ${(x.hotels||[]).map(h=>line(`Hotel: ${esc(h.name)}`, `${esc(h.checkIn)}${h.checkOut?` → ${esc(h.checkOut)}`:''}${h.confirmation?` &middot; Conf. ${esc(h.confirmation)}`:''}${h.address?`<br/>${esc(h.address)}`:''}`)).join('')}
+          ${(x.ground||[]).map(g=>line(`${ICO.car} ${esc(g.company||g.driver||'Car')}`, `${g.pickupAt?esc(fmtFlightDateTime(travelDT(g.pickupAt))):''}${g.pickupLocation?` &middot; ${esc(g.pickupLocation)}`:''}${g.dropoffLocation?` → ${esc(g.dropoffLocation)}`:''}${g.phone?` &middot; ${esc(g.phone)}`:''}`)).join('')}
+          ${x.notes? `<p style="font-size:12px;color:var(--ink-2);margin:8px 0 0;">${esc(x.notes)}</p>` : ''}
+          <button class="btn btn-primary btn-block" style="margin-top:10px;" data-action="save-travel-docs" data-id="${ev.id}">Save to itinerary</button>
+        </div>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+// The artist's itinerary (owner 2026-10-14: "a travel document itinerary for the artist"), ASP-branded
+// like the contract and gig sheet: the gig, every flight, hotel and car, notes and the day's contacts.
+function itineraryDocHtml(ev){
+  const artist = artistById(ev.artistId) || {name:''};
+  const t = travelOf(ev);
+  const flights = t.flights.length ? t.flights : (ev.flight && ev.flightBooked ? [{ airline:ev.flight.airline, flightNumber:ev.flight.flightNumber||'', confirmation:ev.flight.confirmation, departAt:ev.flight.depart, arriveAt:ev.flight.arrive, departAirport:'', arriveAirport:'' }] : []);
+  const ground = t.ground.length ? t.ground : (ev.groundTransport && ev.groundTransportBooked ? [{ company:'', driver:ev.groundTransport.driverName, phone:ev.groundTransport.driverPhone, pickupAt:ev.groundTransport.pickupTime, pickupLocation:ev.groundTransport.pickupLocation, dropoffLocation:ev.groundTransport.dropoffLocation }] : []);
+  const mute = '#6B6B72', accent = '#5B78A8';
+  const label = s=>`<div style="font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:${accent};font-weight:700;margin:22px 0 8px;padding-bottom:6px;border-bottom:2px solid #17171A;">${s}</div>`;
+  const cell = 'padding:7px 12px 7px 0;border:none;border-bottom:1px solid #E3E3E8;background:none;font-size:12.5px;vertical-align:top;';
+  const dt = v=>{ const s2 = travelDT(v); return s2 && s2!=='—' ? fmtFlightDateTime(s2) : ''; };
+  const where = [ev.venue, [ev.city, ev.state].filter(Boolean).join(', ')].filter(Boolean).join(', ');
+  const sheet = gigInfoSheetOf(ev);
+  return `<div style="background:#fff;color:#17171A;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.55;">
+    ${aspDocHeaderHtml({ kicker:'TRAVEL ITINERARY', title:esc(artist.name), subtitle:[esc(ev.type||''), esc(where), ev.date? esc(fmtDateShort(ev.date)) : ''].filter(Boolean).join(' &middot; ') })}
+    <table role="presentation" style="border-collapse:collapse;width:100%;margin-top:6px;border:none;background:none;">
+      ${[['Event', `${fmtDate(ev.date)} · ${fmtTimeRange(ev.time, ev.endTime)}`], ['Venue', where||'TBD'], ...(sheet.startTime? [['Artist starts', fmtTime(sheet.startTime)]] : [])]
+        .map(([k,v])=>`<tr><td style="${cell}color:${mute};width:130px;">${esc(k)}</td><td style="${cell}font-weight:700;">${esc(v)}</td></tr>`).join('')}
+    </table>
+    ${flights.length? `${label('Flights')}${flights.map(fl=>`<table role="presentation" style="border-collapse:collapse;width:100%;margin-bottom:10px;border:none;background:none;">
+      <tr><td style="${cell}font-weight:700;" colspan="2">${esc(fl.airline||'')} ${esc(fl.flightNumber||'')}${fl.departAirport||fl.arriveAirport? ` &middot; ${esc(fl.departAirport)} → ${esc(fl.arriveAirport)}` : ''}</td></tr>
+      <tr><td style="${cell}color:${mute};width:130px;">Departs</td><td style="${cell}">${esc(dt(fl.departAt))}</td></tr>
+      ${fl.arriveAt? `<tr><td style="${cell}color:${mute};">Arrives</td><td style="${cell}">${esc(dt(fl.arriveAt))}</td></tr>` : ''}
+      ${fl.confirmation && fl.confirmation!=='—'? `<tr><td style="${cell}color:${mute};">Confirmation</td><td style="${cell}">${esc(fl.confirmation)}</td></tr>` : ''}
+      ${fl.cabin||fl.seat? `<tr><td style="${cell}color:${mute};">Seat</td><td style="${cell}">${esc([fl.cabin, fl.seat].filter(Boolean).join(' · '))}</td></tr>` : ''}
+    </table>`).join('')}` : ''}
+    ${t.hotels.length? `${label('Hotel')}${t.hotels.map(h=>`<table role="presentation" style="border-collapse:collapse;width:100%;margin-bottom:10px;border:none;background:none;">
+      <tr><td style="${cell}font-weight:700;" colspan="2">${esc(h.name)}</td></tr>
+      ${h.address? `<tr><td style="${cell}color:${mute};width:130px;">Address</td><td style="${cell}">${esc(h.address)}</td></tr>` : ''}
+      <tr><td style="${cell}color:${mute};width:130px;">Check-in / out</td><td style="${cell}">${esc(h.checkIn||'')}${h.checkOut?` → ${esc(h.checkOut)}`:''}</td></tr>
+      ${h.confirmation? `<tr><td style="${cell}color:${mute};">Confirmation</td><td style="${cell}">${esc(h.confirmation)}</td></tr>` : ''}
+      ${h.phone? `<tr><td style="${cell}color:${mute};">Phone</td><td style="${cell}">${esc(h.phone)}</td></tr>` : ''}
+    </table>`).join('')}` : ''}
+    ${ground.length? `${label('Ground transport')}${ground.map(g=>`<table role="presentation" style="border-collapse:collapse;width:100%;margin-bottom:10px;border:none;background:none;">
+      <tr><td style="${cell}font-weight:700;" colspan="2">${esc([g.company, g.driver].filter(x=>x&&x!=='—').join(' · ')||'Car')}</td></tr>
+      ${dt(g.pickupAt)? `<tr><td style="${cell}color:${mute};width:130px;">Pickup</td><td style="${cell}">${esc(dt(g.pickupAt))}${g.pickupLocation&&g.pickupLocation!=='—'?` · ${esc(g.pickupLocation)}`:''}</td></tr>` : ''}
+      ${g.dropoffLocation&&g.dropoffLocation!=='—'? `<tr><td style="${cell}color:${mute};width:130px;">Drop-off</td><td style="${cell}">${esc(g.dropoffLocation)}</td></tr>` : ''}
+      ${g.phone&&g.phone!=='—'? `<tr><td style="${cell}color:${mute};">Phone</td><td style="${cell}">${esc(g.phone)}</td></tr>` : ''}
+    </table>`).join('')}` : ''}
+    ${t.notes? `${label('Notes')}<p style="font-size:12.5px;white-space:pre-wrap;margin:0;">${esc(t.notes)}</p>` : ''}
+    ${(sheet.contacts||[]).length? `${label('Contacts')}<table role="presentation" style="border-collapse:collapse;width:100%;border:none;background:none;">${sheet.contacts.map(c=>`<tr><td style="${cell}font-weight:700;">${esc(c.name)}${c.role?` <span style="color:${mute};font-weight:400;">(${esc(c.role)})</span>`:''}</td><td style="${cell}">${esc(c.phone||'')}</td></tr>`).join('')}</table>` : ''}
+    ${!flights.length && !t.hotels.length && !ground.length? `<p style="font-size:13px;color:${mute};margin-top:16px;">No travel arranged yet.</p>` : ''}
+    <div style="margin-top:22px;padding-top:10px;border-top:1px solid #E3E3E8;font-size:10.5px;color:${mute};">ASP Management${getBrandConfig('asp').phone? ` &middot; ${esc(getBrandConfig('asp').phone)}` : ''}</div>
+  </div>`;
+}
 function renderItineraryDoc(){
   const ev = getEvent(S.itineraryEventId); if(!ev) return '';
   const artist = artistById(ev.artistId);
@@ -7889,37 +8006,7 @@ function renderItineraryDoc(){
           <button class="icon-btn" data-action="close-itinerary" aria-label="Close">${ICO.x}</button>
         </div>
       </div>
-      <div class="doc-body">
-        <div class="doc-letterhead">
-          <div class="doc-logo">${brandLogoHtml({ width:170 })}</div>
-          <span class="pill pill-good">Itinerary</span>
-        </div>
-        <div class="doc-title">${esc(artist.name.toUpperCase())}<br/><span style="font-size:.62em;letter-spacing:.06em;">${esc((ev.type||'').toUpperCase())}${ev.unpaid?'':` — ${esc((ev.clientName||'').toUpperCase())}`}</span></div>
-        <div class="doc-sub">${fmtDate(ev.date)}${ev.venue? ` &middot; ${esc(ev.venue)}` : ''}${(ev.city||ev.state)? `, ${esc(ev.city)}${ev.city&&ev.state?', ':''}${esc(ev.state)}` : ''}</div>
-
-        ${f ? `<div class="doc-section"><h3>${ICO.plane} Flight</h3>
-          <div class="doc-facts">
-            <div><span class="k">Airline</span><span>${esc(f.airline)}</span></div>
-            <div><span class="k">Confirmation</span><span>${esc(f.confirmation)}</span></div>
-            <div><span class="k">Depart</span><span>${esc(fmtFlightDateTime(f.depart))}</span></div>
-            <div><span class="k">Arrive</span><span>${esc(fmtFlightDateTime(f.arrive))}</span></div>
-          </div>
-          ${f.notes? `<p style="font-size:12.5px;color:var(--ink-2);margin:0;">${esc(f.notes)}</p>` : ''}
-        </div>` : ''}
-
-        ${g ? `<div class="doc-section"><h3>${ICO.car} Ground Transport</h3>
-          <div class="doc-facts">
-            <div><span class="k">Driver</span><span>${esc(g.driverName)}</span></div>
-            <div><span class="k">Driver Phone</span><span>${esc(g.driverPhone)}</span></div>
-            <div><span class="k">Pickup</span><span>${esc(fmtFlightDateTime(g.pickupTime))} &middot; ${esc(g.pickupLocation)}</span></div>
-            <div><span class="k">Drop-off</span><span>${esc(fmtFlightDateTime(g.dropoffTime))} &middot; ${esc(g.dropoffLocation)}</span></div>
-          </div>
-          ${g.notes? `<p style="font-size:12.5px;color:var(--ink-2);margin:0;">${esc(g.notes)}</p>` : ''}
-        </div>` : ''}
-
-        ${!f && !g ? `<p style="font-size:13px;color:var(--ink-3);">No travel arranged yet.</p>` : ''}
-
-      </div>
+      <div class="doc-body">${itineraryDocHtml(ev)}</div>
     </div>
   </div>`;
 }
@@ -8783,6 +8870,11 @@ function registerAction(name, fn){
 registerAction('download-backup', ()=>doDownloadBackup());
 registerAction('make-sign-link', ({ id })=>doMakeSignLink(id));
 registerAction('edit-contract-from-doc', ({ id })=>{ S.showContractBuilderDoc = false; S.showContractBuilder = true; S.contractBuilderId = id; render(); });
+registerAction('open-travel-drop', ()=>{ S.showTravelDrop=true; S.travelDropForm={}; S.travelDropFiles=[]; S.travelDropResult=null; render(); });
+registerAction('close-travel-drop', ()=>{ S.showTravelDrop=false; render(); });
+registerAction('travel-drop-overlay-close', ({ t, e })=>{ if(e.target===t){ S.showTravelDrop=false; render(); } });
+registerAction('read-travel-docs', ()=>doReadTravelDocs());
+registerAction('save-travel-docs', ({ id })=>doSaveTravelDocs(id));
 registerAction('build-gig-sheet', ()=>doBuildGigSheet());
 registerAction('parse-lead-paste', ()=>doParseLeadPaste());
 registerAction('unmark-flight', ({ id })=>doUnmarkFlight(id));
@@ -8868,6 +8960,14 @@ function bindGlobal(){
     holder.innerHTML = renderVerifyDepositModal();
     document.body.appendChild(holder);
   }
+  const staleTravelDrop = document.getElementById('travelDropOverlayHost');
+  if(staleTravelDrop) staleTravelDrop.remove();
+  if(S.showTravelDrop){
+    const holder = document.createElement('div');
+    holder.id = 'travelDropOverlayHost';
+    holder.innerHTML = renderTravelDropModal();
+    document.body.appendChild(holder);
+  }
   const staleGigInfoForm = document.getElementById('gigInfoOverlayHost');
   if(staleGigInfoForm) staleGigInfoForm.remove();
   if(S.showGigInfoForm){
@@ -8923,6 +9023,7 @@ function bindGlobal(){
       if(form==='comment'){ S.newCommentText = el.value; return; }
       const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, edituser:S.editRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm, payeeprofile:S.payeeProfileForm, sendcontract:S.sendContractForm, verifydeposit:S.verifyDepositForm, orgsettings:ORG_SETTINGS, gmailmailbox:S.newGmailMailboxForm };
       formTargets.lead = S.newLeadForm;
+      formTargets.traveldrop = S.travelDropForm = S.travelDropForm || {};
       // A misspelled data-form used to write silently into the New Lead form (2026-10-09 audit 5.2).
       // Fields with no data-form at all keep the old New-Lead default.
       if(form && !formTargets[form]){ console.warn('data-field inside unknown data-form:', form, key); return; }
@@ -9385,6 +9486,14 @@ function bindGlobal(){
   });
   document.querySelectorAll('[data-action="pick-event-type"]').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.newLeadForm.type = sel.value; applyStandardPricing(); render(); });
+  });
+  document.querySelectorAll('[data-action="travel-drop-files"]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const list = Array.from(inp.files||[]).slice(0, 6);
+      if(list.some(f=>f.size > 5*1024*1024)){ toast('Each file must be under 5 MB.', 'system'); return; }
+      Promise.all(list.map(file=>new Promise(res=>{ const r = new FileReader(); r.onload = ()=>{ const u = String(r.result||''); res({ name:file.name, mediaType:file.type, data:u.slice(u.indexOf(',')+1) }); }; r.readAsDataURL(file); })))
+        .then(files=>{ S.travelDropFiles = files; render(); });
+    });
   });
   document.querySelectorAll('[data-action="giginfo-file"]').forEach(inp=>{
     inp.addEventListener('change', ()=>{
