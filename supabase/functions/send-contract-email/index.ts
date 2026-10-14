@@ -19,7 +19,7 @@
 //   REPLY_TO     = optional, only used when brand_config has no reply_to
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin, serviceClient } from "../_shared/auth.ts";
-import { brandFor } from "../_shared/config.ts";
+import { sendRelayEmail } from "../_shared/mail.ts";
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const SEND_LIMIT_PER_HOUR = 60;
@@ -38,10 +38,6 @@ Deno.serve(async (req) => {
   if (typeof to !== "string" || !EMAIL_RE.test(to)) return json({ ok: false, error: "invalid recipient" }, 400);
   if (html.length > 300000) return json({ ok: false, error: "contract html too large" }, 400);
 
-  const relayUrl = Deno.env.get("RELAY_URL");
-  const relaySecret = Deno.env.get("RELAY_SECRET");
-  if (!relayUrl || !relaySecret) return json({ ok: false, error: "email relay not configured yet" }, 500);
-
   const sb = serviceClient();
   const since = new Date(Date.now() - 3600_000).toISOString();
   const { count, error: countErr } = await sb.from("email_sends").select("id", { count: "exact", head: true })
@@ -51,21 +47,10 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: `Sending limit reached (${SEND_LIMIT_PER_HOUR} emails an hour). Try again later.` }, 429);
   }
 
-  const brand = await brandFor(sb, body.brand);
-  let relayResp: Response;
-  try {
-    relayResp = await fetch(relayUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ secret: relaySecret, to, subject, html, fromName: brand.senderName, replyTo: brand.replyTo || undefined }),
-    });
-  } catch (err) {
-    return json({ ok: false, error: "could not reach mail relay: " + String(err) }, 502);
-  }
-  const relayJson = await relayResp.json().catch(() => ({ ok: false, error: "bad relay response" }));
-  if (!relayResp.ok || !relayJson.ok) return json({ ok: false, error: relayJson.error || "relay failed" }, 502);
+  const sent = await sendRelayEmail(sb, { to, subject, html, brand: body.brand });
+  if (!sent.ok) return json({ ok: false, error: sent.error }, sent.error === "email relay not configured yet" ? 500 : 502);
 
-  const { error: logErr } = await sb.from("email_sends").insert({ sent_by: auth.user.id, sent_to: to, subject: subject.slice(0, 300), brand_key: brand.key });
+  const { error: logErr } = await sb.from("email_sends").insert({ sent_by: auth.user.id, sent_to: to, subject: subject.slice(0, 300), brand_key: sent.brandKey });
   if (logErr) console.error("send-contract-email: sent, but not recorded", logErr.message);
   return json({ ok: true });
 });
