@@ -241,3 +241,23 @@ def test_add_fee_and_additional_fee_on_gig(live_server, page):
     page.locator('.sheet [data-action="confirm-add-charge"]').click()
     assert "$5,300" in page.locator(".sheet").first.inner_text(), "additional fee not added to the client total"
     assert not errors, f"console errors: {errors}"
+
+
+def test_flight_form_fills_from_confirmation_file(live_server, page):
+    """Flight Info 'Fill from PDF / photo' (owner 2026-10-15): parse-travel-docs is stubbed; the form fills."""
+    import json as _json
+    errors = collect_console_errors(page)
+    travel = {"flights": [{"passenger": "", "airline": "Delta", "flightNumber": "DL 1234", "confirmation": "CNF777", "departAirport": "JFK", "arriveAirport": "MIA",
+                           "departAt": "2027-12-01T08:00", "arriveAt": "2027-12-01T11:05", "cabin": "", "seat": ""}], "hotels": [], "ground": [], "notes": ""}
+    page.route("**/functions/v1/parse-travel-docs", lambda route: route.fulfill(
+        status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=_json.dumps({"ok": True, "travel": travel})))
+    seed_events(page, [fake_gig("EV-9801", "benny", "2027-12-01", clientName="Flight Form Client", flightNeeded=True)])
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    goto_nav(page, "leads")
+    page.locator('[data-action="open-event"][data-id="EV-9801"]').first.click()
+    page.locator('.sheet [data-action="open-flight-form"]').first.click()
+    page.locator('input[data-action="flight-form-file"]').set_input_files({"name": "conf.pdf", "mimeType": "application/pdf", "buffer": b"%PDF-1.4 test"})
+    page.wait_for_function("() => document.querySelector('[data-form=\"flight\"] input[data-field=\"flightNumber\"]')?.value === 'DL1234'", timeout=10000)
+    assert page.locator('[data-form="flight"] input[data-field="confirmation"]').input_value() == "CNF777"
+    assert not errors, f"console errors: {errors}"

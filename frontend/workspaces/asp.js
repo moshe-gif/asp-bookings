@@ -1353,7 +1353,10 @@ function contractEmailWithSignButton(html, url, withPay){
 async function doMakeSignLink(id){
   const c = getContract(id); if(!c || S.signLinkBusy) return;
   if(c.status==='void'){ toast('This contract is void — it can\'t be signed.', 'system'); return; }
-  if(c.status==='signed'){ toast('This contract is already signed. If you changed its terms, set its status back to Sent to send the new version for signing.', 'system'); return; }
+  // Status is read-only now (owner 2026-10-15): a signed contract whose terms changed goes back to Sent
+  // when a link for the new version is made; an unchanged signed contract needs no new link.
+  if(c.status==='signed' && !signedTermsChanged(c)){ toast('This contract is already signed.', 'system'); return; }
+  if(c.status==='signed'){ c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); }
   if(!isContractApproved(c)){ toast(c.approvedAt ? 'Money/terms changed since this contract was approved — re-approve it first.' : 'Approve this contract for sending first — money/terms must be approved before a signing link can go out.', 'system'); return; }
   S.signLinkBusy = id; render();
   const link = await createSignLink(c, clientContractHtml(c), c.snapshot.clientEmail, contractDepositPayment(c));
@@ -1623,6 +1626,9 @@ async function doSendContractEmail(){
   if(!supabaseClient){ toast('Sign in with your ASP account to send email.', 'system'); return; }
   S.sendContractBusy = true; render();
   try{
+    // A signed contract whose terms changed is a new version to sign: back to Sent first, so the new link
+    // carries the new terms and deposit (the read-only status has no other way back; owner 2026-10-15).
+    if(c.status==='signed' && signedTermsChanged(c)){ c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); }
     const html = clientContractHtml(c);
     const { data: { session } } = await supabaseClient.auth.getSession();
     // A session is required: falling back to the publishable key as a bearer token only produced
@@ -1825,6 +1831,22 @@ async function autoRequestFlight(eventId){
   if(!ORG_SETTINGS.rivkyEmail){ toast('Travel request created — set Rivky\'s email in Settings so it sends automatically.', 'system'); return; }
   await doSendTravelRequest(tr.id);
 }
+function travelRequestFromContract(eventId){
+  const c = contractsForLead(eventId).find(x=>x.status!=='void');
+  const t = c && c.travelClause;
+  const plural = (n,w)=>`${n} ${w}${n===1?'':'s'}`;
+  if(!t || !(t.flightsCount>0 || t.hotelRooms>0 || t.hotelNights>0)){
+    return { flightClass:'business', flightQty:1, hotelNeeded:true, hotelPrefs:'1 room — nights to match the trip' };
+  }
+  const rooms = Number(t.hotelRooms)||0, nights = Number(t.hotelNights)||0;
+  const extras = [t.shabbos && 'Shabbos accommodation', t.food && 'food'].filter(Boolean);
+  return {
+    flightClass: t.flightsClass || 'business', flightQty: Number(t.flightsCount)||0,
+    hotelNeeded: rooms>0 || nights>0,
+    hotelPrefs: rooms>0 || nights>0 ? [rooms? plural(rooms,'room') : '1 room', nights? plural(nights,'night') : 'nights to match the trip', ...extras].join(', ') : '',
+    ...(t.groundTransport ? { groundTransportNeeded:true } : {}),
+  };
+}
 function makeTravelRequest(eventId){
   const ev = getEvent(eventId); if(!ev) return null;
   const artist = artistById(ev.artistId);
@@ -1834,9 +1856,10 @@ function makeTravelRequest(eventId){
       passengers: artist? artist.name : '', eventDate: ev.date||'', eventTime: ev.time||'', eventTimezone: 'America/New_York',
       venue: ev.venue||'', city: ev.city||'', state: ev.state||'',
       origin:'', destination:'', arriveBy:'', departAfter:'',
-      flightClass:'business', flightQty:1,
-      hotelNeeded: !!ev.flightNeeded, hotelPrefs:'',
+      // The contract's Travel section, when there is one, decides what Rivky books (owner 2026-10-15:
+      // "hotels have to be part of the travel requests to rivky"): class, flights, hotel rooms + nights, extras.
       groundTransportNeeded: !!ev.groundTransportNeeded, groundTransportNotes:'',
+      ...travelRequestFromContract(eventId),
       notes:'',
     },
     sentAt:null, gmailThreadId:null, gmailMessageId:null, followUpAt:null, owner: S.user,
@@ -2816,6 +2839,7 @@ function artistPortalEvent(g, m, artistId){
     isPrimary: !!g.is_primary,
     flightNeeded: !!g.flight_needed, flightBooked: !!(g.flight_booked && g.flight), flight: g.flight || null,
     groundTransportNeeded: !!g.ground_transport_needed, groundTransportBooked: !!(g.ground_transport_booked && g.ground_transport), groundTransport: g.ground_transport || null,
+    travel: g.travel || null, gigInfoSheet: g.gig_sheet || null, // itinerary + gig sheet (0060)
     coPerformers: Array.isArray(g.co_performers) ? g.co_performers : [],
     moneyPending: pending,
     price: num(m && m.gross_amount), commission: num(m && m.asp_cut), netAmount: num(m && m.net_amount),
@@ -3555,7 +3579,7 @@ function closeAllOverlays(){
   S.showTransportForm=false; S.showItinerary=false; S.itineraryEventId=null; S.showBlockTime=false; S.showAskAI=false; S.showDressCodeForm=false;
   S.showEditEvent=false;
   S.showGigInfoForm=false; S.gigInfoForm={}; S.newGigContactForm={}; S.showGigInfoDoc=false; S.gigInfoDocEventId=null;
-  S.showTravelDrop=false; S.travelDropForm={}; S.travelDropFiles=[]; S.travelDropResult=null;
+  S.showTravelDrop=false; S.travelDropForm={}; S.travelDropFiles=[]; S.travelDropResult=null; S.showClientContact=false;
   S.showNewInvoice=false; S.showInvoiceDoc=false; S.invoiceDocId=null; S.showNewOutsideBooking=false;
   S.showOutsideBookingDetail=false; S.outsideBookingDetailId=null;
   S.showDocumentBuilder=false; S.documentId=null; S.showAiEditNotice=false;
@@ -3920,7 +3944,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.15'; // bump on every release so a phone can tell it has updated. v1.9.15: add/edit the fee and additional fees on a gig
+const APP_VERSION = 'v1.9.16'; // bump on every release so a phone can tell it has updated. v1.9.16: simpler contract builder; contact card; artist itinerary + Flighty
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -5392,8 +5416,23 @@ function renderArtistDashboard(artistId){
       <a href="${esc(gmapsUrl(todayGig))}" target="_blank" rel="noopener" data-action="external-link" class="btn" style="flex:1;background:var(--surface);">${ICO.pin} Google Maps</a>
     </div>` : ''}
   </div>` : ''}
+  ${renderArtistTravelCard(evs)}
   ${renderUpcomingGigsCard(evs, {days:7, showArtist:false})}
   `;
+}
+// "Your Travel" (owner 2026-10-15: "a box that will have a itinerary on the artist end ... they can just
+// click on their itinerary and see all of their information"): every upcoming gig with travel booked.
+function hasItinerary(ev){ const t = travelOf(ev); return !!(ev.flightBooked || ev.groundTransportBooked || t.flights.length || t.hotels.length || t.ground.length); }
+function renderArtistTravelCard(evs){
+  const trips = evs.filter(e=>!isPast(e.date) && hasItinerary(e)).sort((a,b)=>a.date.localeCompare(b.date));
+  if(!trips.length) return '';
+  return `<div class="card card-pad" style="margin-bottom:20px;">
+    <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;margin-bottom:10px;">${ICO.suitcase} Your Travel</div>
+    ${trips.map(e=>{ const t = travelOf(e); const f0 = t.flights[0] || (e.flightBooked ? e.flight : null);
+      return `<button class="btn btn-block" style="justify-content:space-between;margin-bottom:6px;text-align:left;" data-action="view-itinerary" data-id="${e.id}">
+        <span style="min-width:0;"><strong>${esc(fmtDateShort(e.date))} &middot; ${esc(e.city||e.venue||e.type||'')}</strong>${f0? `<br/><span style="font-size:11.5px;color:var(--ink-3);">${esc([f0.airline, f0.flightNumber].filter(Boolean).join(' '))}${t.hotels.length? ` &middot; ${esc(t.hotels[0].name)}` : ''}</span>` : ''}</span>
+        <span style="flex:none;color:var(--accent);">Itinerary ›</span></button>`; }).join('')}
+  </div>`;
 }
 // Shown above the artist's pages while their gigs load from the artist views, or when that failed.
 function renderArtistPortalStatus(){
@@ -5863,7 +5902,7 @@ function renderEventSheet(ev){
         </div>` : ''}
 
         <div class="card card-pad" style="display:flex;flex-direction:column;gap:9px;">
-          ${!ev.unpaid ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.pin} Client</span><strong>${esc(ev.clientName)}</strong></div>` : ''}
+          ${!ev.unpaid ? `<div class="kv-row" ${isAdmin?`data-action="open-client-contact" data-id="${ev.id}" style="cursor:pointer;"`:''}><span style="color:var(--ink-2);">${ICO.pin} Client</span><strong${isAdmin?' style="color:var(--accent);"':''}>${esc(ev.clientName)}</strong></div>` : ''}
           <div class="kv-row"><span style="color:var(--ink-2);">Type</span><strong>${esc(ev.type)}</strong></div>
           ${ev.type==='Wedding' ? `<div class="kv-row"><span style="color:var(--ink-2);">Band</span><strong style="text-align:right;">${ev.band? esc(ev.band) : `<span style="color:var(--ink-3);font-weight:500;">${isAdmin?'Not set':'TBD'}</span>`}${ev.bandSize?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(String(ev.bandSize))} piece${Number(ev.bandSize)===1?'':'s'}</span>`:''}</strong></div>` : ''}
           <div class="kv-row"><span style="color:var(--ink-2);">${ICO.clock} Date &amp; Time</span><strong class="u-mono">${fmtDate(ev.date)} · ${fmtTimeRange(ev.time, ev.endTime)}</strong></div>
@@ -5884,7 +5923,7 @@ function renderEventSheet(ev){
               ${isAdmin? `<button class="icon-btn" data-action="open-dresscode-form" style="width:20px;height:20px;" title="Edit dress code" aria-label="Edit dress code">${ICO.edit}</button>`:''}
             </span>
           </div>
-          ${isAdmin && !ev.unpaid?`<div class="kv-row"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;">${esc(ev.clientEmail)}<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.clientPhone)}</span></strong></div>`:''}
+          ${isAdmin && !ev.unpaid?`<div class="kv-row" data-action="open-client-contact" data-id="${ev.id}" style="cursor:pointer;"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;color:var(--accent);">${ev.clientEmail||ev.clientPhone? `${esc(ev.clientEmail)}${ev.clientEmail&&ev.clientPhone?'<br/>':''}<span style="font-weight:500;">${esc(ev.clientPhone)}</span>` : '<span style="font-weight:500;">+ Add contact</span>'}</strong></div>`:''}
           ${!isAdmin && !ev.unpaid && (ev.clientPhone || ev.clientEmail) ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;">${ev.clientPhone?`<a href="tel:${esc(telHref(ev.clientPhone))}" style="color:var(--accent);text-decoration:none;">${esc(ev.clientPhone)}</a>`:''}${ev.clientPhone&&ev.clientEmail?'<br/>':''}${ev.clientEmail?`<a href="mailto:${esc(ev.clientEmail)}" style="color:var(--accent);text-decoration:none;font-weight:500;">${esc(ev.clientEmail)}</a>`:''}</strong></div>` : ''}
           ${!isAdmin && (ev.coPerformers||[]).length ? `<div class="kv-row"><span style="color:var(--ink-2);">Performing with</span><strong style="text-align:right;">${ev.coPerformers.map(c=>`${esc(c.name)}${c.role?` <span style="font-weight:500;color:var(--ink-2);">(${esc(c.role)})</span>`:''}`).join('<br/>')}</strong></div>` : ''}
           ${isAdmin && !ev.unpaid && !isStandardPayment(ev) ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.money} Payment Method</span><strong style="text-align:right;color:var(--warn-ink);">${esc(paymentMethodLabel(ev))}${ev.paymentMethodNote?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.paymentMethodNote)}</span>`:''}</strong></div>` : ''}
@@ -5902,7 +5941,7 @@ function renderEventSheet(ev){
         ${renderFlightBlock(ev, isAdmin)}
         ${renderGroundTransportBlock(ev, isAdmin)}
         ${isAdmin && (ev.flightNeeded || ev.groundTransportNeeded) ? renderTravelRequestSummary(ev) : ''}
-        ${(ev.flightBooked || ev.groundTransportBooked || travelOf(ev).hotels.length) ? `<div style="display:flex;gap:8px;">
+        ${hasItinerary(ev) ? `<div style="display:flex;gap:8px;">
           <button class="btn" style="flex:1;justify-content:flex-start;" data-action="view-itinerary" data-id="${ev.id}">${ICO.suitcase} View Itinerary</button>
         </div>` : ''}
         ${renderPrepAndGigInfoCard(ev, isAdmin)}
@@ -6048,6 +6087,32 @@ function doSaveGigFee(id){
   if(reportEventSave(updateEvent(id, { price, commission }), 'saving the fee')) toast('Fee saved.', 'success');
   openEvent(id);
 }
+// Client contact card (owner 2026-10-15: "contact info should be clickable and open a contact page"):
+// call, WhatsApp, email or copy in one tap; Edit opens the gig's edit form for the details.
+function renderClientContactModal(){
+  const ev = getEvent(S.clientContactEventId); if(!ev) return '';
+  const phoneDigits = telHref(ev.clientPhone||'').replace(/^\+/,'');
+  const wa = phoneDigits ? `https://wa.me/${phoneDigits.length===10 ? '1'+phoneDigits : phoneDigits}` : '';
+  const row = (label, value, links)=>`<div style="padding:10px 0;border-bottom:1px solid var(--border);">
+      <div class="u-label" style="margin-bottom:4px;">${label}</div>
+      ${value? `<div style="font-size:14px;font-weight:600;overflow-wrap:anywhere;">${esc(value)}</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">${links}</div>` : `<div style="font-size:13px;color:var(--ink-3);">Not added yet</div>`}
+    </div>`;
+  return `<div class="overlay center" data-action="client-contact-overlay-close">
+    <div class="modal" data-stop style="width:420px;">
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">${esc(ev.clientName||'Client')}</h2><button class="icon-btn" data-action="close-client-contact" aria-label="Close">${ICO.x}</button></div>
+      <div class="sheet-body">
+        <div style="font-size:12px;color:var(--ink-3);">${esc(ev.type||'')} &middot; ${esc(fmtDate(ev.date))}${ev.venue?` &middot; ${esc(ev.venue)}`:''}</div>
+        ${row('Phone', ev.clientPhone, `<a class="btn btn-sm btn-primary" href="tel:${esc(telHref(ev.clientPhone||''))}" data-action="external-link">Call</a>
+          ${wa? `<a class="btn btn-sm" href="${esc(wa)}" target="_blank" rel="noopener" data-action="external-link">WhatsApp</a>` : ''}
+          <a class="btn btn-sm" href="sms:${esc(telHref(ev.clientPhone||''))}" data-action="external-link">Text</a>
+          <button class="btn btn-sm btn-ghost" data-action="copy-text" data-value="${esc(ev.clientPhone||'')}">Copy</button>`)}
+        ${row('Email', ev.clientEmail, `<a class="btn btn-sm btn-primary" href="mailto:${esc(ev.clientEmail||'')}" data-action="external-link">Email</a>
+          <button class="btn btn-sm btn-ghost" data-action="copy-text" data-value="${esc(ev.clientEmail||'')}">Copy</button>`)}
+        <button class="btn btn-block" style="margin-top:12px;" data-action="edit-client-contact" data-id="${ev.id}">${ICO.edit} Edit contact details</button>
+      </div>
+    </div>
+  </div>`;
+}
 function renderLedger(ev, opts={}){
   const extras = ev.charges||[];
   const extrasSum = chargesTotal(ev);
@@ -6176,10 +6241,9 @@ function renderPrepAndGigInfoCard(ev, isAdmin){
   return `<div class="card card-pad">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
       <div class="u-label">Gig Info</div>
-      ${isAdmin? `<span style="display:flex;gap:6px;flex-wrap:wrap;">
-        ${canNote? `<button class="btn btn-sm btn-ghost" data-action="open-giginfo-form" data-id="${ev.id}" style="padding:2px 6px;">${hasNotes?'Edit notes':'+ Add notes'}</button>` : ''}
-        <label class="btn btn-sm btn-ghost" style="cursor:pointer;display:inline-flex;padding:2px 6px;">+ Upload file<input type="file" data-action="upload-prep" data-id="${ev.id}" multiple style="display:none;"/></label>
-      </span>` : ''}
+      ${isAdmin? (canNote
+        ? `<button class="btn btn-sm btn-ghost" data-action="open-giginfo-form" data-id="${ev.id}" style="padding:2px 6px;">${hasNotes||files.length?'Edit / upload docs':'+ Upload docs'}</button>`
+        : `<label class="btn btn-sm btn-ghost" style="cursor:pointer;display:inline-flex;padding:2px 6px;">+ Upload docs<input type="file" data-action="upload-prep" data-id="${ev.id}" multiple style="display:none;"/></label>`) : ''}
     </div>
     ${!hasNotes && !files.length? `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No gig info yet.</p>` : ''}
     ${lineup.length? `<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">${lineup.map(([k,v])=>`<div class="kv-row"><span style="color:var(--ink-2);">${esc(k)}</span><strong style="text-align:right;">${esc(v)}</strong></div>`).join('')}</div>` : ''}
@@ -6297,7 +6361,7 @@ function renderGigInfoDoc(){
 function renderAdminActions(ev){
   const buttons=[];
   if(ev.status==='lead'||ev.status==='negotiating'){
-    buttons.push(`<button class="btn btn-primary btn-block" data-action="send-contract" data-id="${ev.id}">${ICO.mail} ${contractsForLead(ev.id).some(c=>c.status!=='void') ? 'Review & Send Contract' : 'Create & Send Contract'}</button>`);
+    // (The contract lives in the Contracts card -- one place to create, view and send it; owner 2026-10-15.)
   }
   if(ev.status==='contract_sent'){
     buttons.push(`<button class="btn btn-primary btn-block" data-action="mark-deposit" data-id="${ev.id}">${ICO.check} Mark Booking Fee Received — Lock In Booking</button>`);
@@ -6325,6 +6389,24 @@ function renderAdminActions(ev){
   return buttons.length? `<div style="display:flex;flex-direction:column;gap:10px;">${buttons.join('')}</div>` : '';
 }
 
+// Flight Info from a confirmation (owner 2026-10-15): drop in the PDF or a photo, parse-travel-docs reads
+// it, and the first flight fills the form for the office to check before Save.
+async function doFillFlightFormFromFile(file){
+  if(file.size > 5*1024*1024){ toast('That file is too big (5 MB max).', 'system'); return; }
+  const data = await new Promise(res=>{ const r = new FileReader(); r.onload = ()=>{ const u = String(r.result||''); res(u.slice(u.indexOf(',')+1)); }; r.readAsDataURL(file); });
+  S.flightFileBusy = true; render();
+  try{
+    const res = await callEdgeFunction('parse-travel-docs', { text:'', files:[{ mediaType:file.type, data }] });
+    const fl = res.ok && (res.travel.flights||[])[0];
+    if(!fl){ toast(res.ok ? 'No flight found in that file.' : (res.error||'Could not read that file.'), 'system'); return; }
+    const [dd, dt] = String(fl.departAt||'').split('T'), [ad, at] = String(fl.arriveAt||'').split('T');
+    Object.assign(S.flightForm, { airline:fl.airline||'', flightNumber:(fl.flightNumber||'').replace(/\s+/g,''), confirmation:fl.confirmation||'',
+      departDate:dd||'', departTime:(dt||'').slice(0,5), arriveDate:ad||'', arriveTime:(at||'').slice(0,5) });
+    toast('Filled from the confirmation — check it and press Save.', 'success');
+  } finally {
+    S.flightFileBusy = false; render();
+  }
+}
 function renderFlightFormOverlay(){
   const ev = getEvent(S.eventId); if(!ev) return '';
   const f = S.flightForm;
@@ -6332,6 +6414,7 @@ function renderFlightFormOverlay(){
     <div class="modal" data-stop data-form="flight" style="width:420px;">
       <div class="sheet-head"><h2 style="font-size:1.2rem;">Flight Info</h2><button class="icon-btn" data-action="close-flight-form" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
+        <label class="btn btn-sm" style="cursor:pointer;align-self:flex-start;">${S.flightFileBusy? 'Reading…' : 'Fill from PDF / photo'}<input type="file" data-action="flight-form-file" accept="application/pdf,image/*" style="display:none;" ${S.flightFileBusy?'disabled':''}/></label>
         <div class="field"><label>Airline</label><input data-field="airline" value="${esc(f.airline||'')}" placeholder="Delta"/></div>
         <div class="field-row">
           <div class="field"><label>Flight #</label><input data-field="flightNumber" value="${esc(f.flightNumber||'')}" placeholder="DL1234"/></div>
@@ -6700,15 +6783,19 @@ function renderInvoiceDoc(){
 function renderLeadContractsCard(ev){
   if(ev.unpaid) return ''; // internal days never get contracts
   const contracts = contractsForLead(ev.id);
+  // One live contract per gig (owner 2026-10-15): once there is one, the button views it; a new one can
+  // only be created after the old one is voided.
+  const live = contracts.find(c=>c.status!=='void');
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <h3 style="font-size:14px;margin:0;">Contracts</h3>
-      <button class="btn btn-sm btn-primary" data-action="create-contract" data-id="${ev.id}">${ICO.plus} Create Contract</button>
+      ${live ? `<button class="btn btn-sm btn-primary" data-action="open-contract-doc" data-id="${live.id}">${ICO.leads} View Contract</button>`
+        : `<button class="btn btn-sm btn-primary" data-action="create-contract" data-id="${ev.id}">${ICO.plus} Create Contract</button>`}
     </div>
     ${contracts.length? `<div class="log">${contracts.map(c=>`
       <div class="log-item" style="cursor:pointer;align-items:center;" data-action="open-contract-builder" data-id="${c.id}">
         <div class="log-ico">${ICO.leads}</div>
-        <div style="flex:1;min-width:0;"><strong style="font-size:12.5px;">${esc(contractTemplateLabel(c.template))}</strong><br/><span class="log-time">${fmtDateShort(c.createdAt)}</span></div>
+        <div style="flex:1;min-width:0;"><strong style="font-size:12.5px;">${esc(contractTemplateLabel(c.template))}</strong><br/><span class="log-time">${c.createdAt? `Created ${fmtDateShort(String(c.createdAt).slice(0,10))}` : ''}</span></div>
         <span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span>
       </div>
     `).join('')}</div>` : `<p style="font-size:12px;color:var(--ink-3);margin:0;">No contracts yet.</p>`}
@@ -6901,7 +6988,13 @@ function renderContractBuilderModal(){
       </div>
       <div class="sheet-body">
         <div class="field"><label>Status</label>
-          <div class="chip-row">${CONTRACT_STATUSES.map(([s])=>`<button class="filter-chip ${c.status===s?'sel':''}" data-action="set-contract-status" data-status="${s}">${esc(contractStatusLabel(s))}</button>`).join('')}</div>
+          <!-- Read-only (owner 2026-10-15): the status follows what happened -- sending, the client signing.
+               Two deliberate actions remain: a contract sent outside the app, and voiding one. -->
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span class="pill ${contractStatusPillClass(c.status)}" data-testid="contract-status">${esc(contractStatusLabel(c.status))}</span>
+            ${c.status==='draft'? `<button class="btn btn-sm btn-ghost" data-action="set-contract-status" data-status="sent" title="Use only when you sent it yourself, outside the app">Mark sent (sent outside the app)</button>` : ''}
+            ${c.status!=='void' && c.status!=='signed'? `<button class="btn btn-sm btn-ghost" style="color:var(--crit);" data-action="set-contract-status" data-status="void">Void contract</button>` : ''}
+          </div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--surface-2);">
           ${isContractApproved(c)
@@ -6954,7 +7047,6 @@ function renderContractBuilderModal(){
         ${!isCreative? renderContractProvidesSection(c) : ''}
         ${c.template==='multiline' ? renderBarterSection(c) : ''}
         ${renderContractCustomClausesSection(c)}
-        ${renderContractDocSettingsSection(c)}
         <div class="field"><label>Internal Notes (not printed)</label><textarea data-contract-field="notes" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(c.notes||'')}</textarea></div>
 
         <button class="btn btn-primary btn-block" data-action="close-contract-builder">Done</button>
@@ -7094,6 +7186,19 @@ function renderContractCancellationSection(c){
   </div>`;
 }
 function renderContractBoilerplateSection(c){
+  if(c.template==='standard'){
+    const extras = BOILERPLATE_TOGGLES.filter(([k])=>!STANDARD_TERM_FLAGS.includes(k) && c.boilerplate[k]);
+    const available = BOILERPLATE_TOGGLES.filter(([k])=>!STANDARD_TERM_FLAGS.includes(k) && !c.boilerplate[k]);
+    return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:8px;">
+      <h3 style="font-size:13.5px;margin:0;">Terms (standard)</h3>
+      <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Every Standard Artist Agreement carries these. Extra terms below come from the artist's profile; add or remove one for this contract only.</p>
+      <ul style="margin:0;padding-left:18px;font-size:12.5px;line-height:1.6;color:var(--ink-2);">${standardAgreementTerms(c).map(t=>`<li>${esc(t)}</li>`).join('')}</ul>
+      <div class="chip-row" style="align-items:center;">
+        ${extras.map(([k,l])=>`<span class="filter-chip sel" style="display:flex;align-items:center;gap:6px;">${esc(l)} <button data-action="remove-contract-term" data-key="${k}" aria-label="Remove ${esc(l)}" style="background:none;border:none;cursor:pointer;color:inherit;padding:0;display:flex;">${ICO.x}</button></span>`).join('')}
+        ${available.length? `<select class="contract-add-term-select" style="width:auto;max-width:100%;min-width:0;"><option value="">+ Add a term…</option>${available.map(([k,l])=>`<option value="${k}">${esc(l)}</option>`).join('')}</select>` : ''}
+      </div>
+    </div>`;
+  }
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:8px;">
     <h3 style="font-size:13.5px;margin:0;">Artist's Terms</h3>
     <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Filled in from the artist's profile (Settings → Payee Profiles). Change them here only if this one contract differs.</p>
@@ -7104,12 +7209,21 @@ function renderContractBoilerplateSection(c){
 }
 const CLIENT_PROVIDES_SUGGESTIONS = ['Stage','Sound & Lighting per Artist specs','AV/Backline per Artist specs','Wired Microphone & Spotlight','Green Room','Appropriate Venue & Sound System'];
 function renderContractProvidesSection(c){
+  // Simplified (owner 2026-10-15: "make standard ... a dropdown not a huge box"): the standard
+  // agreement's "Artist shall provide" follows the hours; "Client shall provide" is Payment plus
+  // whatever is picked from one dropdown.
+  const standard = c.template==='standard';
+  const left = CLIENT_PROVIDES_SUGGESTIONS.filter(x=>!c.clientProvides.includes(x));
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     <h3 style="font-size:13.5px;margin:0;">Artist Shall Provide</h3>
-    <input data-contract-field="top.artistProvides" value="${esc(c.artistProvides||'')}" placeholder="e.g. Vocal performance for up to 5 hours"/>
+    ${standard? `<p style="font-size:12.5px;margin:0;">Vocal performance for up to ${esc(c.hoursOfEngagement||'the agreed hours')} <span style="color:var(--ink-3);">(standard)</span></p>`
+      : `<input data-contract-field="top.artistProvides" value="${esc(c.artistProvides||'')}" placeholder="e.g. Vocal performance for up to 5 hours"/>`}
     <h3 style="font-size:13.5px;margin:10px 0 0;">Client Shall Provide</h3>
-    <div class="chip-row">${CLIENT_PROVIDES_SUGGESTIONS.map(s=>`<button class="filter-chip" data-action="add-client-provides" data-id="${c.id}" data-label="${esc(s)}">${ICO.plus} ${esc(s)}</button>`).join('')}</div>
-    ${c.clientProvides.length? `<div class="chip-row">${c.clientProvides.map((label,idx)=>`<span class="filter-chip sel" style="display:flex;align-items:center;gap:6px;">${esc(label)} <button data-action="remove-client-provides" data-id="${c.id}" data-idx="${idx}" aria-label="Remove ${esc(label)}" style="background:none;border:none;cursor:pointer;color:inherit;">${ICO.x}</button></span>`).join('')}</div>` : `<p style="font-size:12px;color:var(--ink-3);margin:0;">None yet.</p>`}
+    <div class="chip-row" style="align-items:center;">
+      <span class="filter-chip sel">Payment</span>
+      ${c.clientProvides.map((label,idx)=>`<span class="filter-chip sel" style="display:flex;align-items:center;gap:6px;">${esc(label)} <button data-action="remove-client-provides" data-id="${c.id}" data-idx="${idx}" aria-label="Remove ${esc(label)}" style="background:none;border:none;cursor:pointer;color:inherit;padding:0;display:flex;">${ICO.x}</button></span>`).join('')}
+      ${left.length? `<select class="contract-add-provides-select" data-id="${c.id}" style="width:auto;max-width:100%;min-width:0;"><option value="">+ Add…</option>${left.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('')}</select>` : ''}
+    </div>
   </div>`;
 }
 function renderBarterSection(c){
@@ -7119,12 +7233,6 @@ function renderBarterSection(c){
     <p style="font-size:11px;color:var(--ink-3);margin:0;">Excluded from the payment total above — e.g. a performer compensated via hotel rooms in lieu of a fee.</p>
     <div class="field"><label>Label</label><input data-contract-field="barter.label" value="${esc(b.label||'')}" placeholder="e.g. 2 hotel rooms for 5 people"/></div>
     <div class="field"><label>Description</label><textarea data-contract-field="barter.description" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(b.description||'')}</textarea></div>
-  </div>`;
-}
-function renderContractDocSettingsSection(c){
-  return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
-    <h3 style="font-size:13.5px;margin:0;">Letterhead</h3>
-    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-contract-field="top.bsdHeader" ${c.bsdHeader?'checked':''}/> Show "BS"D" header</label>
   </div>`;
 }
 function renderContractLineItemsSection(c){
@@ -7235,7 +7343,7 @@ function renderContractSignBlock(c, signingPartyLabel){
   return block;
 }
 function docBsdHeader(c){
-  return c.bsdHeader ? `<div style="text-align:center;font-size:12px;font-weight:700;margin-bottom:8px;">BS"D</div>` : '';
+  return `<div style="text-align:center;font-size:12px;font-weight:700;margin-bottom:8px;">BS"D</div>`; // always (owner 2026-10-15)
 }
 function renderContractBuilderDoc(c){
   if(!c) return '';
@@ -7261,6 +7369,34 @@ function aspDocHeaderHtml({ kicker, title, subtitle, bsd }){
       <div style="font-size:12.5px;color:#C9CFDA;">${subtitle}</div>
     </div>`;
 }
+// The Standard Artist Agreement's TERMS, in order (owner 2026-10-15: the terms "have to become standard").
+// Always: not binding until the deposit, deposit/balance, overtime, travel (only with a flight), Mechitza,
+// secular songs, weather/travel returns the deposit, postponement credit, cancellation, changes initialed.
+// On top: the artist's own extra terms from their payee profile (approvals, Chassidish DJ, recording...).
+// One function, used by the document and by the builder's read-only list, so both always agree.
+const STANDARD_TERM_FLAGS = ['notBindingUntilDeposit','acceptanceClause','mechitza','mechitzaWithDancingOnly','noSecularSongs','weatherReturnsDeposit','postponementCreditsReschedule'];
+function standardAgreementTerms(c){
+  const figures = contractPaymentFigures(c), who = contractPerformerName(c);
+  const travel = contractTravelSentence(c.travelClause);
+  const plusTravel = travel ? ' plus travel expenses' : '';
+  const pct = Number(c.deposit.percent)>0 ? `${Number(c.deposit.percent)}%` : (figures.total && figures.deposit ? `${Math.round(figures.deposit/figures.total*100)}%` : '');
+  const timing = c.balanceDueTiming==='at_event' ? 'at the event' : c.balanceDueTiming==='on_completion' ? 'when the project is complete' : 'prior to the engagement';
+  const terms = ['Contract is not binding until the deposit is received.'];
+  terms.push(`A ${c.deposit.nonRefundable?'non-refundable ':''}deposit of ${money(figures.deposit)}${pct?` (${pct})`:''} is required to confirm the date. The outstanding balance of ${money(figures.balance)}${plusTravel} is to be paid ${timing}.`);
+  if(c.overtime.interval==='not_applicable') terms.push('Overtime: N/A.');
+  else if(Number(c.overtime.rate)) terms.push(`If the Artist is asked to stay beyond the agreed upon time, then a ${money(Number(c.overtime.rate))} per ${overtimeIntervalLabel(c.overtime.interval)} charge shall be paid in overtime fees.`);
+  if(travel) terms.push(`Travel (${travel.replace(/^plus /,'')}) is booked by ASP Management and invoiced together with the final balance.`);
+  terms.push(`${who} only performs at events where there is a Mechitza.`);
+  terms.push('The Artist may refuse to sing any non-Jewish or secular songs at his discretion.');
+  terms.push('If the event is cancelled due to weather or travel issues, the Artist agrees to return the deposit.');
+  terms.push(`In the event of postponement or venue change, ${who} will use the deposit towards the rescheduled date (pending availability).`);
+  const standardText = new Set(['This contract is not binding until the deposit is received.', 'The Artist may refuse to sing any non-Jewish or secular songs at his discretion.',
+    'If the event is cancelled due to weather or travel issues, the Artist agrees to return the deposit.', 'If the event is postponed, the deposit will be credited toward a mutually agreed rescheduled date.']);
+  contractBoilerplateLines(c).filter(l=>!standardText.has(l) && !/Mechitza/.test(l)).forEach(l=>terms.push(l));
+  terms.push(contractCancellationText(c));
+  terms.push('Any and all changes to this agreement must be approved and initialed by both Client and Artist.');
+  return terms;
+}
 function contractMadeOnSentence(c){
   const d = new Date((c.createdAt||new Date().toISOString()).slice(0,10)+'T00:00:00');
   return `${ordinal(d.getDate())} day of the month of ${d.toLocaleString('en-US',{month:'long'})} ${d.getFullYear()}`;
@@ -7285,24 +7421,14 @@ function standardDocContent(c){
   const hours = c.hoursOfEngagement || 'TBD';
   const hoursLine = `${hours}${start? `, starting ${start}` : ' (start time TBD)'}`;
   const timing = c.balanceDueTiming==='at_event' ? 'at the event' : c.balanceDueTiming==='on_completion' ? 'when the project is complete' : 'prior to the engagement';
-  const terms = [];
-  if(b.notBindingUntilDeposit) terms.push('Contract is not binding until the deposit is received.');
-  terms.push(`A ${c.deposit.nonRefundable?'non-refundable ':''}deposit of ${depositLabel} is required to confirm the date. The outstanding balance of ${money(figures.balance)}${plusTravel} is to be paid ${timing}.`);
-  if(c.overtime.interval==='not_applicable') terms.push('Overtime: N/A.');
-  else if(Number(c.overtime.rate)) terms.push(`If the Artist is asked to stay beyond the agreed upon time, then a ${money(Number(c.overtime.rate))} per ${overtimeIntervalLabel(c.overtime.interval)} charge shall be paid in overtime fees.`);
-  if(travel) terms.push(`Travel (${travel.replace(/^plus /,'')}) is booked by ASP Management and invoiced together with the final balance.`);
-  // Every booking needs a Mechitza (owner 2026-10-14), in the samples' wording, whatever the flags say.
-  terms.push(`${who} only performs at events where there is a Mechitza.`);
-  contractBoilerplateLines(c).filter(l=>l!=='This contract is not binding until the deposit is received.' && !/Mechitza/.test(l)).forEach(l=>terms.push(l));
-  terms.push(contractCancellationText(c));
-  terms.push('Any and all changes to this agreement must be approved and initialed by both Client and Artist.');
+  const terms = standardAgreementTerms(c);
   const ink = '#17171A', mute = '#6B6B72', rule = '#17171A', accent = '#5B78A8';
   const label = t=>`<div style="font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:${accent};font-weight:700;margin:22px 0 8px;padding-bottom:6px;border-bottom:2px solid ${rule};">${t}</div>`;
   const row = (n,k,v)=>`<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #E3E3E8;color:${mute};font-size:12.5px;vertical-align:top;white-space:nowrap;">${n}. ${k}</td><td style="padding:8px 0;border-bottom:1px solid #E3E3E8;font-weight:700;font-size:12.5px;">${v}</td></tr>`;
   const stat = (k,v)=>`<td style="padding:10px 18px 10px 0;vertical-align:top;border:none;background:none;"><div style="font-size:10.5px;color:${mute};">${k}</div><div style="font-size:13px;font-weight:700;">${v}</div></td>`;
   const phone = brand.phone || '';
   return `<div style="background:#fff;color:${ink};font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.55;">
-    ${aspDocHeaderHtml({ kicker:`ARTIST AGREEMENT${c.status==='draft'?' &nbsp;|&nbsp; DRAFT':''}`, title:esc(who), subtitle:[esc(c.snapshot.occasion||''), esc(where), esc(dateShort)].filter(Boolean).join(' &middot; '), bsd:c.bsdHeader })}
+    ${aspDocHeaderHtml({ kicker:`ARTIST AGREEMENT${c.status==='draft'?' &nbsp;|&nbsp; DRAFT':''}`, title:esc(who), subtitle:[esc(c.snapshot.occasion||''), esc(where), esc(dateShort)].filter(Boolean).join(' &middot; '), bsd:true })}
     ${b.notBindingUntilDeposit? `<div style="background:#FBEFD9;color:#8A5A0F;font-size:10.5px;font-weight:700;letter-spacing:.14em;padding:9px 24px;">NOT BINDING UNTIL THE DEPOSIT IS RECEIVED &middot; DATE IS NOT HELD UNTIL THE DEPOSIT IS RECEIVED</div>` : ''}
     <table role="presentation" style="border-collapse:collapse;margin:4px 0 0;width:100%;border:none;border-bottom:1px solid #E3E3E8;background:none;"><tr>
       ${stat('Event date', esc(dateShort))}${stat('Hours', esc(hours))}${stat('Fee', `${contractFeeDisplayHtml(c, figures)}${plusTravel? ' + travel':''}`)}${stat('Deposit', esc(depositLabel))}
@@ -7319,11 +7445,11 @@ function standardDocContent(c){
         ${row(5,'Payment for engagement', `${contractFeeDisplayHtml(c, figures)}${plusTravel}${c.fee.note?` ${esc(c.fee.note)}`:''}`)}
         ${row(6,'Terms of engagement', `${esc(who)} as performer for the engagement`)}
       </table>
-      <p style="margin:12px 0 4px;"><strong>Artist shall provide:</strong> ${esc(c.artistProvides || `Vocal performance for up to ${hours}`)}${/[.!]$/.test(c.artistProvides||'')?'':'.'}</p>
+      <p style="margin:12px 0 4px;"><strong>Artist shall provide:</strong> ${esc(`Vocal performance for up to ${hours}`)}.</p>
       <p style="margin:0;"><strong>Client shall provide:</strong> ${esc((c.clientProvides||[]).length ? c.clientProvides.join(', ') : 'Payment')}.</p>
       ${label('Terms')}
       <ul style="margin:0;padding-left:18px;">${terms.map(t=>`<li style="margin:0 0 5px;">${esc(t)}</li>`).join('')}</ul>
-      ${b.acceptanceClause? `<p style="margin:12px 0 0;"><strong>Acceptance.</strong> ${esc(contractAcceptanceText(c).replace(/^Acceptance\.\s*/,''))}</p>` : ''}
+      ${c.template==='standard' || b.acceptanceClause? `<p style="margin:12px 0 0;"><strong>Acceptance.</strong> ${esc(contractAcceptanceText(c).replace(/^Acceptance\.\s*/,''))}</p>` : ''}
       <p style="margin:10px 0 0;">The signatures below confirm that the parties have read and approved all terms above.</p>
       ${(c.customClauses||[]).map(cc=>`${label(esc(cc.title||'Additional Terms'))}<p style="margin:0;white-space:pre-line;">${esc(cc.body)}</p>`).join('')}
       ${renderContractSignBlock(c, who)}
@@ -7967,10 +8093,30 @@ function renderTravelDropModal(){
 }
 // The artist's itinerary (owner 2026-10-14: "a travel document itinerary for the artist"), ASP-branded
 // like the contract and gig sheet: the gig, every flight, hotel and car, notes and the day's contacts.
+// The itinerary's flights, newest data first (ev.travel), else the gig's single booked flight.
+function itineraryFlights(ev){
+  const t = travelOf(ev);
+  return t.flights.length ? t.flights : (ev.flight && ev.flightBooked ? [{ airline:ev.flight.airline, flightNumber:ev.flight.flightNumber||'', confirmation:ev.flight.confirmation, departAt:ev.flight.depart, arriveAt:ev.flight.arrive, departAirport:'', arriveAirport:'' }] : []);
+}
+// "Add to calendar" for one flight (owner 2026-10-15: artists track it in Flighty automatically). Flighty
+// has no public add-flight link, but its Calendar Sync picks up flight events from the phone's calendar.
+// Times are the airports' local times, written as floating times.
+function downloadFlightIcs(ev, idx){
+  const fl = itineraryFlights(ev)[idx]; if(!fl) return;
+  const stamp = v=>{ const m = String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/); return m ? `${m[1]}${m[2]}${m[3]}T${m[4]}${m[5]}00` : ''; };
+  const start = stamp(fl.departAt); if(!start){ toast('This flight has no departure time yet.', 'system'); return; }
+  const end = stamp(fl.arriveAt) || start;
+  const num = String(fl.flightNumber||'').replace(/\s+/g,'');
+  const title = `Flight ${num}${fl.departAirport&&fl.arriveAirport?` ${fl.departAirport} → ${fl.arriveAirport}`:''}`;
+  const ics = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//ASP Management//Itinerary//EN','BEGIN:VEVENT',`UID:${ev.id}-flight-${idx}-${num}@asp-bookings`,
+    `DTSTART:${start}`,`DTEND:${end}`,`SUMMARY:${title}`,`DESCRIPTION:${[fl.airline, num, fl.confirmation&&fl.confirmation!=='—'?`Confirmation ${fl.confirmation}`:''].filter(Boolean).join(' · ')}`,
+    `LOCATION:${fl.departAirport||''}`,'END:VEVENT','END:VCALENDAR'].join('\r\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ics], {type:'text/calendar'})); a.download = `${num||'flight'}_${start.slice(0,8)}.ics`; a.click();
+}
 function itineraryDocHtml(ev){
   const artist = artistById(ev.artistId) || {name:''};
   const t = travelOf(ev);
-  const flights = t.flights.length ? t.flights : (ev.flight && ev.flightBooked ? [{ airline:ev.flight.airline, flightNumber:ev.flight.flightNumber||'', confirmation:ev.flight.confirmation, departAt:ev.flight.depart, arriveAt:ev.flight.arrive, departAirport:'', arriveAirport:'' }] : []);
+  const flights = itineraryFlights(ev);
   const ground = t.ground.length ? t.ground : (ev.groundTransport && ev.groundTransportBooked ? [{ company:'', driver:ev.groundTransport.driverName, phone:ev.groundTransport.driverPhone, pickupAt:ev.groundTransport.pickupTime, pickupLocation:ev.groundTransport.pickupLocation, dropoffLocation:ev.groundTransport.dropoffLocation }] : []);
   const mute = '#6B6B72', accent = '#5B78A8';
   const label = s=>`<div style="font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:${accent};font-weight:700;margin:22px 0 8px;padding-bottom:6px;border-bottom:2px solid #17171A;">${s}</div>`;
@@ -8023,6 +8169,10 @@ function renderItineraryDoc(){
           <button class="icon-btn" data-action="close-itinerary" aria-label="Close">${ICO.x}</button>
         </div>
       </div>
+      ${itineraryFlights(ev).length? `<div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+        <span style="font-size:12px;color:var(--ink-2);margin-right:4px;">Track in Flighty: add each flight to your calendar</span>
+        ${itineraryFlights(ev).map((fl,i)=>`<button class="btn btn-sm" data-action="flight-ics" data-id="${ev.id}" data-idx="${i}">${ICO.plane} ${esc(String(fl.flightNumber||'Flight').replace(/\s+/g,''))}</button>`).join('')}
+      </div>` : ''}
       <div class="doc-body">${itineraryDocHtml(ev)}</div>
     </div>
   </div>`;
@@ -8213,6 +8363,8 @@ function doSaveGigInfo(id){
     contacts: [...(prevSheet.contacts||[]), ...added],
     updatedAt: todayISO() };
   const patch = { gigInfoSheet };
+  // The doc dropped in to build the sheet is kept with the gig's files (one "Upload docs" button, owner 2026-10-15).
+  if(S.gigInfoFile) patch.prepSheets = [...(ev.prepSheets||[]), { id:'PS-'+Date.now()+Math.random().toString(36).slice(2,6), name:S.gigInfoFile.name, dataUrl:`data:${S.gigInfoFile.mediaType};base64,${S.gigInfoFile.data}`, uploadedAt:todayISO() }];
   if(f.band!==undefined) patch.band = (f.band||'').trim() || null;
   if(f.bandSize!==undefined) patch.bandSize = f.bandSize ? Number(f.bandSize) : null;
   logEvent(ev, 'system', 'Gig info updated.');
@@ -8888,6 +9040,12 @@ function registerAction(name, fn){
 registerAction('download-backup', ()=>doDownloadBackup());
 registerAction('make-sign-link', ({ id })=>doMakeSignLink(id));
 registerAction('edit-contract-from-doc', ({ id })=>{ S.showContractBuilderDoc = false; S.showContractBuilder = true; S.contractBuilderId = id; render(); });
+registerAction('flight-ics', ({ id, t })=>downloadFlightIcs(getEvent(id), Number(t.getAttribute('data-idx'))));
+registerAction('remove-contract-term', ({ t })=>{ const c=getContract(S.contractBuilderId); if(c){ c.boilerplate[t.getAttribute('data-key')] = false; c.updatedAt=new Date().toISOString(); saveContracts(); } render(); });
+registerAction('open-client-contact', ({ id })=>{ S.clientContactEventId=id; S.showClientContact=true; render(); });
+registerAction('close-client-contact', ()=>{ S.showClientContact=false; render(); });
+registerAction('client-contact-overlay-close', ({ t, e })=>{ if(e.target===t){ S.showClientContact=false; render(); } });
+registerAction('edit-client-contact', ()=>{ S.showClientContact=false; S.editEventForm={}; S.showEditEvent=true; render(); });
 registerAction('edit-gig-fee', ({ id })=>{ const ev=getEvent(id); S.editFeeEventId=id; S.gigFeeForm={ price: ev&&ev.price ? ev.price : '' }; render(); });
 registerAction('cancel-gig-fee', ()=>{ S.editFeeEventId=null; S.gigFeeForm={}; render(); });
 registerAction('save-gig-fee', ({ id })=>doSaveGigFee(id));
@@ -8980,6 +9138,14 @@ function bindGlobal(){
     const holder = document.createElement('div');
     holder.id = 'verifyDepositOverlayHost';
     holder.innerHTML = renderVerifyDepositModal();
+    document.body.appendChild(holder);
+  }
+  const staleClientContact = document.getElementById('clientContactOverlayHost');
+  if(staleClientContact) staleClientContact.remove();
+  if(S.showClientContact){
+    const holder = document.createElement('div');
+    holder.id = 'clientContactOverlayHost';
+    holder.innerHTML = renderClientContactModal();
     document.body.appendChild(holder);
   }
   const staleTravelDrop = document.getElementById('travelDropOverlayHost');
@@ -9509,6 +9675,15 @@ function bindGlobal(){
   });
   document.querySelectorAll('[data-action="pick-event-type"]').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.newLeadForm.type = sel.value; applyStandardPricing(); render(); });
+  });
+  document.querySelectorAll('[data-action="flight-form-file"]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{ const f = inp.files && inp.files[0]; if(f) doFillFlightFormFromFile(f); });
+  });
+  document.querySelectorAll('.contract-add-provides-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ if(sel.value) doAddClientProvides(sel.getAttribute('data-id'), sel.value); });
+  });
+  document.querySelectorAll('.contract-add-term-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ const c=getContract(S.contractBuilderId); if(c && sel.value){ c.boilerplate[sel.value] = true; c.updatedAt=new Date().toISOString(); saveContracts(); render(); } });
   });
   document.querySelectorAll('[data-action="travel-drop-files"]').forEach(inp=>{
     inp.addEventListener('change', ()=>{

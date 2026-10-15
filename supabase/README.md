@@ -45,6 +45,7 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0057_payment_claims | Applied 2026-10-13 — payments hardened after review: `payment_requests.applied_at` (one admin browser applies a paid deposit), `claim_payment_attempt()` (one pay attempt at a time per contract/invoice; service role only). |
 | 0058_client_followups | Applied 2026-10-14 — log of automatic client reminders (deposit / balance, every 7 days) written by the client-followups job; enables pg_cron. Service role writes, admins read. |
 | 0059_brand_public_storage | Applied 2026-10-14 — public Storage bucket `brand-public` (admins upload; anyone reads) for images that go out in client emails: the Zelle QR codes (Gmail won't show data: images). |
+| 0060_artist_itinerary_view | Applied 2026-10-15 — artist_gig_view adds `travel` (primary artist only, like flight) and `gig_sheet`, so artists see their itinerary and gig sheet. Isolation check ALL OK (non-primary gets no travel). |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in

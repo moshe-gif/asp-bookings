@@ -32,7 +32,7 @@ def test_client_signs_contract_online(live_server, page, browser):
     url = link_box.input_value()
     assert '/sign/#' in url
     # Making a link for a draft means it is going out: the contract is now Sent.
-    assert builder.locator('[data-action="set-contract-status"][data-status="sent"].sel').count() == 1
+    assert builder.locator('[data-testid="contract-status"]').inner_text() == "Sent"
 
     # The client: a fresh browser, never signed in to ASP.
     client_ctx = browser.new_context()
@@ -67,7 +67,7 @@ def test_client_signs_contract_online(live_server, page, browser):
 
     # Back in the office: the signature arrives live and the contract is Signed.
     builder.get_by_text('Signed online by Test Signer').wait_for(state='visible', timeout=20000)
-    assert builder.locator('[data-action="set-contract-status"][data-status="signed"].sel').count() == 1
+    assert builder.locator('[data-testid="contract-status"]').inner_text() == "Signed"
     # No second link for a signed contract.
     assert builder.locator('[data-action="make-sign-link"]').count() == 0
 
@@ -78,8 +78,7 @@ def test_client_signs_contract_online(live_server, page, browser):
 
     # The new terms can go out and be signed in turn (re-approve, back to Sent, new link).
     builder.locator('[data-action="approve-contract-for-sending"]').first.click()
-    builder.locator('[data-action="set-contract-status"][data-status="sent"]').click()
-    builder.locator('[data-action="make-sign-link"]').click()
+    builder.locator('[data-action="make-sign-link"]').click()  # a new link for changed terms moves it back to Sent
     page.wait_for_function("u => document.querySelector('[data-testid=\"sign-link-url\"]') && document.querySelector('[data-testid=\"sign-link-url\"]').value !== u", arg=url, timeout=15000)
     url2 = builder.locator('[data-testid="sign-link-url"]').input_value()
     client_ctx = browser.new_context()
@@ -93,7 +92,7 @@ def test_client_signs_contract_online(live_server, page, browser):
     client_ctx.close()
     builder.get_by_text('Signed online by Second Signer').wait_for(state='visible', timeout=20000)
     assert builder.get_by_text('(terms changed since)').count() == 0
-    assert builder.locator('[data-action="set-contract-status"][data-status="signed"].sel').count() == 1
+    assert builder.locator('[data-testid="contract-status"]').inner_text() == "Signed"
     assert not errors, f"console errors in the app: {errors}"
 
 

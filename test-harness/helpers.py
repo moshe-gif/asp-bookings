@@ -213,7 +213,7 @@ def mark_contract_sent_from_event_sheet(page):
     """From an open lead's event sheet: contract button -> Contract Builder (Standard) -> mark the
     contract Sent -> close. Moves the lead to Contract Sent the same way a real emailed send does
     (the event-sheet button stopped faking a send on 2026-10-09)."""
-    page.locator('[data-action="send-contract"]').click()
+    page.locator('[data-action="create-contract"]').click()
     pick_template(page, "standard")
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')

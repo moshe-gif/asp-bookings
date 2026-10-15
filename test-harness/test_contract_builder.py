@@ -40,8 +40,10 @@ def test_standard_contract_autofills_performer_and_payee_profile(live_server, pa
     # defaults (Mechitza with dancing, no secular songs) without any manual picking.
     assert builder.locator('.contract-performer-select').input_value() == "baruch"
     assert "Baruch Levine Music Inc." in builder.locator('p', has_text='Payee:').first.inner_text()
-    assert builder.locator('input[data-contract-field="boilerplate.mechitzaWithDancingOnly"]').is_checked()
-    assert builder.locator('input[data-contract-field="boilerplate.noSecularSongs"]').is_checked()
+    # Standard agreement: the terms are a fixed list (owner 2026-10-15), Mechitza + secular songs always in it.
+    terms = builder.inner_text()
+    assert "only performs at events where there is a Mechitza" in terms
+    assert "may refuse to sing any non-Jewish or secular songs" in terms
 
     assert not errors, f"console errors during standard contract autofill: {errors}"
 
@@ -353,7 +355,8 @@ def test_v2_contract_migrates_split_boilerplate_without_data_loss(live_server, p
     builder.wait_for(state='visible')
 
     for key in ["runOfShowApproval", "bandSoundLightingApproval", "adsGraphicsApproval", "mediaReleaseApproval"]:
-        assert builder.locator(f'input[data-contract-field="boilerplate.{key}"]').is_checked(), f"{key} should inherit from the old adsRequireApproval=true"
+        # Standard agreement: an inherited extra term shows as a removable chip (owner 2026-10-15).
+        assert builder.locator(f'[data-action="remove-contract-term"][data-key="{key}"]').count() == 1, f"{key} should inherit from the old adsRequireApproval=true"
     assert builder.locator('input[data-contract-field="snapshot.clientName"]').input_value() == "Legacy Client"
     cc_title = builder.locator('input[data-contract-field^="customclause."][data-contract-field$=".title"]')
     assert cc_title.count() == 1

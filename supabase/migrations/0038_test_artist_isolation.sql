@@ -127,7 +127,7 @@ begin
               and co_performers = (select jsonb_build_array(jsonb_build_object('name', x.name, 'role', 'Harmony')) from artist_directory x where x.legacy_id = 'eli'));
       all_ok := all_ok and n = 1; res := res || format(E'\n%s | %s | fixture: primary gets travel + co-performer name/role | rows=%s', case when n = 1 then 'ok  ' else 'FAIL' end, a.name, n);
     elsif a.legacy_id = 'eli' then
-      n := (select count(*) from artist_gig_view where legacy_id = 'EV-ISO-2' and not is_primary and flight is null and flight_needed is null and ground_transport is null);
+      n := (select count(*) from artist_gig_view where legacy_id = 'EV-ISO-2' and not is_primary and flight is null and flight_needed is null and ground_transport is null and travel is null);
       all_ok := all_ok and n = 1; res := res || format(E'\n%s | %s | fixture: non-primary gets no travel | rows=%s', case when n = 1 then 'ok  ' else 'FAIL' end, a.name, n);
       n := (select count(*) from artist_finance_view where legacy_id = 'EV-ISO-2' and not money_pending and gross_amount = 9000 and asp_cut = 900 and net_amount = 8100 and asp_cut_pct = 10 and not paid_to_you);
       all_ok := all_ok and n = 1; res := res || format(E'\n%s | %s | fixture: own row money only, not primary''s payout | rows=%s', case when n = 1 then 'ok  ' else 'FAIL' end, a.name, n);

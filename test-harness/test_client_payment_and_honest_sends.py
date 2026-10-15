@@ -41,7 +41,7 @@ def test_primary_contract_button_routes_to_real_builder_and_logs_nothing(live_se
     page.goto(live_server)
     login_as(page, "admin_bookings")
     _open_gig(page, "leads", "Test Client EV-9102")
-    page.locator('[data-action="send-contract"]').first.click()
+    page.locator('[data-action="create-contract"]').first.click()
     # A one-artist wedding opens the Standard Artist Agreement straight away; anything else, the picker.
     page.wait_for_function("() => document.querySelector('#templatePickerOverlayHost')"
                            " || document.querySelector('#contractBuilderOverlayHost .sheet')", timeout=15000)
