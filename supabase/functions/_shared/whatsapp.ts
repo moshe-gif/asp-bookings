@@ -1,6 +1,10 @@
-// The one way server code sends WhatsApp: Meta's WhatsApp Cloud API, from the office number
-// (owner 2026-10-15: "well connect the office number"). Secrets: WHATSAPP_TOKEN (a permanent System User
-// token) and WHATSAPP_PHONE_NUMBER_ID (from WhatsApp -> API Setup); optional WHATSAPP_GRAPH_VERSION.
+// The one way server code sends WhatsApp, from the office number (owner 2026-10-15: "well connect the
+// office number" ... "i wanna do coexist" -- the number stays in the WhatsApp Business app on the phone).
+// Two ways in, same message format (Meta's Cloud API body):
+//  - WHATSAPP_PROVIDER=360dialog (coexistence goes through a Meta partner): WHATSAPP_TOKEN = the 360dialog
+//    API key (header D360-API-KEY), POST https://waba-v2.360dialog.io/messages. No phone number id needed.
+//  - otherwise Meta directly: WHATSAPP_TOKEN (System User token) + WHATSAPP_PHONE_NUMBER_ID; optional
+//    WHATSAPP_GRAPH_VERSION.
 //
 // TEST MODE (same rule as _shared/mail.ts): unless WHATSAPP_LIVE is exactly "yes", every message goes
 // to TEST_WHATSAPP_TO (default the owner's own phone, +1 475-559-5075) instead of its real recipient,
@@ -26,7 +30,8 @@ export function waNumber(raw: string): string {
 
 export async function sendWhatsApp(msg: WaMessage): Promise<{ ok: boolean; error?: string; id?: string; testRedirect?: boolean }> {
   const token = Deno.env.get("WHATSAPP_TOKEN"), phoneId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-  if (!token || !phoneId) return { ok: false, error: "WhatsApp isn't connected yet (WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID missing)." };
+  const via360 = (Deno.env.get("WHATSAPP_PROVIDER") || "").toLowerCase() === "360dialog";
+  if (!token || (!via360 && !phoneId)) return { ok: false, error: "WhatsApp isn't connected yet (WHATSAPP_TOKEN" + (via360 ? "" : " / WHATSAPP_PHONE_NUMBER_ID") + " missing)." };
   const version = Deno.env.get("WHATSAPP_GRAPH_VERSION") || "v23.0";
   const test = whatsappTestMode();
   const realTo = waNumber(msg.to);
@@ -41,9 +46,9 @@ export async function sendWhatsApp(msg: WaMessage): Promise<{ ok: boolean; error
 
   let resp: Response;
   try {
-    resp = await fetch(`https://graph.facebook.com/${version}/${phoneId}/messages`, {
-      method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body),
-    });
+    resp = via360
+      ? await fetch("https://waba-v2.360dialog.io/messages", { method: "POST", headers: { "D360-API-KEY": token, "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      : await fetch(`https://graph.facebook.com/${version}/${phoneId}/messages`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   } catch (err) {
     return { ok: false, error: "could not reach WhatsApp: " + String(err) };
   }
