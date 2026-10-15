@@ -2932,7 +2932,7 @@ async function linkRealSessionToRosterNow(session){
   // sign-in showed QuickBooks/Calendar as "not connected" until a reload, and an artist's reload
   // called the admin-only status functions.
   loadBrandConfig();
-  if(adminRow){ refreshQboStatus(); refreshGcalStatus(); refreshStripeStatus(); }
+  if(adminRow){ refreshQboStatus(); refreshGcalStatus(); refreshStripeStatus(); loadInbox(); }
   await syncArtistRoster();
   startSharedSync().then(startClientSignatureWatch); // after contracts load, so signatures land on them
 }
@@ -3188,7 +3188,14 @@ async function doParseLeadPaste(){
   try{
     const res = await callEdgeFunction('parse-lead', { text, today: todayISO(), eventTypes: EVENT_TYPES });
     if(!res.ok){ toast(res.error || 'Could not read that message.', 'system'); return; }
-    const x = res.fields || {};
+    fillLeadFormFrom(f, res.fields || {});
+    toast('Filled from the message — check everything before saving.', 'success');
+  } finally {
+    S.parseLeadBusy = false; render();
+  }
+}
+// Shared by the paste box and the Inbox's "Create lead": copy the reader's fields into the New Lead form.
+function fillLeadFormFrom(f, x){
     const set = (k, v)=>{ if(v) f[k] = v; };
     set('clientName', x.clientName); set('clientEmail', x.clientEmail); set('clientPhone', x.clientPhone);
     set('date', x.date); set('venue', x.venue); set('city', x.city); set('state', x.state); set('price', x.price);
@@ -3197,10 +3204,6 @@ async function doParseLeadPaste(){
     if(x.time){ f.time = x.time; f.timeTbd = false; }
     if(x.endTime){ f.endTime = x.endTime; f.endTimeManual = true; } else if(!f.endTimeManual) delete f.endTime;
     if(x.notes) f.pasteNotes = x.notes;
-    toast('Filled from the message — check everything before saving.', 'success');
-  } finally {
-    S.parseLeadBusy = false; render();
-  }
 }
 async function refreshQboStatus(){
   if(!supabaseClient) return;
@@ -3901,7 +3904,7 @@ const MGMT_NAV_ITEMS = [
   ['artists','Artists',ICO.artists], ['travel','Travel',ICO.suitcase], ['projects','Projects',ICO.kanban], ['pricing','Pricing',ICO.tag], ['financials','Financials',ICO.money],
   ['contracts','Contracts',ICO.leads],
   ['contract_builder','Contract Builder',ICO.edit],
-  ['messages','Messages',ICO.sms],
+  ['messages','Inbox',ICO.sms],
 ];
 // External Events (outside_bookings) and Documents were removed from the menu for everyone
 // (2026-10-09, Moshe's call) -- their pages still exist and open by URL (#/outside_bookings,
@@ -3930,7 +3933,7 @@ function newPaymentsCount(){
   const since = LAST_SEEN.financials;
   return S.events.filter(e=>(e.depositReceivedDate && e.depositReceivedDate>since) || (e.balanceReceivedDate && e.balanceReceivedDate>since)).length;
 }
-function newMessagesCount(){ return 0; } // WhatsApp isn't connected yet -- nothing to count.
+function newMessagesCount(){ return (S.inboxItems||[]).length; } // emails waiting in the Inbox (0062)
 function navBadgeCount(v){
   if(v==='leads') return newLeadsCount();
   if(v==='financials') return newPaymentsCount();
@@ -3944,7 +3947,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.17'; // bump on every release so a phone can tell it has updated. v1.9.17: Gmail mailboxes load on their own; clear duplicate message
+const APP_VERSION = 'v1.9.18'; // bump on every release so a phone can tell it has updated. v1.9.18: Inbox (office email read + matched to gigs)
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -4028,7 +4031,7 @@ const VIEWS = {
   documents:        { who:'admin',  title:'Documents',                  render:()=>renderDocumentsPage() },
   contracts:        { who:'admin',  title:'Contracts',                  render:()=>renderContractsPage() },
   contract_builder: { who:'admin',  title:'Contract Builder',           render:()=>renderContractsBuilderListPage() },
-  messages:         { who:'admin',  title:'Messages',                   render:()=>renderMessagesPage() },
+  messages:         { who:'admin',  title:'Inbox',                      render:()=>renderMessagesPage() },
   projects:         { who:'admin',  title:'Projects',                   render:()=>renderProjectsBoard() },
   pricing:          { who:'admin',  title:'Pricing',                    render:()=>renderPricingPage() },
   international:    { who:'admin',  title:'International Opportunities', render:()=>renderInternationalPage() },
@@ -4340,7 +4343,7 @@ function renderMgmtDashboard(){
     ${statTile('International Opportunities', intlTrips.length, 'Artist traveling — worth adding nearby bookings', 'international')}
     ${statTile('Travel To Arrange', needsTravel.length, 'Flights or drivers still needed', 'travel')}
     ${statTile('Daily Digest', new Set([...open, ...awaitingBalance, ...altPaymentFollowUps()].map(e=>e.id)).size, 'Leads to follow up + payments due', 'daily_digest')}
-    ${statTile('Open Messages', '—', 'Not connected yet', 'messages')}
+    ${statTile('Inbox', S.inboxItems? String(S.inboxItems.length) : '—', 'emails waiting', 'messages')}
   </div>
 
   ${conflictPairs.length ? `
@@ -4692,14 +4695,82 @@ function renderArtistDetailPage(artistId){
 }
 
 /* ============ FINANCIALS ============ */
+/* ============ INBOX (owner 2026-10-15: "keep an eye on the inbox ... if anything coming in it should mark it") ============ */
+// The inbox-scan job (Edge Function, every 10 minutes) reads office@'s Gmail, has Claude classify each email
+// and match it to a gig, and stores it in inbox_items (0062). This page lists what's waiting, each with the
+// one action that fits; nothing changes on a gig until that action's own form is saved. Payment notices
+// only open Verify Deposit (never mark anything paid by themselves).
+const INBOX_KINDS = { travel_confirmation:['Travel','pill-accent'], booking_inquiry:['New inquiry','pill-good'], payment_notice:['Payment','pill-warn'], gig_info:['Gig info','pill-accent'], client_reply:['Client','pill-neutral'], other:['Other','pill-neutral'] };
+const INBOX_ACTION_LABEL = { travel_confirmation:'Add to itinerary', booking_inquiry:'Create lead', payment_notice:'Verify deposit', gig_info:'Add to gig sheet', client_reply:'Open gig', other:'Open gig' };
+async function loadInbox(){
+  if(!supabaseClient || !S.realSession || S.inboxBusy) return;
+  S.inboxBusy = true;
+  try{
+    const { data, error } = await supabaseClient.from('inbox_items').select('*').eq('status','new').order('received_at', { ascending:false }).limit(200);
+    if(error){ toast('Could not load the inbox: ' + error.message, 'system'); S.inboxItems = S.inboxItems || []; return; }
+    S.inboxItems = data || [];
+  } finally { S.inboxBusy = false; render(); }
+}
+async function doInboxCheckNow(){
+  S.inboxScanBusy = true; render();
+  try{
+    const res = await callEdgeFunction('inbox-scan', {});
+    if(!res.ok) toast(res.error || 'Could not check the inbox.', 'system');
+    else toast(res.scanned ? `Checked ${res.scanned} new email${res.scanned===1?'':'s'}.` : 'No new email.', 'success');
+  } finally { S.inboxScanBusy = false; await loadInbox(); }
+}
+async function doInboxMark(id, status){
+  const { error } = await supabaseClient.from('inbox_items').update({ status, handled_at:new Date().toISOString() }).eq('id', id);
+  if(error){ toast('Could not update: ' + error.message, 'system'); return; }
+  S.inboxItems = (S.inboxItems||[]).filter(x=>x.id!==id); render();
+}
+function doInboxAct(id){
+  const it = (S.inboxItems||[]).find(x=>x.id===id); if(!it) return;
+  const x = it.extracted || {};
+  const gig = it.event_legacy_id && getEvent(it.event_legacy_id);
+  if(it.kind==='booking_inquiry'){
+    closeAllOverlays(); S.newLeadForm = { kind:'client' }; fillLeadFormFrom(S.newLeadForm, x); S.showNewLead = true; render(); return;
+  }
+  if(!gig){ toast("This email isn't matched to a gig — open the gig yourself.", 'system'); return; }
+  openEvent(gig.id);
+  if(it.kind==='travel_confirmation'){
+    S.showTravelDrop=true; S.travelDropForm={}; S.travelDropFiles=[];
+    S.travelDropResult={ flights:x.flights||[], hotels:x.hotels||[], ground:x.ground||[], notes:x.notes||'' }; render();
+  } else if(it.kind==='gig_info'){
+    const sheet = gigInfoSheetOf(gig);
+    S.gigInfoForm={ text:sheet.text, band:gig.band||'', bandSize:gig.bandSize||'', choir:sheet.choir, otherSingers:sheet.otherSingers, startTime:sheet.startTime, scheduleText:gigScheduleText(sheet), songsText:gigSongsText(sheet) };
+    fillGigFormFrom(S.gigInfoForm, x); S.gigInfoFile=null; S.newGigContactForm={}; S.showGigInfoForm=true; render();
+  } else if(it.kind==='payment_notice' && !gig.depositReceived){
+    S.verifyDepositEventId=gig.id; S.showVerifyDeposit=true; S.verifyDepositForm={ method:'zelle', note:`From email: ${it.summary||''}`.slice(0,300) }; render();
+  }
+}
 function renderMessagesPage(){
+  if(S.inboxItems==null && !S.inboxBusy) setTimeout(loadInbox, 0);
+  const items = S.inboxItems || [];
+  const when = iso=>{ if(!iso) return ''; return new Date(iso).toLocaleString('en-US',{ month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }); };
   return `
-  <div class="section-head"><h2>Messages</h2></div>
-  <div class="card empty" style="padding:48px 24px;">
-    <div style="font-size:15px;font-weight:700;color:var(--ink);margin-bottom:6px;">WhatsApp isn't connected yet</div>
-    <p style="max-width:420px;margin:0 auto 18px;color:var(--ink-3);font-size:13px;line-height:1.6;">Once it's connected, client and lead conversations will show up here — reply without leaving the app, and open threads will count toward the badge on this tab.</p>
-    <button class="btn btn-primary" disabled style="opacity:.55;cursor:not-allowed;">${ICO.sms} Connect WhatsApp</button>
-  </div>
+  <div class="section-head"><h2>Inbox${items.length?` (${items.length})`:''}</h2>
+    <button class="btn btn-sm" data-action="inbox-check-now" ${S.inboxScanBusy?'disabled':''}>${S.inboxScanBusy?'Checking…':'Check now'}</button></div>
+  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">office@aspmgmt.com is read every 10 minutes. Each email is matched to its gig with a suggested next step; nothing changes until you act on it.</p>
+  ${S.inboxItems==null? `<div class="card card-pad" style="font-size:13px;color:var(--ink-2);">Loading…</div>`
+  : !items.length? `<div class="card empty">Nothing waiting — you're all caught up.</div>`
+  : items.map(it=>{ const [label, cls] = INBOX_KINDS[it.kind] || INBOX_KINDS.other; const gig = it.event_legacy_id && getEvent(it.event_legacy_id);
+      const canAct = it.kind==='booking_inquiry' || (gig && !(it.kind==='payment_notice' && gig.depositReceived));
+      return `<div class="card card-pad" style="margin-bottom:10px;display:flex;flex-direction:column;gap:6px;" data-testid="inbox-item">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="pill ${cls}">${esc(label)}</span>
+          <strong style="font-size:13px;min-width:0;overflow-wrap:anywhere;">${esc(it.subject||'(no subject)')}</strong>
+          <span style="margin-left:auto;font-size:11px;color:var(--ink-3);">${esc(when(it.received_at))}</span></div>
+        <div style="font-size:12px;color:var(--ink-3);overflow-wrap:anywhere;">${esc(it.from_addr||'')}</div>
+        <div style="font-size:13px;overflow-wrap:anywhere;">${esc(it.summary||'')}</div>
+        ${gig? `<div style="font-size:12px;"><a href="#" data-action="open-event" data-id="${esc(gig.id)}" style="color:var(--accent);">${esc((artistById(gig.artistId)||{}).name||'')} · ${esc(fmtDateShort(gig.date))} · ${esc(gig.clientName||gig.type||'')}</a></div>`
+          : it.event_legacy_id? `<div style="font-size:12px;color:var(--ink-3);">Gig ${esc(it.event_legacy_id)}</div>` : ''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
+          ${canAct? `<button class="btn btn-sm btn-primary" data-action="inbox-act" data-id="${esc(it.id)}">${esc(INBOX_ACTION_LABEL[it.kind]||'Open gig')}</button>` : ''}
+          ${it.gmail_thread_id? `<a class="btn btn-sm" href="https://mail.google.com/mail/u/?authuser=office@aspmgmt.com#all/${esc(it.gmail_thread_id)}" target="_blank" rel="noopener" data-action="external-link">Open email</a>` : ''}
+          <button class="btn btn-sm btn-ghost" data-action="inbox-done" data-id="${esc(it.id)}">Done</button>
+          <button class="btn btn-sm btn-ghost" data-action="inbox-dismiss" data-id="${esc(it.id)}">Dismiss</button>
+        </div>
+      </div>`; }).join('')}
   `;
 }
 function renderPricingPage(){
@@ -6204,7 +6275,14 @@ async function doBuildGigSheet(){
   try{
     const res = await callEdgeFunction('parse-gig-info', { text, file: S.gigInfoFile ? { mediaType:S.gigInfoFile.mediaType, data:S.gigInfoFile.data } : null });
     if(!res.ok){ toast(res.error || 'Could not read that.', 'system'); return; }
-    const x = res.sheet || {};
+    fillGigFormFrom(f, res.sheet || {});
+    toast('Gig sheet filled in — check it and press Save.', 'success');
+  } finally {
+    S.gigInfoBusy = false; render();
+  }
+}
+// Shared by the drop-in and the Inbox's "Add to gig sheet".
+function fillGigFormFrom(f, x){
     if(x.band) f.band = x.band;
     if(x.bandSize) f.bandSize = x.bandSize;
     if(x.choir) f.choir = x.choir;
@@ -6214,10 +6292,6 @@ async function doBuildGigSheet(){
     if((x.songs||[]).length) f.songsText = gigSongsText({ songs:x.songs });
     if(x.notes) f.text = [f.text, x.notes].filter(Boolean).join('\n');
     f.newContacts = (x.contacts||[]).filter(c=>c.name||c.phone||c.email);
-    toast('Gig sheet filled in — check it and press Save.', 'success');
-  } finally {
-    S.gigInfoBusy = false; render();
-  }
 }
 
 function renderContactCopyRow(c, ev){
@@ -9043,6 +9117,10 @@ function registerAction(name, fn){
 registerAction('download-backup', ()=>doDownloadBackup());
 registerAction('make-sign-link', ({ id })=>doMakeSignLink(id));
 registerAction('edit-contract-from-doc', ({ id })=>{ S.showContractBuilderDoc = false; S.showContractBuilder = true; S.contractBuilderId = id; render(); });
+registerAction('inbox-check-now', ()=>doInboxCheckNow());
+registerAction('inbox-act', ({ id })=>doInboxAct(id));
+registerAction('inbox-done', ({ id })=>doInboxMark(id, 'done'));
+registerAction('inbox-dismiss', ({ id })=>doInboxMark(id, 'dismissed'));
 registerAction('flight-ics', ({ id, t })=>downloadFlightIcs(getEvent(id), Number(t.getAttribute('data-idx'))));
 registerAction('remove-contract-term', ({ t })=>{ const c=getContract(S.contractBuilderId); if(c){ c.boilerplate[t.getAttribute('data-key')] = false; c.updatedAt=new Date().toISOString(); saveContracts(); } render(); });
 registerAction('open-client-contact', ({ id })=>{ S.clientContactEventId=id; S.showClientContact=true; render(); });

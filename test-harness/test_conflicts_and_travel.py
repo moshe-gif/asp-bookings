@@ -261,3 +261,44 @@ def test_flight_form_fills_from_confirmation_file(live_server, page):
     page.wait_for_function("() => document.querySelector('[data-form=\"flight\"] input[data-field=\"flightNumber\"]')?.value === 'DL1234'", timeout=10000)
     assert page.locator('[data-form="flight"] input[data-field="confirmation"]').input_value() == "CNF777"
     assert not errors, f"console errors: {errors}"
+
+
+def test_inbox_lists_emails_and_actions_open_the_right_form(live_server, page):
+    """Inbox (owner 2026-10-15): inbox_items is stubbed with fake rows (no real email); each item's action
+    opens the matching form prefilled, and Dismiss removes it. Payment items only open Verify Deposit."""
+    import json as _json
+    errors = collect_console_errors(page)
+    items = [
+        {"id": "11111111-1111-1111-1111-111111111111", "gmail_message_id": "m1", "gmail_thread_id": "t1", "received_at": "2026-10-15T15:00:00Z",
+         "from_addr": "Band Office <band@example.com>", "subject": "Lineup for Sunday", "snippet": "", "kind": "gig_info",
+         "summary": "Test Inbox Band sent the lineup.", "event_legacy_id": "EV-9901", "match_note": "", "status": "new",
+         "extracted": {"band": "Test Inbox Band", "bandSize": "7", "songs": [{"moment": "Chuppah", "song": "Mi Adir"}]}},
+        {"id": "22222222-2222-2222-2222-222222222222", "gmail_message_id": "m2", "gmail_thread_id": "t2", "received_at": "2026-10-15T14:00:00Z",
+         "from_addr": "New Client <new@example.com>", "subject": "Booking request", "snippet": "", "kind": "booking_inquiry",
+         "summary": "Inquiry for a wedding.", "event_legacy_id": None, "match_note": "", "status": "new",
+         "extracted": {"clientName": "Inbox Inquiry Client", "date": "2027-11-11", "type": "Wedding", "artistName": "Benny Friedman"}},
+    ]
+    def handle(route):
+        if route.request.method == "GET":
+            route.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=_json.dumps(items))
+        else:
+            route.fulfill(status=204, headers={"Access-Control-Allow-Origin": "*"}, body="")
+    page.route("**/rest/v1/inbox_items*", handle)
+    seed_events(page, [fake_gig("EV-9901", "benny", "2027-10-31", clientName="Inbox Gig Client")])
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    goto_nav(page, "messages")
+    page.locator('[data-testid="inbox-item"]').first.wait_for(state="visible")
+    assert page.locator('[data-testid="inbox-item"]').count() == 2
+    page.locator('[data-action="inbox-act"][data-id="11111111-1111-1111-1111-111111111111"]').click()
+    assert page.locator('input[data-field="band"]').input_value() == "Test Inbox Band", "gig sheet form not prefilled from the email"
+    page.locator('[data-action="close-giginfo-form"]').click()
+    page.locator('.sheet [data-action="close-sheet"]').first.click()
+    goto_nav(page, "messages")
+    page.locator('[data-action="inbox-act"][data-id="22222222-2222-2222-2222-222222222222"]').click()
+    assert page.locator('input[data-field="clientName"]').input_value() == "Inbox Inquiry Client", "New Lead not prefilled from the inquiry"
+    page.locator('[data-action="close-sheet"]').first.click()
+    goto_nav(page, "messages")
+    page.locator('[data-action="inbox-dismiss"][data-id="22222222-2222-2222-2222-222222222222"]').click()
+    page.wait_for_function("() => document.querySelectorAll('[data-testid=\"inbox-item\"]').length === 1", timeout=10000)
+    assert not errors, f"console errors: {errors}"
