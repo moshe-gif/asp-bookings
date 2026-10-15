@@ -3920,7 +3920,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.14'; // bump on every release so a phone can tell it has updated. v1.9.14: opener is only the A; app icon A (new file names); Mezumin on New Lead
+const APP_VERSION = 'v1.9.15'; // bump on every release so a phone can tell it has updated. v1.9.15: add/edit the fee and additional fees on a gig
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -6036,6 +6036,18 @@ function renderAdditionalArtistsRoster(ev){
   </div>`;
 }
 // Office price breakdown. Artists see renderArtistMoneyCard instead.
+// Set / change the artist's fee right on the price breakdown (owner 2026-10-14: "once a gig is
+// created i need to be able to add a fee"). Same rule as the Edit form: ASP's fee follows the new
+// price at the artist's own rate.
+function doSaveGigFee(id){
+  const ev = getEvent(id); if(!ev) return;
+  const price = Math.max(0, Number(S.gigFeeForm.price)||0);
+  const commission = standardCommission(price, ev.artistId);
+  if(price!==ev.price) logEvent(ev, 'system', `Performance fee ${ev.price? `changed from ${money(ev.price)} to` : 'set to'} ${money(price)}.`);
+  S.editFeeEventId=null; S.gigFeeForm={};
+  if(reportEventSave(updateEvent(id, { price, commission }), 'saving the fee')) toast('Fee saved.', 'success');
+  openEvent(id);
+}
 function renderLedger(ev, opts={}){
   const extras = ev.charges||[];
   const extrasSum = chargesTotal(ev);
@@ -6045,10 +6057,14 @@ function renderLedger(ev, opts={}){
   return `<div class="card card-pad" style="${compact?'padding:12px 14px;':''}">
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
       <div class="u-label">Price Breakdown</div>
-      <button class="btn btn-sm btn-ghost" data-action="toggle-add-charge" data-id="${ev.id}" style="padding:2px 6px;">${S.showAddCharge?'Cancel':'+ Add Charge'}</button>
+      <button class="btn btn-sm btn-ghost" data-action="toggle-add-charge" data-id="${ev.id}" style="padding:2px 6px;">${S.showAddCharge?'Cancel':'+ Additional fee'}</button>
     </div>
     <div class="ledger" style="${compact?'font-size:11.5px;':''}">
-      <div class="ledger-row"><span>Performance Fee</span><span class="amt">${money(ev.price)}</span></div>
+      ${S.editFeeEventId===ev.id
+        ? `<div class="ledger-row" data-form="gigfee" style="gap:8px;align-items:center;"><span>Performance Fee</span>
+            <span style="display:flex;gap:6px;align-items:center;"><input type="number" data-field="price" value="${esc(String(S.gigFeeForm.price ?? (ev.price||'')))}" placeholder="4500" style="width:110px;"/>
+            <button class="btn btn-sm btn-primary" data-action="save-gig-fee" data-id="${ev.id}">Save</button><button class="btn btn-sm btn-ghost" data-action="cancel-gig-fee">Cancel</button></span></div>`
+        : `<div class="ledger-row"><span>Performance Fee</span><span class="amt">${ev.price? money(ev.price) : ''} <button class="btn btn-sm ${ev.price?'btn-ghost':'btn-primary'}" style="padding:2px 8px;margin-left:6px;" data-action="edit-gig-fee" data-id="${ev.id}">${ev.price?'Edit':'Add fee'}</button></span></div>`}
       ${extras.map(c=>`<div class="ledger-row"><span>${esc(c.label)}${c.addedAfterSigning?` <span class="pill pill-warn" style="padding:1px 6px;font-size:9px;vertical-align:1px;">notify client</span>`:''} <a href="#" data-action="remove-charge" data-id="${ev.id}" data-chargeid="${c.id}" style="color:var(--crit);text-decoration:none;margin-left:4px;">×</a></span><span class="amt">${money(c.amount)}</span></div>`).join('')}
       ${S.showAddCharge? renderAddChargeRow(ev) : ''}
       <div class="ledger-row"><span>Total charged to client</span><span class="amt">${money(total)}</span></div>
@@ -8872,6 +8888,9 @@ function registerAction(name, fn){
 registerAction('download-backup', ()=>doDownloadBackup());
 registerAction('make-sign-link', ({ id })=>doMakeSignLink(id));
 registerAction('edit-contract-from-doc', ({ id })=>{ S.showContractBuilderDoc = false; S.showContractBuilder = true; S.contractBuilderId = id; render(); });
+registerAction('edit-gig-fee', ({ id })=>{ const ev=getEvent(id); S.editFeeEventId=id; S.gigFeeForm={ price: ev&&ev.price ? ev.price : '' }; render(); });
+registerAction('cancel-gig-fee', ()=>{ S.editFeeEventId=null; S.gigFeeForm={}; render(); });
+registerAction('save-gig-fee', ({ id })=>doSaveGigFee(id));
 registerAction('toggle-lead-mezumin', ()=>{ S.newLeadForm.mezumin = !S.newLeadForm.mezumin; render(); });
 registerAction('open-travel-drop', ()=>{ S.showTravelDrop=true; S.travelDropForm={}; S.travelDropFiles=[]; S.travelDropResult=null; render(); });
 registerAction('close-travel-drop', ()=>{ S.showTravelDrop=false; render(); });
@@ -9027,6 +9046,7 @@ function bindGlobal(){
       const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, edituser:S.editRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm, payeeprofile:S.payeeProfileForm, sendcontract:S.sendContractForm, verifydeposit:S.verifyDepositForm, orgsettings:ORG_SETTINGS, gmailmailbox:S.newGmailMailboxForm };
       formTargets.lead = S.newLeadForm;
       formTargets.traveldrop = S.travelDropForm = S.travelDropForm || {};
+      formTargets.gigfee = S.gigFeeForm = S.gigFeeForm || {};
       // A misspelled data-form used to write silently into the New Lead form (2026-10-09 audit 5.2).
       // Fields with no data-form at all keep the old New-Lead default.
       if(form && !formTargets[form]){ console.warn('data-field inside unknown data-form:', form, key); return; }

@@ -222,3 +222,22 @@ def test_new_lead_mezumin_marks_cash(live_server, page):
     page.locator('[data-action="submit-lead"]').click()
     assert "Mezumin (cash)" in page.locator(".sheet").first.inner_text(), "lead isn't marked Mezumin (cash)"
     assert not errors, f"console errors: {errors}"
+
+
+def test_add_fee_and_additional_fee_on_gig(live_server, page):
+    """Owner 2026-10-14: set the artist's fee on a gig created without one, then add an additional fee."""
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    create_lead(page, "No Fee Yet Client", "2027-10-20", artist_id="benny")
+    sheet = page.locator(".sheet").first
+    sheet.locator('[data-action="edit-gig-fee"]').click()
+    sheet.locator('[data-form="gigfee"] input[data-field="price"]').fill("5000")
+    sheet.locator('[data-action="save-gig-fee"]').click()
+    text = page.locator(".sheet").first.inner_text()
+    assert "$5,000" in text, "fee not shown after Add fee"
+    page.locator('.sheet [data-action="toggle-add-charge"]').click()
+    page.locator('.sheet input[data-field="amount"]').fill("300")
+    page.locator('.sheet [data-action="confirm-add-charge"]').click()
+    assert "$5,300" in page.locator(".sheet").first.inner_text(), "additional fee not added to the client total"
+    assert not errors, f"console errors: {errors}"
