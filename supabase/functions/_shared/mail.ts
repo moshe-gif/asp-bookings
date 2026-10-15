@@ -16,8 +16,9 @@ const hdr = (s: string) => /^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${b64(new T
 function b64(bytes: Uint8Array): string { let bin = ""; for (const b of bytes) bin += String.fromCharCode(b); return btoa(bin); }
 const b64url = (bytes: Uint8Array) => b64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
-// The connected sending mailbox and a live access token, or null when none is connected.
-async function gmailSender(sb: Sb): Promise<{ email: string; token: string } | null> {
+// The connected sending mailbox and a live access token, or null when none is connected. Exported for
+// the inbox watcher (inbox-scan), which reads the same mailbox.
+export async function gmailSender(sb: Sb): Promise<{ email: string; token: string } | null> {
   const { data: box } = await sb.from("gmail_mailboxes").select("id, email").eq("mailbox_type", "asp_sending").limit(1).maybeSingle();
   if (!box) return null;
   const { data: tok } = await sb.from("gmail_oauth_tokens").select("access_token, refresh_token, access_token_expires_at").eq("gmail_mailbox_id", box.id).maybeSingle();
