@@ -39,13 +39,16 @@ async function gmailSender(sb: Sb): Promise<{ email: string; token: string } | n
 // out any emails except for test ones to moshe@aspmgmt.com"). On unless the secret EMAIL_LIVE is exactly
 // "yes": every email goes to TEST_EMAIL_TO (default moshe@aspmgmt.com) instead, with the real recipient in
 // the subject and a banner, so nothing reaches a client, artist or Rivky until the owner goes live.
-export function emailTestMode(): { on: boolean; to: string } {
-  return { on: Deno.env.get("EMAIL_LIVE") !== "yes", to: Deno.env.get("TEST_EMAIL_TO") || "moshe@aspmgmt.com" };
+// TEST_EMAIL_ALLOW (comma list): office staff the owner has asked to reach during test mode
+// (2026-10-15: Rivky and Ilan's welcome emails). Clients and artists are never on it.
+export function emailTestMode(): { on: boolean; to: string; allow: string[] } {
+  const allow = (Deno.env.get("TEST_EMAIL_ALLOW") || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+  return { on: Deno.env.get("EMAIL_LIVE") !== "yes", to: Deno.env.get("TEST_EMAIL_TO") || "moshe@aspmgmt.com", allow };
 }
 
 export async function sendRelayEmail(sb: Sb, original: { to: string; subject: string; html: string; brand?: string }): Promise<{ ok: boolean; error?: string; brandKey?: string; id?: string }> {
   const test = emailTestMode();
-  const msg = !test.on || original.to.toLowerCase() === test.to.toLowerCase() ? original : {
+  const msg = !test.on || original.to.toLowerCase() === test.to.toLowerCase() || test.allow.includes(original.to.toLowerCase()) ? original : {
     ...original, to: test.to,
     subject: `[TEST → ${original.to}] ${original.subject}`,
     html: `<div style="background:#FBEFD9;color:#8A5A0F;font:600 13px -apple-system,Arial,sans-serif;padding:10px 14px;">TEST MODE — this would have gone to ${original.to.replace(/[<>&"]/g, "")}. Nothing was sent to them.</div>${original.html}`,
