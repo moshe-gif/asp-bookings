@@ -3268,7 +3268,7 @@ async function doAddGmailMailbox(){
     // No artist picked = the office's sending mailbox (the dropdown's first option); it always saved as artist_payment before.
     mailbox_type: f.artistId ? 'artist_payment' : 'asp_sending', artist_id: f.artistId||null, email,
   });
-  if(error){ toast('Could not add mailbox: ' + error.message, 'system'); return; }
+  if(error){ toast(/duplicate key|gmail_mailboxes_email_key/.test(error.message) ? `${email} is already added — click Connect next to it below.` : 'Could not add mailbox: ' + error.message, 'system'); loadGmailStatus(); return; }
   S.newGmailMailboxForm = {};
   toast('Mailbox added -- click Connect to authorize it.', 'success');
   loadGmailStatus();
@@ -3944,7 +3944,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.16'; // bump on every release so a phone can tell it has updated. v1.9.16: simpler contract builder; contact card; artist itinerary + Flighty
+const APP_VERSION = 'v1.9.17'; // bump on every release so a phone can tell it has updated. v1.9.17: Gmail mailboxes load on their own; clear duplicate message
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -7804,6 +7804,9 @@ function renderCalendarMappingSection(){
 function renderGmailMailboxesCard(){
   const configured = !!GMAIL_CLIENT_ID;
   const boxes = S.gmailMailboxes;
+  // Load the list on its own the first time Settings shows it (owner 2026-10-15: the Connect button was
+  // hidden behind 'Check Mailboxes').
+  if(boxes==null && !S.gmailMailboxesBusy && !S.gmailMailboxesAutoTried && S.realSession){ S.gmailMailboxesAutoTried = true; setTimeout(loadGmailStatus, 0); }
   const busy = !!S.gmailMailboxesBusy;
   const f = S.newGmailMailboxForm||{};
   return `<div class="card card-pad" style="margin-bottom:20px;">
