@@ -1,5 +1,5 @@
 /* The client's "Pay" panel (migration 0056, Edge Function client-pay, ops/STRIPE_SETUP.md). Used by
-   /sign/ (the deposit, once the contract is signed) and /pay/ (a custom invoice). Card and bank
+   /sign/ (the deposit, once the contract is signed) and /pay/ (a custom invoice, or a gig's balance). Card and bank
    details go straight into Stripe's own fields (Stripe.js, loaded from js.stripe.com as Stripe
    requires) -- this page and ASP's servers never see a card number.
 
@@ -69,8 +69,8 @@
 
   function mount(el, token, p){
     addStyle();
-    const what = p.kind==='invoice' ? 'invoice' : 'deposit';
-    const title = p.kind==='invoice' ? 'Pay this invoice' : 'Pay your deposit';
+    const what = p.kind==='invoice' ? 'invoice' : p.kind==='event_balance' ? 'balance' : 'deposit';
+    const title = p.kind==='invoice' ? 'Pay this invoice' : p.kind==='event_balance' ? 'Pay the balance' : 'Pay your deposit';
     const contact = p.replyTo ? ` Questions? Email <a href="mailto:${esc(p.replyTo)}">${esc(p.replyTo)}</a>.` : '';
     const card = inner => { el.innerHTML = `<div class="card pay-card" data-testid="pay-panel">${inner}</div>`; };
     // Zelle under the card form: "Or scan here to pay the deposit" (the same box as in the email).
@@ -78,7 +78,7 @@
       const z = p.zelle; if(!z) return '';
       const qr = z.qrUrl && /^https:\/\//.test(z.qrUrl) ? z.qrUrl : '';
       const memo = p.memo ? ` Put “${esc(p.memo)}” in the memo so we can match your payment.` : '';
-      return `<div class="pay-zelle" data-testid="pay-zelle">${qr?`<img src="${esc(qr)}" alt="Zelle QR code"/>`:''}<div><strong>${qr?'Or scan here to pay':'Or pay'} ${p.kind==='invoice'?'this invoice':'the deposit'} with Zelle</strong>${qr?'Open your bank app, choose Zelle, and scan.':`Send it with Zelle to <strong style="display:inline;">${esc(z.handle)}</strong>.`}${memo}</div></div>`;
+      return `<div class="pay-zelle" data-testid="pay-zelle">${qr?`<img src="${esc(qr)}" alt="Zelle QR code"/>`:''}<div><strong>${qr?'Or scan here to pay':'Or pay'} ${p.kind==='invoice'?'this invoice':'the '+what} with Zelle</strong>${qr?'Open your bank app, choose Zelle, and scan.':`Send it with Zelle to <strong style="display:inline;">${esc(z.handle)}</strong>.`}${memo}</div></div>`;
     };
 
     if(p.paid){

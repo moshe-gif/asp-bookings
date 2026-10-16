@@ -1454,6 +1454,7 @@ async function refreshStripeStatus(){
   const data = await callEdgeFunction('stripe-status', {});
   S.stripeStatus = data && data.ok ? data : { connected:false, error:(data && data.error) || 'Could not check Stripe.' };
   render();
+  if(S.stripeStatus.connected) refreshStripePayees();
 }
 function contractDepositCents(c){ return Math.round((Number(contractPaymentFigures(c).deposit)||0) * 100); }
 function contractDepositDescription(c){
@@ -1519,6 +1520,128 @@ async function doMakeInvoicePayLink(id){
   try{ await navigator.clipboard.writeText(link.url); toast('Payment link copied — paste it to the client.', 'success'); }
   catch(e){ toast('Payment link ready — copy it from the box.', 'system'); }
 }
+/* ---- Balances paid online, straight to the artist (Stripe Connect, migration 0063, Edge Functions
+   stripe-connect / payee-onboard, ops/STRIPE_SETUP.md) ----
+   Owner 2026-10-16: the deposit (ASP's commission) goes to ASP, the balance straight to the artist,
+   and the client only ever deals with ASP. Each payee profile can have a Stripe account of its own
+   (the artist sets it up from a link the office sends); a balance link pays the gig's balance to the
+   gig's balance payee (zellePayeeProfileFor, the same payee as the balance Zelle). The server re-checks
+   all of it -- amount, payee, account -- before charging. */
+// S.stripePayees: payee profile id → its stripe_payees row, as Stripe last reported it.
+async function refreshStripePayees(){
+  const data = await callEdgeFunction('stripe-connect', { action:'refresh' });
+  if(!data || !data.ok) return;
+  S.stripePayees = Object.fromEntries((data.payees||[]).map(r=>[r.payee_profile_id, r]));
+  renderPreservingFocus();
+}
+function stripePayeeOf(profileId){ return (S.stripePayees||{})[profileId] || null; }
+// Ready to receive: Stripe says the account can take transfers, in the same mode (test/live) as ASP's key.
+function stripePayeeActive(row){ return !!(row && row.transfers_active && !!row.livemode === (!!S.stripeStatus && S.stripeStatus.mode==='live')); }
+function stripePayeeStatusPill(row){
+  if(!row) return `<span class="pill pill-neutral">Not set up</span>`;
+  if(stripePayeeActive(row)) return `<span class="pill pill-good" data-testid="payee-stripe-active">Active${row.livemode?'':' — test mode'}</span>`;
+  if(row.details_submitted) return `<span class="pill pill-warn">Stripe is checking${row.requirements_due?' — more details needed':''}</span>`;
+  return `<span class="pill pill-neutral">Setup link sent${row.setup_email?` to ${esc(row.setup_email)}`:''}</span>`;
+}
+function balancePayKey(ev){ return isHarnessBrowser() ? `EV-TEST-${ev.id}` : ev.id; }
+function balanceDescription(ev){ return `Balance — ${ev.venue||ev.type||'your event'}${ev.date?` (${fmtDateShort(ev.date)})`:''}`.slice(0, 200); }
+// Why a gig's balance can't be paid online now, or '' (the client still gets the artist's Zelle).
+function balancePayBlocker(ev){
+  if(!stripeReady()) return 'Online payments aren\'t set up yet (Settings → Online payments).';
+  if(ev.balanceReceived) return 'The balance is already received.';
+  if(!ev.depositReceived) return 'The deposit isn\'t in yet: the balance link goes out after it.';
+  if(!isStandardPayment(ev)) return 'This gig\'s balance is paid another way.';
+  if(Math.round(artistPayout(ev)*100) < 50) return 'There\'s no balance left to pay.';
+  const profile = zellePayeeProfileFor(ev);
+  if(!profile) return 'This gig has no payee profile.';
+  if(!stripePayeeActive(stripePayeeOf(profile.id))) return `${profile.entityName||'The payee'} hasn't finished setting up online payouts (Settings → Payee Profiles).`;
+  return '';
+}
+async function createBalancePayLink(ev){
+  if(!supabaseClient || !S.realSession) return { ok:false, error:'Sign in with your ASP account to make a payment link.' };
+  const why = balancePayBlocker(ev); if(why) return { ok:false, error:why };
+  // The server checks the link against the shared copies of the gig, its contracts and payee profiles
+  // (the amount and the payee), so send this browser's latest first.
+  for(const k of ['events','contracts','payee_profiles']) if(SHARED[k].on) await SHARED[k].flush();
+  const token = newLinkToken();
+  const { error } = await supabaseClient.from('payment_requests').insert({
+    token_hash: await sha256Hex(token), kind:'event_balance', event_legacy_id: balancePayKey(ev), payee_profile_id: zellePayeeProfileFor(ev).id,
+    brand_key:'asp', client_name: ev.clientName||null, client_email: ev.clientEmail||null,
+    description: balanceDescription(ev), amount_cents: Math.round(artistPayout(ev)*100),
+    card_fee_bps: NO_CARD_FEE_STATES.includes(normalizeState(ev.state)) ? 0 : Math.round(cardFeePercentSetting() * 100),
+  });
+  if(error) return { ok:false, error:'Could not make a payment link: ' + error.message };
+  return { ok:true, url: `${location.origin}/pay/#${token}` };
+}
+// For the client emails: a balance link when one can be made, else null (the email shows Zelle only).
+async function balancePayUrl(ev){
+  // Right after sign-in (an online deposit's booking confirmation) the statuses may not be loaded yet;
+  // re-read the payees so one who just finished setting up counts.
+  if(!S.stripeStatus) await refreshStripeStatus();
+  if(stripeReady()) await refreshStripePayees();
+  if(balancePayBlocker(ev)) return null;
+  const link = await createBalancePayLink(ev);
+  if(!link.ok) console.warn('balance pay link', link.error);
+  return link.ok ? link.url : null;
+}
+async function doMakeBalancePayLink(id){
+  const ev = getEvent(id); if(!ev || S.payLinkBusy) return;
+  const why = balancePayBlocker(ev); if(why){ toast(why, 'system'); return; }
+  S.payLinkBusy = id; render();
+  const link = await createBalancePayLink(ev);
+  S.payLinkBusy = null;
+  if(!link.ok){ toast(link.error, 'system'); render(); return; }
+  S.payLinks = { ...(S.payLinks||{}), [id]: link.url };
+  render();
+  try{ await navigator.clipboard.writeText(link.url); toast('Balance payment link copied — paste it to the client.', 'success'); }
+  catch(e){ toast('Balance payment link ready — copy it from the box.', 'system'); }
+}
+// Payee profile → Online balance payouts (the payee profile modal).
+async function doPayeeStripeSetup(profileId, { send=false, shareFrom=null }={}){
+  if(S.payeeStripeBusy) return;
+  const email = String(payeeStripeEmailValue(profileId)||'').trim();
+  if(send && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ toast('Enter the email to send the setup link to.', 'system'); return; }
+  S.payeeStripeBusy = true; render();
+  const data = await callEdgeFunction('stripe-connect', { action:'setup', payeeProfileId:profileId, shareFrom, email: send ? email : undefined, send });
+  S.payeeStripeBusy = false;
+  if(!data || !data.ok){ toast((data && data.error) || 'Could not set up payouts.', 'system'); render(); return; }
+  if(data.payee) S.stripePayees = { ...(S.stripePayees||{}), [profileId]: data.payee };
+  S.payeeStripeLink = { id:profileId, url:data.url };
+  render();
+  if(send) toast(data.sent ? `Setup link emailed to ${email}.` : `The email didn't go out (${data.sendError||'unknown error'}) — copy the link instead.`, data.sent?'success':'system');
+  else { try{ await navigator.clipboard.writeText(data.url); toast('Setup link copied — send it to the artist.', 'success'); }catch(e){ toast('Setup link ready — copy it from the box.', 'system'); } }
+}
+// What the office typed, else where the last link went, else the artist's own email.
+function payeeStripeEmailValue(profileId){
+  if(S.payeeStripeEmail!=null) return S.payeeStripeEmail;
+  const p = getPayeeProfile(profileId), row = stripePayeeOf(profileId), artist = p && p.artistId ? artistById(p.artistId) : null;
+  return (row && row.setup_email) || (artist && artist.email) || '';
+}
+function renderPayeeStripeSection(profileId){
+  const p = getPayeeProfile(profileId); if(!p || !stripeReady()) return '';
+  const row = stripePayeeOf(profileId);
+  const isAsp = !p.artistId && /^ASP\b/i.test(p.entityName||'');
+  if(isAsp) return '';
+  const link = S.payeeStripeLink && S.payeeStripeLink.id===profileId ? S.payeeStripeLink.url : '';
+  const emailDefault = payeeStripeEmailValue(profileId);
+  // Another profile of the same company that already has an account (e.g. Airschnitz for two artists).
+  const norm = s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  const twin = !row && PAYEE_PROFILES.find(x=>x.id!==p.id && norm(x.entityName)===norm(p.entityName) && stripePayeeOf(x.id) && !!stripePayeeOf(x.id).livemode===(S.stripeStatus.mode==='live'));
+  const busy = S.payeeStripeBusy;
+  return `<div class="field" data-testid="payee-stripe">
+    <label>Online balance payouts (Stripe)</label>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">${stripePayeeStatusPill(row)}</div>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 8px;">Clients pay the balance online and it goes straight to this payee's bank. The artist sets it up on Stripe's site from the link (their bank and tax ID; ASP never sees them).${row && row.requirements_due && !stripePayeeActive(row) ? ` Stripe still needs: ${esc(row.requirements_due)}.` : ''}</p>
+    ${stripePayeeActive(row) ? '' : `
+      ${twin ? `<button type="button" class="btn btn-sm" style="margin-bottom:8px;" data-action="payee-stripe-share" data-id="${esc(p.id)}" data-from="${esc(twin.id)}" ${busy?'disabled':''}>Use ${esc(twin.entityName)}'s Stripe account</button>` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+        <input data-field="payeeStripeEmail" data-form="payeestripe" type="email" value="${esc(emailDefault)}" placeholder="artist's email" style="flex:1 1 180px;min-width:0;"/>
+        <button type="button" class="btn btn-sm btn-primary" data-action="payee-stripe-send" data-id="${esc(p.id)}" ${busy?'disabled':''}>${busy?'Working…':'Email setup link'}</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-action="payee-stripe-link" data-id="${esc(p.id)}" ${busy?'disabled':''}>Copy setup link</button>
+      </div>`}
+    ${link ? `<input readonly value="${esc(link)}" data-testid="payee-stripe-link" style="margin-top:8px;width:100%;font-size:12px;" onfocus="this.select()"/>` : ''}
+  </div>`;
+}
 function paidOnlineText(r){
   const how = r.pay_method==='us_bank_account' ? `bank transfer${r.pay_last4?` ••${r.pay_last4}`:''}`
     : `${r.card_brand ? r.card_brand.charAt(0).toUpperCase()+r.card_brand.slice(1) : 'Card'}${r.card_funding==='credit'?' credit':r.card_funding==='debit'?' debit':''}${r.pay_last4?` ••${r.pay_last4}`:''}`;
@@ -1528,6 +1651,7 @@ function paidOnlineText(r){
 // that took money (or is taking it: a bank transfer still processing).
 function contractOnlinePayment(c){ return (S.clientPayments||{})[`c|${signLinkContractKey(c)}|${c.createdAt}`] || null; }
 function invoiceOnlinePayment(inv){ return (S.clientPayments||{})[`i|${invoicePayKey(inv)}|${inv.createdTs}`] || null; }
+function balanceOnlinePayment(ev){ return (S.clientPayments||{})[`b|${balancePayKey(ev)}`] || null; }
 function contractPaymentPill(c){
   const r = contractOnlinePayment(c); if(!r) return '';
   if(r.pay_status==='processing') return `<span class="pill pill-wrap pill-neutral" data-testid="online-payment">Deposit: bank transfer processing (started ${fmtDateShort(String(r.processing_at||r.created_at).slice(0,10))})</span>`;
@@ -1538,12 +1662,12 @@ const appliedOnlinePayments = new Set();
 async function applyClientPayments(){
   if(!supabaseClient || !S.realSession || !isAdminUser(S.user)) return;
   const { data, error } = await supabaseClient.from('payment_requests')
-    .select('id, kind, contract_legacy_id, contract_created_at, invoice_legacy_id, invoice_created_at, pay_status, pay_method, card_brand, card_funding, pay_last4, fee_cents, total_cents, amount_cents, processing_at, paid_at, applied_at, created_at')
+    .select('id, kind, contract_legacy_id, contract_created_at, invoice_legacy_id, invoice_created_at, event_legacy_id, pay_status, pay_method, card_brand, card_funding, pay_last4, fee_cents, total_cents, amount_cents, processing_at, paid_at, applied_at, created_at')
     .in('pay_status', ['processing','paid','refunded','disputed']).order('created_at');
   if(error){ console.warn('could not load online payments', error.message); return; }
   const map = {};
   for(const r of data||[]){
-    const k = r.kind==='invoice' ? `i|${r.invoice_legacy_id}|${r.invoice_created_at}` : `c|${r.contract_legacy_id}|${r.contract_created_at}`;
+    const k = r.kind==='invoice' ? `i|${r.invoice_legacy_id}|${r.invoice_created_at}` : r.kind==='event_balance' ? `b|${r.event_legacy_id}` : `c|${r.contract_legacy_id}|${r.contract_created_at}`;
     if(!map[k] || map[k].pay_status==='processing') map[k] = r;
   }
   const changed = canon(map)!==canon(S.clientPayments||{});
@@ -1568,6 +1692,21 @@ async function applyClientPayments(){
     if(!(await claimOnlinePayment(r))){ appliedOnlinePayments.add(r.id); continue; }
     appliedOnlinePayments.add(r.id);
     applyOnlineDeposit(ev, c, r);
+  }
+  for(const ev of S.events){
+    const r = balanceOnlinePayment(ev);
+    if(!r || r.pay_status!=='paid' || r.applied_at || appliedOnlinePayments.has(r.id)) continue;
+    if(ev.balanceVerification && ev.balanceVerification.paymentRequestId===r.id){ appliedOnlinePayments.add(r.id); continue; }
+    appliedOnlinePayments.add(r.id);
+    if(!(await claimOnlinePayment(r))) continue;
+    if(ev.balanceReceived){
+      // Marked received another way (Zelle, check) AND paid online: the client paid twice.
+      logEvent(ev, 'system', `The client ALSO paid the balance online (${paidOnlineText(r)}) after it was marked received another way — refund one of the two payments in Stripe (tick Reverse transfer).`);
+      reportEventSave(updateEvent(ev.id, {}), 'noting the second balance payment');
+      toast(`${ev.clientName||'A client'} paid the balance twice (online and another way) — refund one in Stripe.`, 'system');
+      continue;
+    }
+    applyOnlineBalance(ev, r);
   }
   let invChanged = false;
   for(const inv of CUSTOM_INVOICES){
@@ -1604,6 +1743,18 @@ function applyOnlineDeposit(ev, c, r){
   }
   toast(`${ev.clientName||'The client'} paid the deposit online — ${patch.status==='booked'?'booked':'deposit recorded'}.`, 'success');
   if(ev.clientEmail && patch.status==='booked' && !isHarnessBrowser()) doSendBookingConfirmationEmail(ev.id);
+}
+
+// What Mark Balance Received does, for a balance the client paid online (it went straight to the
+// artist's Stripe account). Only the admin browser that claimed the payment gets here.
+function applyOnlineBalance(ev, r){
+  const text = paidOnlineText(r);
+  const payee = zellePayeeProfileFor(ev);
+  logEvent(ev, 'success', `Balance paid online (${text}), sent straight to ${payee ? payee.entityName : 'the artist'}'s Stripe account — paid in full.`);
+  const result = updateEvent(ev.id, { balanceReceived:true, balanceReceivedDate:String(r.paid_at).slice(0,10), status:'paid',
+    balanceVerification:{ method:'stripe', note:`Paid online: ${text}`, loggedAt:r.paid_at, paymentRequestId:r.id } });
+  if(!result.ok){ toast(`${ev.clientName||'A client'} paid the balance online, but this gig couldn't be updated — reload and mark the balance received.`, 'system'); return; }
+  toast(`${ev.clientName||'The client'} paid the balance online — paid in full.`, 'success');
 }
 
 /* ---- Send Contract (real email, via the send-contract-email Supabase Edge Function) ---- */
@@ -2026,14 +2177,9 @@ function paymentOptionsEmailBlock({ kind='deposit', payUrl=null, amount=null, me
   return `<div class="pay-options" style="margin:18px 0 0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">${button}${zelleBox}${foot}</div>`;
 }
 // Zelle for deposits and invoices: ASP's own (Settings → Online payments), else ASP's house payee
-// profile. Never the artist's: the deposit (ASP's fee) goes to ASP; only the balance goes to the artist.
+// profile. Never the artist's: the deposit (ASP's fee) goes to ASP -- creative/video contracts' too
+// (owner 2026-10-16) -- and only the balance goes to the artist.
 function aspHousePayeeProfile(){ return PAYEE_PROFILES.find(x=>!x.artistId && /^ASP\b/i.test(x.entityName||'')) || null; }
-// A contract's deposit Zelle: ASP's (depositZelle), except a creative contract, whose deposit goes to
-// its production company's payee (e.g. Airschnitz), as before.
-function contractDepositZelle(c, profile){
-  if(c.template==='creative' && profile && profile.zelleActive!==false && (profile.zelle || profile.zelleQrUrl)) return { qrUrl: profile.zelleQrUrl||null, handle: profile.zelle||'', label: profile.zelleRecipientLabel||profile.zelle||'' };
-  return depositZelle();
-}
 function depositZelle(){
   const qrUrl = ORG_SETTINGS.depositZelleQrUrl || null, handle = (ORG_SETTINGS.depositZelleHandle||'').trim();
   if(qrUrl || handle) return { qrUrl, handle, label: handle };
@@ -2066,7 +2212,7 @@ function gigPaymentMemo(ev){ return `${ev.clientName||'Event'} ${fmtDateShort(ev
 // Client-facing notice emails (booking confirmation + balance reminder, ops automation spec item
 // 5): same branded wrapper as travelRequestEmailHtml, parameterized by the one paragraph that
 // actually differs between the two.
-function clientNoticeEmailHtml(ev, artist, introHtml){
+function clientNoticeEmailHtml(ev, artist, introHtml, payUrl){
   const brand = getBrandConfig('asp');
   const balance = artistPayout(ev);
   return `<!doctype html><html><head><meta charset="utf-8"/><style>
@@ -2078,7 +2224,7 @@ function clientNoticeEmailHtml(ev, artist, introHtml){
     <div class="wordmark">${brandLogoEmailHtml(170)}</div>
     ${introHtml}
     ${hasLocation(ev)? `<p style="margin:0 0 8px;font-size:13px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:#4C6FA5;">Open in Maps</a></p>` : ''}
-    ${isStandardPayment(ev) && balance>0 ? paymentOptionsEmailBlock({ kind:'balance', amount:balance, memo:gigPaymentMemo(ev), zelle:balanceZelle(ev) }) : ''}
+    ${isStandardPayment(ev) && balance>0 ? paymentOptionsEmailBlock({ kind:'balance', payUrl, amount:balance, memo:gigPaymentMemo(ev), zelle:balanceZelle(ev) }) : ''}
     <div class="doc-foot">Sent from ${esc(brand.label||'ASP')}. Remaining balance: ${money(balance)}.</div>
   </div></body></html>`;
 }
@@ -2104,23 +2250,29 @@ function sendClientNoticeEmail(ev, subject, html){ return sendEmail({ to: ev.cli
 // Fires automatically right after a deposit is marked received (doMarkDeposit) -- "after verified
 // payment... send an ASP-branded confirmation with balance + QR for the correct payee" (item 5).
 // Also reachable manually via a Resend button on the preview, per "manual resend + audit log."
-function bookingConfirmationIntroHtml(ev, artist, balance){
+// How the client pays the balance, for the emails' sentence: online first when there's a link.
+function balanceHowSentence(ev, payUrl){
+  if(!isStandardPayment(ev)) return ` (${esc(paymentMethodLabel(ev))})`;
+  return payUrl ? ` — pay online with the button below${zellePayeeFor(ev)?', or by Zelle':''}` : zellePaymentSentence(ev);
+}
+function bookingConfirmationIntroHtml(ev, artist, balance, payUrl){
   return `<p style="margin:0 0 8px;">Hi ${esc((ev.clientName||'').split(' ')[0])},</p>
     <p style="margin:0 0 8px;">You're all set — ${esc(artist.name)} is booked for your ${esc(ev.type)} on ${esc(fmtDate(ev.date))}${ev.time && ev.time!=='00:00' ? ` at ${esc(fmtTime(ev.time))}` : ''}.</p>
-    <p style="margin:0 0 8px;">Remaining balance of ${money(balance)} is due before the event${isStandardPayment(ev)? zellePaymentSentence(ev) : ` (${esc(paymentMethodLabel(ev))})`}.</p>`;
+    <p style="margin:0 0 8px;">Remaining balance of ${money(balance)} is due before the event${balanceHowSentence(ev, payUrl)}.</p>`;
 }
-function reminderIntroHtml(ev, artist, balance){
+function reminderIntroHtml(ev, artist, balance, payUrl){
   return `<p style="margin:0 0 8px;">Hi ${esc((ev.clientName||'').split(' ')[0])},</p>
-    <p style="margin:0 0 8px;">Just a reminder — the remaining balance of ${money(balance)} for ${esc(artist.name)}'s ${esc(ev.type)} on ${esc(fmtDate(ev.date))} is due${isStandardPayment(ev)? zellePaymentSentence(ev) : ` (${esc(paymentMethodLabel(ev))})`}.</p>`;
+    <p style="margin:0 0 8px;">Just a reminder — the remaining balance of ${money(balance)} for ${esc(artist.name)}'s ${esc(ev.type)} on ${esc(fmtDate(ev.date))} is due${balanceHowSentence(ev, payUrl)}.</p>`;
 }
 async function doSendBookingConfirmationEmail(id){
   const ev = getEvent(id); if(!ev) return;
   const artist = artistById(ev.artistId);
   const balance = artistPayout(ev);
   const subject = `You're booked! — ${artist.name}, ${fmtDateShort(ev.date)}`;
-  const intro = bookingConfirmationIntroHtml(ev, artist, balance);
-  const html = clientNoticeEmailHtml(ev, artist, intro);
   S.bookingConfirmationBusy = true; render();
+  const payUrl = await balancePayUrl(ev);
+  const intro = bookingConfirmationIntroHtml(ev, artist, balance, payUrl);
+  const html = clientNoticeEmailHtml(ev, artist, intro, payUrl);
   const result = await sendClientNoticeEmail(ev, subject, html);
   S.bookingConfirmationBusy = false;
   if(result.ok){
@@ -2138,9 +2290,10 @@ async function doSendReminderEmail(id){
   const artist = artistById(ev.artistId);
   const balance = artistPayout(ev);
   const subject = `Balance reminder — ${artist.name}, ${fmtDateShort(ev.date)}`;
-  const intro = reminderIntroHtml(ev, artist, balance);
-  const html = clientNoticeEmailHtml(ev, artist, intro);
   S.reminderBusy = true; render();
+  const payUrl = await balancePayUrl(ev);
+  const intro = reminderIntroHtml(ev, artist, balance, payUrl);
+  const html = clientNoticeEmailHtml(ev, artist, intro, payUrl);
   const result = await sendClientNoticeEmail(ev, subject, html);
   S.reminderBusy = false;
   if(result.ok){
@@ -3973,7 +4126,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.20'; // bump on every release so a phone can tell it has updated. v1.9.20: a new deposit or invoice payment link no longer gets cancelled by the old links' cancel
+const APP_VERSION = 'v1.9.21'; // bump on every release so a phone can tell it has updated. v1.9.21: clients pay the balance online straight to the artist (Stripe Connect); creative deposits go to ASP
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -5906,7 +6059,7 @@ function renderReminderPreview(){
           <div><strong>To:</strong> ${esc(ev.clientEmail)}</div>
           <div><strong>Subject:</strong> Balance reminder — ${esc(artist.name)}, ${esc(fmtDateShort(ev.date))}</div>
           <hr style="border:none;border-top:1px solid var(--border);margin:10px 0;"/>
-          ${reminderIntroHtml(ev, artist, balance)}
+          ${reminderIntroHtml(ev, artist, balance, balancePayBlocker(ev) ? null : 'preview')}
           ${hasLocation(ev)? `<p style="margin:0 0 8px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:var(--accent);">Open in Maps</a></p>` : ''}
         </div>
         ${isStandardPayment(ev)? renderZelleQrBlock(ev, artist) : ''}
@@ -5929,7 +6082,7 @@ function renderBookingConfirmationPreview(){
           <div><strong>To:</strong> ${esc(ev.clientEmail)}</div>
           <div><strong>Subject:</strong> You're booked! — ${esc(artist.name)}, ${esc(fmtDateShort(ev.date))}</div>
           <hr style="border:none;border-top:1px solid var(--border);margin:10px 0;"/>
-          ${bookingConfirmationIntroHtml(ev, artist, balance)}
+          ${bookingConfirmationIntroHtml(ev, artist, balance, balancePayBlocker(ev) ? null : 'preview')}
           ${hasLocation(ev)? `<p style="margin:0 0 8px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:var(--accent);">Open in Maps</a></p>` : ''}
         </div>
         ${isStandardPayment(ev)? renderZelleQrBlock(ev, artist) : ''}
@@ -6234,10 +6387,25 @@ function renderLedger(ev, opts={}){
       <div class="ledger-row"><span>ASP booking fee ${ev.depositReceived?'· received':`· due via ${esc(paymentMethodLabel(ev))}`}</span><span class="amt">${money(ev.commission)}</span></div>
       <div class="ledger-row total"><span>Artist payout (85% + charges, via Zelle)</span><span class="amt">${money(artistTotal)}</span></div>
       <div class="ledger-row"><span>Balance status</span><span class="amt">${ev.balanceReceived? `Received ${fmtDateShort(ev.balanceReceivedDate)}` : (ev.depositReceived? (isStandardPayment(ev)?'Pending — reminders active':'Pending — follow up directly'):'—')}</span></div>
+      ${renderBalanceOnlineRow(ev)}
     </div>
   </div>`;
 }
 
+// The balance paid online (or paying: a bank transfer clearing), or the office's "Balance pay link"
+// button when one can be made. Nothing when online payments or the payee's payouts aren't set up.
+function renderBalanceOnlineRow(ev){
+  const r = balanceOnlinePayment(ev);
+  if(r){
+    const label = r.pay_status==='processing' ? `Bank transfer processing (started ${fmtDateShort(String(r.processing_at||r.created_at).slice(0,10))})`
+      : `Paid online — ${esc(paidOnlineText(r))}${r.pay_status==='refunded'?' — since refunded':r.pay_status==='disputed'?' — disputed, check Stripe':''}`;
+    return `<div class="ledger-row"><span class="pill pill-wrap ${r.pay_status==='paid'||r.pay_status==='processing'?'pill-good':'pill-warn'}" data-testid="balance-online-payment">${label}</span></div>`;
+  }
+  if(balancePayBlocker(ev)) return '';
+  const link = (S.payLinks||{})[ev.id];
+  return `<div class="ledger-row"><span>Balance online (to the artist)</span><span class="amt"><button class="btn btn-sm btn-ghost" data-action="make-balance-pay-link" data-id="${ev.id}" ${S.payLinkBusy===ev.id?'disabled':''}>${S.payLinkBusy===ev.id?'Making link…':'Balance pay link'}</button></span></div>
+    ${link?`<input readonly value="${esc(link)}" data-testid="balance-pay-link" style="width:100%;font-size:12px;" onfocus="this.select()"/>`:''}`;
+}
 // The artist's own money on a gig: gig amount, ASP fee at this gig's percentage, what they receive.
 function renderArtistMoneyCard(ev){
   const m = artistMoney(ev);
@@ -7565,7 +7733,7 @@ function standardDocContent(c){
       ${renderContractSignBlock(c, who)}
       ${contractClientContactLine(c)? `<p style="margin:12px 0 0;"><strong>Client contact:</strong> ${esc(contractClientContactLine(c).replace(/^Client contact:\s*/,'').replace(/ - /g,' — '))}</p>` : ''}
       ${label('Paying the Deposit')}
-      ${paymentOptionsEmailBlock({ kind:'deposit', amount:figures.deposit, memo:c.id, zelle:contractDepositZelle(c, profile) })}
+      ${paymentOptionsEmailBlock({ kind:'deposit', amount:figures.deposit, memo:c.id, zelle:depositZelle() })}
       <div style="margin-top:22px;padding-top:10px;border-top:1px solid #E3E3E8;font-size:10.5px;color:${mute};display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
         <span>${esc(brand.senderName||'ASP Management')}${brand.email?` &middot; ${esc(brand.email)}`:''}${phone?` &middot; ${esc(phone)}`:''}</span><span>Agreement ${esc(c.id)}</span>
       </div>
@@ -7623,7 +7791,7 @@ function comedianDocContent(c){
     ${c.boilerplate.acceptanceClause? `<div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractAcceptanceText(c))}</p></div>` : ''}
     ${c.customClauses.map(cc=>`<div class="doc-section"><h3>${esc(cc.title||'Additional Terms')}</h3><p style="font-size:12.5px;line-height:1.7;margin:0;white-space:pre-line;">${esc(cc.body)}</p></div>`).join('')}
     ${renderContractSignBlock(c, brand.signer)}
-    <div class="doc-section"><h3>Paying the Deposit</h3><div style="background:#fff;color:#17171A;border-radius:10px;padding:2px 12px 12px;">${paymentOptionsEmailBlock({ kind:'deposit', amount:contractPaymentFigures(c).deposit, memo:c.id, zelle:contractDepositZelle(c, profile) })}</div></div>
+    <div class="doc-section"><h3>Paying the Deposit</h3><div style="background:#fff;color:#17171A;border-radius:10px;padding:2px 12px 12px;">${paymentOptionsEmailBlock({ kind:'deposit', amount:contractPaymentFigures(c).deposit, memo:c.id, zelle:depositZelle() })}</div></div>
     ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
   `;
 }
@@ -7674,7 +7842,7 @@ function multilineDocContent(c){
     <div class="doc-section"><p style="font-size:12.5px;line-height:1.7;margin:0;">${esc(contractCancellationText(c))}</p></div>
     ${c.customClauses.map(cc=>`<div class="doc-section"><h3>${esc(cc.title||'Additional Terms')}</h3><p style="font-size:12.5px;line-height:1.7;margin:0;white-space:pre-line;">${esc(cc.body)}</p></div>`).join('')}
     ${renderContractSignBlock(c, brand.signer)}
-    <div class="doc-section"><h3>Paying the Deposit</h3><div style="background:#fff;color:#17171A;border-radius:10px;padding:2px 12px 12px;">${paymentOptionsEmailBlock({ kind:'deposit', amount:contractPaymentFigures(c).deposit, memo:c.id, zelle:contractDepositZelle(c, profile) })}</div></div>
+    <div class="doc-section"><h3>Paying the Deposit</h3><div style="background:#fff;color:#17171A;border-radius:10px;padding:2px 12px 12px;">${paymentOptionsEmailBlock({ kind:'deposit', amount:contractPaymentFigures(c).deposit, memo:c.id, zelle:depositZelle() })}</div></div>
     ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
   `;
 }
@@ -7722,7 +7890,7 @@ function creativeDocContent(c){
     </div>
     ${c.customClauses.map(cc=>`<div class="doc-section"><h3>${esc(cc.title||'Additional Terms')}</h3><p style="font-size:12.5px;line-height:1.7;margin:0;white-space:pre-line;">${esc(cc.body)}</p></div>`).join('')}
     ${renderContractSignBlock(c, brand.signer)}
-    <div class="doc-section"><h3>Paying the Deposit</h3><div style="background:#fff;color:#17171A;border-radius:10px;padding:2px 12px 12px;">${paymentOptionsEmailBlock({ kind:'deposit', amount:contractPaymentFigures(c).deposit, memo:c.id, zelle:contractDepositZelle(c, profile) })}</div></div>
+    <div class="doc-section"><h3>Paying the Deposit</h3><div style="background:#fff;color:#17171A;border-radius:10px;padding:2px 12px 12px;">${paymentOptionsEmailBlock({ kind:'deposit', amount:contractPaymentFigures(c).deposit, memo:c.id, zelle:depositZelle() })}</div></div>
     ${contactLine? `<p style="font-size:11px;color:var(--ink-3);margin:10px 0 0;">${esc(contactLine)}</p>` : ''}
   `;
 }
@@ -7803,7 +7971,7 @@ function renderPayeeProfilesCard(){
     ${PAYEE_PROFILES.map(p=>{ const artist = p.artistId ? artistById(p.artistId) : null; return `<div class="settings-row">
       <div style="display:flex;align-items:center;gap:10px;">
         <span class="avatar" data-slot="1" style="width:28px;height:28px;font-size:11px;">${esc((p.entityName||'?').slice(0,1))}</span>
-        <div><h4>${esc(p.entityName)}</h4><p>${artist? `Default for ${esc(artist.name)}` : 'House profile (no specific artist)'}</p></div>
+        <div><h4>${esc(p.entityName)}</h4><p>${artist? `Default for ${esc(artist.name)}` : 'House profile (no specific artist)'}${stripePayeeActive(stripePayeeOf(p.id))?' · Online payouts active':''}</p></div>
       </div>
       <div style="display:flex;gap:4px;">
         <button class="icon-btn" data-action="open-payee-profile-form" data-id="${p.id}" title="Edit" aria-label="Edit">${ICO.edit}</button>
@@ -8104,6 +8272,7 @@ function renderPayeeProfileFormModal(){
           ${f.zelleQrDataUrl? `<div style="display:flex;align-items:center;gap:10px;"><img src="${safeDataUrl(f.zelleQrDataUrl)}" width="72" height="72" style="border-radius:6px;background:#fff;padding:4px;border:1px solid var(--border);"/><button type="button" class="btn btn-sm btn-ghost" data-action="remove-payee-zelle-qr">Remove</button></div>`
           : `<label class="btn btn-sm" style="cursor:pointer;display:inline-flex;">Upload QR Image<input type="file" accept="image/*" data-action="upload-payee-zelle-qr" style="display:none;"/></label>`}
         </div>
+        ${editing ? renderPayeeStripeSection(S.editingPayeeProfileId) : ''}
         <div class="field-row">
           <div class="field"><label>Check Payee</label><input data-field="checkPayee" value="${esc(f.checkPayee||'')}"/></div>
           <div class="field"><label>Check Address</label><input data-field="checkAddress" value="${esc(f.checkAddress||'')}"/></div>
@@ -9329,6 +9498,7 @@ function bindGlobal(){
       const form = el.closest('[data-form]')?.getAttribute('data-form');
       if(form==='task'){ S.newTaskText = el.value; return; }
       if(form==='comment'){ S.newCommentText = el.value; return; }
+      if(form==='payeestripe'){ S.payeeStripeEmail = el.value; return; }
       const formTargets = { flight:S.flightForm, transport:S.transportForm, charge:S.addChargeForm, addartist:S.addArtistForm, addrealuser:S.addRealUserForm, edituser:S.editRealUserForm, newproject:S.newProjectForm, projectlink:S.newLinkForm, blocktime:S.blockTimeForm, askai:S.askAIForm, dresscode:S.dressCodeForm, editevent:S.editEventForm, newinvoice:S.newInvoiceForm, newoutsidebooking:S.newOutsideBookingForm, document:S.documentForm, person:S.newPersonForm, finincome:S, finexpense:S, realsignin:S, giginfo:S.gigInfoForm, gigcontact:S.newGigContactForm, payeeprofile:S.payeeProfileForm, sendcontract:S.sendContractForm, verifydeposit:S.verifyDepositForm, orgsettings:ORG_SETTINGS, gmailmailbox:S.newGmailMailboxForm };
       formTargets.lead = S.newLeadForm;
       formTargets.traveldrop = S.travelDropForm = S.travelDropForm || {};
@@ -9627,7 +9797,7 @@ function bindGlobal(){
       case 'contractbuilderdoc-overlay-close': if(e.target===t){ S.showContractBuilderDoc=false; render(); } break;
       case 'print-contract-builder': window.print(); break;
       case 'filter-contracts-status': S.contractsStatusFilter = t.getAttribute('data-status'); render(); break;
-      case 'open-payee-profile-form': S.showPayeeProfileForm=true; S.editingPayeeProfileId=id||null; S.payeeProfileForm = id? (()=>{ const p=getPayeeProfile(id); return p? {entityName:p.entityName, artistId:p.artistId, zelle:p.zelle, checkPayee:p.checkPayee, checkAddress:p.checkAddress, wireBankName:p.wireBankName, wireAccountName:p.wireAccountName, wireAccountNumber:p.wireAccountNumber, wireRoutingNumber:p.wireRoutingNumber, wireSwift:p.wireSwift, notes:p.notes, defaultOvertimeInterval:p.defaultOvertimeInterval, zelleRecipientLabel:p.zelleRecipientLabel, zelleInstructions:p.zelleInstructions, zelleActive:p.zelleActive, zelleQrDataUrl:p.zelleQrDataUrl, zelleQrUrl:p.zelleQrUrl||null} : {}; })() : {defaultOvertimeInterval:'half_hour', zelleActive:true};
+      case 'open-payee-profile-form': S.showPayeeProfileForm=true; S.editingPayeeProfileId=id||null; S.payeeStripeEmail=null; S.payeeStripeLink=null; if(id && stripeReady()) refreshStripePayees(); S.payeeProfileForm = id? (()=>{ const p=getPayeeProfile(id); return p? {entityName:p.entityName, artistId:p.artistId, zelle:p.zelle, checkPayee:p.checkPayee, checkAddress:p.checkAddress, wireBankName:p.wireBankName, wireAccountName:p.wireAccountName, wireAccountNumber:p.wireAccountNumber, wireRoutingNumber:p.wireRoutingNumber, wireSwift:p.wireSwift, notes:p.notes, defaultOvertimeInterval:p.defaultOvertimeInterval, zelleRecipientLabel:p.zelleRecipientLabel, zelleInstructions:p.zelleInstructions, zelleActive:p.zelleActive, zelleQrDataUrl:p.zelleQrDataUrl, zelleQrUrl:p.zelleQrUrl||null} : {}; })() : {defaultOvertimeInterval:'half_hour', zelleActive:true};
       render(); break;
       case 'close-payee-profile-form': S.showPayeeProfileForm=false; S.payeeProfileForm={}; S.editingPayeeProfileId=null; render(); break;
       case 'payeeprofileform-overlay-close': if(e.target===t){ S.showPayeeProfileForm=false; S.payeeProfileForm={}; S.editingPayeeProfileId=null; render(); } break;
@@ -9650,6 +9820,10 @@ function bindGlobal(){
       case 'toggle-send-contract-invoice': S.sendContractInvoice = !S.sendContractInvoice; if(S.sendContractInvoice) S.sendContractPayOnline = false; render(); break;
       case 'toggle-send-contract-pay': S.sendContractPayOnline = !S.sendContractPayOnline; if(S.sendContractPayOnline) S.sendContractInvoice = false; render(); break;
       case 'make-invoice-pay-link': doMakeInvoicePayLink(id); break;
+      case 'make-balance-pay-link': doMakeBalancePayLink(id); break;
+      case 'payee-stripe-link': doPayeeStripeSetup(id); break;
+      case 'payee-stripe-send': doPayeeStripeSetup(id, { send:true }); break;
+      case 'payee-stripe-share': doPayeeStripeSetup(id, { shareFrom: t.getAttribute('data-from') }); break;
       case 'remove-deposit-zelle-qr': ORG_SETTINGS.depositZelleQrUrl = null; saveOrgSettings(); render(); break;
       case 'toggle-invoice-no-card-fee': S.newInvoiceForm.noCardFee = !S.newInvoiceForm.noCardFee; render(); break;
       case 'open-verify-deposit': S.verifyDepositEventId=id; S.showVerifyDeposit=true; S.verifyDepositForm={method:'zelle', note:''}; render(); break;

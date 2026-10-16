@@ -89,8 +89,13 @@ export async function relay(to: string, subject: string, html: string, _fromName
   return out.ok;
 }
 
-const isTestRow = (r: { contract_legacy_id?: string | null; invoice_legacy_id?: string | null }) =>
-  (r.contract_legacy_id || "").startsWith("CT-TEST-") || (r.invoice_legacy_id || "").startsWith("INV-TEST-");
+const isTestRow = (r: { kind?: string; contract_legacy_id?: string | null; invoice_legacy_id?: string | null; event_legacy_id?: string | null }) =>
+  (r.contract_legacy_id || "").startsWith("CT-TEST-") || (r.invoice_legacy_id || "").startsWith("INV-TEST-")
+  || (r.kind === "event_balance" && (r.event_legacy_id || "").startsWith("EV-TEST-"));
+// What a payment link was for, in the office's words.
+// deno-lint-ignore no-explicit-any
+const whatOf = (p: any) => p.kind === "contract_deposit" ? `deposit for contract ${p.contract_legacy_id}`
+  : p.kind === "event_balance" ? `balance for gig ${p.event_legacy_id} (paid to the artist's Stripe account)` : `invoice ${p.invoice_legacy_id}`;
 
 function methodLabel(r: { pay_method: string | null; card_brand: string | null; card_funding: string | null; pay_last4: string | null }): string {
   if (r.pay_method === "us_bank_account") return `bank account${r.pay_last4 ? " ending " + r.pay_last4 : ""}`;
@@ -164,14 +169,16 @@ export async function recordPaymentIntent(sb: any, pi: any): Promise<void> {
   }
   if (isTestRow(p)) return;
   // Another link for the same contract/invoice was already paid: this is a second payment.
-  const sibKey = p.kind === "contract_deposit" ? ["contract_legacy_id", p.contract_legacy_id, "contract_created_at", p.contract_created_at]
-    : ["invoice_legacy_id", p.invoice_legacy_id, "invoice_created_at", p.invoice_created_at];
-  const { data: paidSib, error: sibErr } = await sb.from("payment_requests").select("*").eq(sibKey[0], sibKey[1]).eq(sibKey[2], sibKey[3])
+  let sibQ = sb.from("payment_requests").select("*").eq("kind", p.kind);
+  sibQ = p.kind === "contract_deposit" ? sibQ.eq("contract_legacy_id", p.contract_legacy_id).eq("contract_created_at", p.contract_created_at)
+    : p.kind === "invoice" ? sibQ.eq("invoice_legacy_id", p.invoice_legacy_id).eq("invoice_created_at", p.invoice_created_at)
+    : sibQ.eq("event_legacy_id", p.event_legacy_id);
+  const { data: paidSib, error: sibErr } = await sibQ
     .neq("id", p.id).lt("paid_at", p.paid_at).order("paid_at").limit(1);   // the EARLIER payment stands
   if (sibErr) throw new Error(`check other links: ${sibErr.message}`);
   if (paidSib?.length) { await reportSecondCharge(sb, paidSib[0], pi); return; }
 
-  const what = p.kind === "contract_deposit" ? `deposit for contract ${p.contract_legacy_id}` : `invoice ${p.invoice_legacy_id}`;
+  const what = whatOf(p);
 
   // The receipt (with the fee on its own line, as card rules require) and the office notice.
   const brand = await brandFor(sb, p.brand_key || undefined);
@@ -204,13 +211,16 @@ async function ledgerInsert(sb: any, p: any, pi: any): Promise<void> {
     const { data: ev } = await sb.from("events").select("id").eq("legacy_id", p.event_legacy_id).maybeSingle();
     eventUuid = ev?.id || null;
   }
-  const what = p.kind === "contract_deposit" ? `deposit for contract ${p.contract_legacy_id}` : `invoice ${p.invoice_legacy_id}`;
+  const what = whatOf(p);
+  // A balance went to the artist without the card fee, which ASP kept (application_fee_amount).
+  const toArtist = p.kind === "event_balance";
   const { error } = await sb.from("payments").upsert({
-    event_id: eventUuid, amount: total / 100, expected_amount: p.amount_cents / 100, kind: p.kind === "contract_deposit" ? "deposit" : "balance",
+    event_id: eventUuid, amount: (toArtist ? total - fee : total) / 100, expected_amount: p.amount_cents / 100, kind: p.kind === "contract_deposit" ? "deposit" : "balance",
     source: "stripe", source_ref: pi.id, status: "received", received_at: p.paid_at || new Date().toISOString(), payer: p.client_name || null,
-    payment_rail: p.pay_method === "us_bank_account" ? "ach" : "credit_card", destination: "asp_operating",
+    payment_rail: p.pay_method === "us_bank_account" ? "ach" : "credit_card",
+    destination: p.kind === "event_balance" ? "artist_direct" : "asp_operating",
     allocation_status: "allocated",
-    notes: `Paid online (${methodLabel(p)}): ${what}${fee ? `, including a ${dollars(fee)} card fee` : ""}.`,
+    notes: `Paid online (${methodLabel(p)}): ${what}${fee ? (toArtist ? `; the client also paid a ${dollars(fee)} card fee, which ASP kept` : `, including a ${dollars(fee)} card fee`) : ""}.`,
   }, { onConflict: "source,source_ref", ignoreDuplicates: true });
   // Thrown so the webhook answers 500 and Stripe redelivers (the next delivery re-runs this).
   if (error) throw new Error(`payments ledger insert: ${error.message}`);
@@ -222,15 +232,15 @@ async function reportSecondCharge(sb: any, r: any, pi: any): Promise<void> {
   const { error } = await sb.from("payments").upsert({
     amount: total / 100, expected_amount: 0, kind: "overpayment", source: "stripe", source_ref: pi.id, status: "received",
     received_at: new Date().toISOString(), payer: r.client_name || null, payment_rail: pi.metadata?.pay_method === "us_bank_account" ? "ach" : "credit_card",
-    destination: "asp_operating", allocation_status: "needs_review",
-    notes: `SECOND online payment for ${r.description} (already paid by ${r.payment_intent_id}). Refund one in Stripe.`,
+    destination: r.kind === "event_balance" ? "artist_direct" : "asp_operating", allocation_status: "needs_review",
+    notes: `SECOND online payment for ${r.description} (already paid by ${r.payment_intent_id}). Refund one in Stripe${r.kind === "event_balance" ? " and tick Reverse transfer (the artist received it)" : ""}.`,
   }, { onConflict: "source,source_ref", ignoreDuplicates: true });
   if (error) throw new Error(`ledger second charge: ${error.message}`);
   console.error("payments: second charge", r.id, pi.id);
   const brand = await brandFor(sb, r.brand_key || undefined);
   if (brand.replyTo) {
     await relay(brand.replyTo, `Action needed: ${r.client_name || "a client"} was charged twice`,
-      `<p style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;">A second online payment of ${dollars(total)} came in for ${escapeHtml(r.description)}, which was already paid (Stripe ${escapeHtml(r.payment_intent_id)}). Please refund one of them in Stripe: ${escapeHtml(pi.id)}.</p>`,
+      `<p style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;">A second online payment of ${dollars(total)} came in for ${escapeHtml(r.description)}, which was already paid (Stripe ${escapeHtml(r.payment_intent_id)}). Please refund one of them in Stripe: ${escapeHtml(pi.id)}.${r.kind === "event_balance" ? " It went to the artist's Stripe account: tick <strong>Reverse transfer</strong> when refunding, or ASP pays the refund." : ""}</p>`,
       "ASP Bookings", null);
   }
 }

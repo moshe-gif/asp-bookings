@@ -14,11 +14,16 @@
 // card fee frozen when the link was made) and the card's funding type, which Stripe reports from the
 // ConfirmationToken before anything is charged. A credit card pays the fee; debit, prepaid and bank
 // transfers don't.
+//
+// Three kinds of link: a contract's deposit and a custom invoice go to ASP; a gig's balance
+// (event_balance, 0063) goes straight to the artist's Stripe account (a destination charge: ASP is the
+// business the client pays, and any card fee stays with ASP to cover Stripe's fee).
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { serviceClient } from "../_shared/auth.ts";
 import { brandFor } from "../_shared/config.ts";
 import { cardFeeCents, recordPaymentIntent, stripeApi, stripeConfigured, stripeMode } from "../_shared/stripe.ts";
-import { depositZelle, officePhone } from "../_shared/payblock.ts";
+import { balanceZelle, depositZelle, officePhone } from "../_shared/payblock.ts";
+import { balanceCentsOf, balancePayeeProfile, gigCardFeeBps, payableAccount } from "../_shared/connect.ts";
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 const CT_RE = /^ctoken_[A-Za-z0-9]{8,}$/;
@@ -30,7 +35,14 @@ async function sha256Hex(s: string): Promise<string> {
 
 // deno-lint-ignore no-explicit-any
 type Row = Record<string, any>;
-const isTest = (r: Row) => (r.contract_legacy_id || "").startsWith("CT-TEST-") || (r.invoice_legacy_id || "").startsWith("INV-TEST-");
+const isTest = (r: Row) => (r.contract_legacy_id || "").startsWith("CT-TEST-") || (r.invoice_legacy_id || "").startsWith("INV-TEST-")
+  || (r.kind === "event_balance" && (r.event_legacy_id || "").startsWith("EV-TEST-"));
+// The links for the same deposit, invoice or gig balance as this one (only one of them may take money).
+// deno-lint-ignore no-explicit-any
+const sameThing = (q: any, r: Row) => r.kind === "contract_deposit" ? q.eq("kind", r.kind).eq("contract_legacy_id", r.contract_legacy_id).eq("contract_created_at", r.contract_created_at)
+  : r.kind === "invoice" ? q.eq("kind", r.kind).eq("invoice_legacy_id", r.invoice_legacy_id).eq("invoice_created_at", r.invoice_created_at)
+  : q.eq("kind", r.kind).eq("event_legacy_id", r.event_legacy_id);
+const referenceOf = (r: Row) => r.kind === "contract_deposit" ? r.contract_legacy_id : r.kind === "invoice" ? r.invoice_legacy_id : r.event_legacy_id;
 
 // Why this link can't take a payment right now, or null. A paid link is still viewable (the receipt).
 // deno-lint-ignore no-explicit-any
@@ -39,11 +51,11 @@ async function blocker(sb: any, r: Row, tokenHash: string): Promise<string | nul
   if (r.pay_status === "processing") return "processing";
   if (r.revoked_at) return "revoked";
   if (new Date(r.expires_at) <= new Date()) return "expired";
+  // Harness rows skip the checks below, so they never take real money.
+  if (isTest(r) && stripeMode() === "live") return "revoked";
   // Another link for the same contract or invoice already took the money.
-  const key = r.kind === "contract_deposit" ? ["contract_legacy_id", r.contract_legacy_id, "contract_created_at", r.contract_created_at]
-    : ["invoice_legacy_id", r.invoice_legacy_id, "invoice_created_at", r.invoice_created_at];
-  const { data: others } = await sb.from("payment_requests").select("id")
-    .eq(key[0], key[1]).eq(key[2], key[3]).neq("id", r.id).in("pay_status", ["processing", "paid", "refunded", "disputed"]).limit(1);
+  const { data: others } = await sameThing(sb.from("payment_requests").select("id"), r)
+    .neq("id", r.id).in("pay_status", ["processing", "paid", "refunded", "disputed"]).limit(1);
   if (others?.length) return "paid_elsewhere";
   if (r.kind === "contract_deposit") {
     // The deposit is paid after signing: this link's contract must be signed, to these terms.
@@ -66,6 +78,21 @@ async function blocker(sb: any, r: Row, tokenHash: string): Promise<string | nul
         if (ev?.app_doc?.depositReceived) return "paid_elsewhere";
       }
     }
+  } else if (r.kind === "event_balance") {
+    if (!isTest(r)) {
+      const { data: evRow } = await sb.from("events").select("app_doc").eq("legacy_id", r.event_legacy_id).maybeSingle();
+      const ev = evRow?.app_doc;
+      if (!ev) return "void";
+      if (ev.balanceReceived) return "paid_elsewhere";
+      // The link pays what was owed, to whom, when it was made: if the balance or the gig's payee has
+      // changed since, the office sends a new link (and nothing goes to an artist no longer on the gig).
+      if (!ev.depositReceived || balanceCentsOf(ev) !== r.amount_cents) return "revoked";
+      if (ev.paymentMethod && ev.paymentMethod !== "standard") return "revoked";
+      // Never more card fee than the office's setting allows for this gig (none in CT/MA).
+      if (r.card_fee_bps > await gigCardFeeBps(sb, ev)) return "revoked";
+      const payee = await balancePayeeProfile(sb, r.event_legacy_id, ev);
+      if (!payee || payee.id !== r.payee_profile_id) return "revoked";
+    }
   } else if (!isTest(r)) {
     const { data: rec } = await sb.from("app_records").select("app_doc").eq("collection", "invoices").eq("legacy_id", r.invoice_legacy_id).maybeSingle();
     const doc = rec?.app_doc;
@@ -81,17 +108,10 @@ async function blocker(sb: any, r: Row, tokenHash: string): Promise<string | nul
 // deno-lint-ignore no-explicit-any
 async function viewOf(sb: any, r: Row, tokenHash: string) {
   const brand = await brandFor(sb, r.brand_key || undefined);
-  // The Zelle box under the card form (ASP's deposit/invoice Zelle, as on the contract) and the office
-  // phone for the check/cash line.
-  let zelle = await depositZelle(sb);
-  // A creative contract's deposit goes to its production company's payee, as its contract says.
-  if (r.kind === "contract_deposit" && !isTest(r)) {
-    const { data: rec } = await sb.from("app_records").select("app_doc").eq("collection", "contracts").eq("legacy_id", r.contract_legacy_id).maybeSingle();
-    const c = rec?.app_doc, p = c?.payeeSnapshot;
-    if (c?.template === "creative" && p && p.zelleActive !== false && (p.zelle || p.zelleQrUrl)) {
-      zelle = { qrUrl: typeof p.zelleQrUrl === "string" && /^https:\/\//.test(p.zelleQrUrl) ? p.zelleQrUrl : null, handle: (p.zelle || "").trim() };
-    }
-  }
+  // The Zelle box under the card form and the office phone for the check/cash line. Deposits and
+  // invoices go to ASP's Zelle (creative contracts' deposits too, owner 2026-10-16); a balance to the
+  // artist's, as on the balance email.
+  const zelle = r.kind === "event_balance" ? (isTest(r) ? null : await balanceZelle(sb, r.event_legacy_id)) : await depositZelle(sb);
   const phone = await officePhone(sb, brand.key);
   const block = await blocker(sb, r, tokenHash);
   return {
@@ -102,7 +122,7 @@ async function viewOf(sb: any, r: Row, tokenHash: string) {
     testMode: stripeMode() === "test",
     publishableKey: Deno.env.get("STRIPE_PUBLISHABLE_KEY") || null,
     description: r.description,
-    reference: r.kind === "contract_deposit" ? r.contract_legacy_id : r.invoice_legacy_id,
+    reference: referenceOf(r),
     amountCents: r.amount_cents,
     cardFeeBps: r.card_fee_bps,
     clientName: r.client_name || "",
@@ -110,7 +130,7 @@ async function viewOf(sb: any, r: Row, tokenHash: string) {
     replyTo: brand.replyTo,
     zelle,
     officePhone: phone,
-    memo: r.kind === "contract_deposit" ? r.contract_legacy_id : r.invoice_legacy_id,
+    memo: r.kind === "event_balance" ? [r.client_name, (r.description.match(/\(([^)]+)\)$/) || [])[1]].filter(Boolean).join(" ") : referenceOf(r),
     html: r.kind === "invoice" ? r.rendered_html : undefined,
     failureMessage: r.pay_status === "failed" ? r.failure_message : null,
     paid: ["paid", "refunded", "disputed"].includes(r.pay_status)
@@ -205,9 +225,7 @@ Deno.serve(async (req) => {
   // knows about (the last stored attempt) and any the database never heard about (a timeout).
   // Every link for the same contract/invoice counts (a re-sent email's link must not charge while an
   // older link's 3-D Secure check is still open).
-  const keyCols = r.kind === "contract_deposit" ? ["contract_legacy_id", r.contract_legacy_id, "contract_created_at", r.contract_created_at]
-    : ["invoice_legacy_id", r.invoice_legacy_id, "invoice_created_at", r.invoice_created_at];
-  const { data: siblings, error: sibErr } = await sb.from("payment_requests").select("id, payment_intent_id").eq(keyCols[0], keyCols[1]).eq(keyCols[2], keyCols[3]).limit(20);
+  const { data: siblings, error: sibErr } = await sameThing(sb.from("payment_requests").select("id, payment_intent_id"), r).order("created_at", { ascending: false }).limit(20);
   if (sibErr) { await release(); return json({ ok: false, error: "busy" }, 409); }
   const earlier = new Set<string>();
   if (claim.payment_intent_id) earlier.add(claim.payment_intent_id);
@@ -232,17 +250,26 @@ Deno.serve(async (req) => {
     }
   }
 
-  const ref = r.kind === "contract_deposit" ? r.contract_legacy_id : r.invoice_legacy_id;
+  const ref = referenceOf(r);
+  // A balance goes to the artist's Stripe account, checked live: Stripe must say it can receive money now.
+  let destination: string | null = null;
+  if (r.kind === "event_balance") {
+    destination = await payableAccount(sb, r.payee_profile_id, stripeMode() === "live");
+    if (!destination) { await release(); return json({ ok: false, error: "unavailable" }, 503); }
+  }
   const params = {
     amount: quote.totalCents, currency: "usd", confirm: true, confirmation_token: body.confirmationTokenId,
     payment_method_types: [quote.method],
     // Instant bank verification only: micro-deposits would leave the client stuck on this page.
     ...(quote.method === "us_bank_account" ? { payment_method_options: { us_bank_account: { verification_method: "instant" } } } : {}),
     description: `${r.description}${quote.feeCents ? " (incl. credit card fee)" : ""}`.slice(0, 300),
+    // The artist gets the balance; ASP keeps only the card fee the client paid (if any).
+    ...(destination ? { transfer_data: { destination }, ...(quote.feeCents ? { application_fee_amount: quote.feeCents } : {}) } : {}),
     metadata: {
       payment_request_id: r.id, kind: r.kind, reference: ref, event: r.event_legacy_id || "",
       base_cents: String(r.amount_cents), fee_cents: String(quote.feeCents), pay_method: quote.method,
       card_brand: quote.method === "card" ? (quote.brand || "") : "", card_funding: quote.funding || "", last4: quote.last4 || "",
+      payee_profile_id: r.payee_profile_id || "", destination: destination || "",
     },
   };
   const idem = `pr-${r.id}-${body.confirmationTokenId}`;

@@ -1,14 +1,14 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8" />
-<title>Pay Invoice</title>
+<title>Pay Online</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="robots" content="noindex" />
 <meta name="referrer" content="no-referrer" />
 <link rel="icon" type="image/png" href="../icon-192.png" />
-<!-- The client's invoice payment page (migration 0056, Edge Function client-pay). Standalone like
-     /sign/: no app code, no sign-in. Shows the frozen invoice (in a sandboxed frame that can't run
-     scripts) and the Pay panel from ../sign/pay.js. The link's token is after the "#", so it only
+<!-- The client's payment page for an invoice (migration 0056) or a gig's balance (0063), Edge Function
+     client-pay. Standalone like /sign/: no app code, no sign-in. Shows the frozen invoice (in a
+     sandboxed frame that can't run scripts) and the Pay panel from ../sign/pay.js. The link's token is after the "#", so it only
      ever travels in POST bodies to client-pay. -->
 <style>
   :root{
@@ -38,7 +38,7 @@
 </style>
 
 <script src="../sign/pay.js"></script>
-<div class="wrap" id="root"><div class="card msg"><p class="muted">Loading your invoice…</p></div></div>
+<div class="wrap" id="root"><div class="card msg"><p class="muted">Loading…</p></div></div>
 
 <script>
 (function(){
@@ -60,13 +60,19 @@
   async function load(){
     if(!/^[A-Za-z0-9_-]{43}$/.test(token) || !window.ASPPay){ showMessage('This link doesn’t work', 'Check that you opened the whole link from your email, or ask us to send it again.'); return; }
     const res = await window.ASPPay.call(token, { action:'view' });
-    if(!res.ok || !res.payment || res.payment.kind!=='invoice'){
+    if(!res.ok || !res.payment || !['invoice','event_balance'].includes(res.payment.kind)){
       if(res.error==='network') showMessage('No connection', 'Check your internet connection and reload this page.');
       else if(res.error==='server') showMessage('Something went wrong', 'Please try again in a minute.');
       else showMessage('This link doesn’t work', 'Check that you opened the whole link from your email, or ask us to send it again.');
       return;
     }
     const p = res.payment;
+    if(p.kind==='event_balance'){
+      // A balance has no document of its own: the client already has the contract.
+      root.innerHTML = `<div class="top"><div class="brandhead"><img class="logo" src="../assets/brand/asp-horizontal-dark.png" alt="${esc(p.brandName)}" width="220" height="29"/><div class="label">Balance due</div></div></div><div id="pay"></div>`;
+      window.ASPPay.mount(document.getElementById('pay'), token, p);
+      return;
+    }
     root.innerHTML = `<div class="top"><div class="brandhead"><img class="logo" src="../assets/brand/asp-horizontal-dark.png" alt="${esc(p.brandName)}" width="220" height="29"/><div class="label">Invoice ${esc(p.reference)}</div></div>
       <button class="btn btn-ghost" id="print" type="button">Print / Save PDF</button></div>
       <div id="doc"></div><div id="pay"></div>`;

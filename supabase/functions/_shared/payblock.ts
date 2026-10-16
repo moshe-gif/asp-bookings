@@ -6,6 +6,8 @@
 //      and invoices, the artist's payee profile for balances);
 //   3. one footnote line: to pay by check or cash, call the office.
 
+import { balancePayeeProfile } from "./connect.ts";
+
 // deno-lint-ignore no-explicit-any
 type Sb = any;
 export type Zelle = { qrUrl: string | null; handle: string; note?: string };
@@ -55,23 +57,10 @@ export async function depositZelle(sb: Sb): Promise<Zelle | null> {
   return hq || hh ? { qrUrl: hq, handle: hh } : null;
 }
 
-// A gig's balance Zelle, the same choice as zellePayeeFor() in the app: the payee on the gig's latest
-// sent/signed contract (its frozen payeeSnapshot), else the artist's own payee profile. Never the
-// house's or another artist's.
+// A gig's balance Zelle: its balance payee (balancePayeeProfile, the same choice as zellePayeeFor()
+// in the app). Never the house's or another artist's.
 export async function balanceZelle(sb: Sb, eventLegacyId: string): Promise<Zelle | null> {
-  const { data: ev } = await sb.from("events").select("app_doc").eq("legacy_id", eventLegacyId).maybeSingle();
-  const e = ev?.app_doc;
-  if (!e) return null;
-  const { data: cRows } = await sb.from("app_records").select("app_doc").eq("collection", "contracts").eq("app_doc->>leadId", eventLegacyId);
-  // deno-lint-ignore no-explicit-any
-  const sent = (cRows || []).map((r: any) => r.app_doc).filter((c: any) => c && (c.status === "sent" || c.status === "signed"))
-    // deno-lint-ignore no-explicit-any
-    .sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
-  const { data: pRows } = await sb.from("app_records").select("app_doc").eq("collection", "payee_profiles");
-  // deno-lint-ignore no-explicit-any
-  const profiles = (pRows || []).map((r: any) => r.app_doc).filter(Boolean);
-  // deno-lint-ignore no-explicit-any
-  const p = (sent && (sent.payeeSnapshot || profiles.find((x: any) => x.id === sent.payeeProfileId))) || profiles.find((x: any) => x.artistId && x.artistId === e.artistId);
+  const p = await balancePayeeProfile(sb, eventLegacyId);
   if (!p || p.zelleActive === false) return null;
   const qrUrl = typeof p.zelleQrUrl === "string" && /^https:\/\//.test(p.zelleQrUrl) ? p.zelleQrUrl : null;
   const handle = (p.zelle || "").trim();

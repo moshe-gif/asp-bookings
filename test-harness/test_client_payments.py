@@ -132,3 +132,31 @@ def test_settings_shows_online_payments(live_server, page):
 def test_bad_pay_link_explains_itself(live_server, page):
     page.goto(live_server + '/pay/#' + 'A' * 43)
     page.get_by_text('This link doesn’t work').wait_for(state='visible', timeout=15000)
+
+
+# ---- Balances paid online straight to the artist (Stripe Connect, migration 0063) ----
+
+def test_payee_profile_shows_online_payouts(live_server, page):
+    # Editing an artist's payee profile shows its Stripe payouts status and the setup-link buttons --
+    # only once Stripe is connected (dormant before that). The harness never makes a Stripe account.
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    st = _stripe_status(page)
+    goto_nav(page, "settings")
+    page.locator('.settings-row', has_text='Default for').locator('[data-action="open-payee-profile-form"][data-id]').first.click()
+    page.locator('.modal input[data-field="entityName"]').wait_for(state='visible', timeout=10000)
+    section = page.locator('[data-testid="payee-stripe"]')
+    if st.get("connected"):
+        section.wait_for(state='visible', timeout=10000)
+        assert section.locator('[data-action="payee-stripe-link"], [data-testid="payee-stripe-active"]').count() >= 1
+    else:
+        assert section.count() == 0
+    assert not errors, f"console errors: {errors}"
+
+
+def test_bad_payout_setup_link_explains_itself(live_server, page):
+    page.goto(live_server + '/payouts/#' + 'A' * 43)
+    page.get_by_text('This link doesn’t work').wait_for(state='visible', timeout=15000)
+    page.goto(live_server + '/payouts/#short')
+    page.get_by_text('This link doesn’t work').wait_for(state='visible', timeout=15000)

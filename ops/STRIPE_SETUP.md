@@ -54,6 +54,38 @@ check or cash, please call our office at …" (the phone in `brand_config`).
   email clients don't show images embedded in the message. The client's bank app shows the
   recipient's registered Zelle name when they scan.
 
+## Balances paid online, straight to the artist (Stripe Connect, owner 2026-10-16)
+The deposit (ASP's commission) goes to ASP; the balance goes **straight to the artist's bank**, and the
+client only ever deals with ASP: ASP's name is on their card statement, the page and the receipt.
+- **How:** each artist's payee profile gets its own Stripe account (Stripe Express). A balance payment is
+  a *destination charge* (Stripe takes the payment on ASP's account and passes the balance on to the
+  artist's account at once). Migration 0063 (`stripe_payees`, payment link kind `event_balance`); Edge
+  Functions `stripe-connect` (admin) and `payee-onboard` (public, the artist's setup page `/payouts/`).
+- **Setting up an artist:** Settings → Payee Profiles → edit the profile → **Online balance payouts** →
+  **Make setup link** (or **Email setup link**). The artist opens it, enters their bank and tax ID on
+  Stripe's pages (ASP never sees them), and the profile shows **Active**. Later visits to the same link
+  only send the artist to Stripe's own sign-in (with a code to their phone), never straight into their
+  dashboard, so a forwarded setup email can't be used to change their bank. Two profiles of the same
+  company (e.g. Airschnitz) can share one account: **Use <other profile>'s Stripe account**.
+- **What the client gets:** the booking confirmation and balance reminders sent from the app get a
+  **Pay the balance online** button once the gig's deposit is in and its payee is Active (the gig's
+  **Balance pay link** button copies one). Scheduled reminders can use `mintBalanceLink()`
+  (`_shared/paylinks.ts`). The artist's Zelle stays as the
+  other option. When the money arrives the app marks the balance received (status Paid in Full), like
+  Mark Balance Received.
+- **Fees:** a credit card's card fee (Settings, 0-3%) goes to ASP, to cover Stripe's fee. The artist always
+  gets the full balance, so on a **debit card or bank transfer ASP pays Stripe's fee** (about 2.9% + 30¢
+  for a debit card; 0.8%, max $5, for a bank transfer).
+- **Refunds and disputes:** ASP is the business the client paid, so a refund or chargeback comes out of
+  ASP's Stripe balance. When refunding a balance in Stripe, tick **Reverse transfer** to take it back from
+  the artist's account. A dispute emails the office as usual; reverse the transfer in Stripe if ASP loses it.
+- **Safety:** the server works out the gig's balance, its payee and that payee's Stripe account itself,
+  never from the browser. A balance link stops working if the balance or the gig's payee changes after
+  it was made (the next reminder carries a fresh one), and only one link per gig can take the money.
+- **One-time setup:** in Stripe, **Connect → Get started** (test mode too), as a platform whose connected
+  accounts are paid out by Stripe. No second webhook is needed: an account's status is re-read from
+  Stripe whenever the office or the artist looks, and right before every charge.
+
 ## Card fee: before turning it on
 The fee is **0% until you set it** (Settings → Online payments). Before setting it above 0:
 - Notify Visa and Mastercard at least 30 days ahead (ask Stripe support how; there's a short form).
@@ -84,8 +116,9 @@ client page shows a "Test mode" note. Swap in the live keys when ready.
 
 ## Deploy / redeploy
 - Migration: `supabase/run-sql.sh supabase/migrations/0056_payment_requests.sql` (done).
-- Functions: `supabase/deploy-function.sh client-pay stripe-webhook stripe-status`. `client-pay` and
-  `stripe-webhook` have **JWT verification OFF** (the client and Stripe have no Supabase session):
+- Migration 0063 (balances to artists): `supabase/run-sql.sh supabase/migrations/0063_stripe_payees.sql`.
+- Functions: `supabase/deploy-function.sh client-pay stripe-webhook stripe-status stripe-connect payee-onboard`.
+  `client-pay`, `payee-onboard` and `stripe-webhook` have **JWT verification OFF** (the client and Stripe have no Supabase session):
   the boundaries are the link token (stored only as its SHA-256) and the webhook signature.
 - Mail goes through the `RELAY_URL` / `RELAY_SECRET` secrets already set for send-contract-email.
 
@@ -95,4 +128,5 @@ end to end; without keys it checks the page says online payment isn't available.
 mode. Harness rows use `CT-TEST-…` / `INV-TEST-…` ids, send no email and write no ledger or gig log.
 Clean up after a run:
 `delete from payment_requests where contract_legacy_id like 'CT-TEST-%' or invoice_legacy_id like 'INV-TEST-%';`
-then the signing rows as in `ops/CONTRACT_SIGN_SETUP.md`.
+then the signing rows as in `ops/CONTRACT_SIGN_SETUP.md`. Balance rows use `EV-TEST-…` gigs:
+`delete from payment_requests where kind = 'event_balance' and event_legacy_id like 'EV-TEST-%';`
