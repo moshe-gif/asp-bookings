@@ -302,3 +302,25 @@ def test_inbox_lists_emails_and_actions_open_the_right_form(live_server, page):
     page.locator('[data-action="inbox-dismiss"][data-id="22222222-2222-2222-2222-222222222222"]').click()
     page.wait_for_function("() => document.querySelectorAll('[data-testid=\"inbox-item\"]').length === 1", timeout=10000)
     assert not errors, f"console errors: {errors}"
+
+
+def test_venue_pick_fills_address(live_server, page):
+    """Venue list (owner 2026-10-15): picking a known venue on New Lead fills address/city/state; the gig keeps them."""
+    import json as _json
+    errors = collect_console_errors(page)
+    venues = [{"name": "Test Venue Hall", "address": "1 Test Ave", "city": "Lakewood", "state": "NJ", "zip": "08701"}]
+    page.context.add_init_script(f"localStorage.setItem('asp_mock_venues_v1', {_json.dumps(_json.dumps(venues))});")
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    page.locator('[data-action="open-new-lead"]').click()
+    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
+    page.locator('input[data-field="clientName"]').fill("Venue Pick Client")
+    page.locator('input[data-field="date"]').fill("2027-06-06")
+    page.locator('input[data-field="venue"]').fill("Test Venue Hall")
+    assert page.locator('input[data-field="address"]').input_value() == "1 Test Ave"
+    assert page.locator('input[data-field="city"]').input_value() == "Lakewood"
+    assert page.locator('input[data-field="state"]').input_value() == "NJ"
+    page.locator('[data-action="submit-lead"]').click()
+    ev = page.evaluate("() => JSON.parse(localStorage.getItem('asp_mock_state_v3')||'[]').find(e => e.clientName === 'Venue Pick Client')")
+    assert ev and ev["address"] == "1 Test Ave" and ev["city"] == "Lakewood", f"gig didn't keep the venue address: {ev and ev.get('address')}"
+    assert not errors, f"console errors: {errors}"

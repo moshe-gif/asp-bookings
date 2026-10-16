@@ -894,7 +894,7 @@ function doCreateContractFromLead(eventId, template){
   const contract = {
     id:'CT-'+(CTID++), schemaVersion: CONTRACTS_SCHEMA_VERSION, leadId: ev.id, template: template||'standard', status:'draft',
     createdAt: now, updatedAt: now,
-    snapshot: { clientName: ev.clientName||'', clientEmail: ev.clientEmail||'', clientPhone: ev.clientPhone||'', eventName:'', eventDate: ev.date||'', venue: ev.venue||'', city: ev.city||'', state: ev.state||'', occasion: ev.type||'' },
+    snapshot: { clientName: ev.clientName||'', clientEmail: ev.clientEmail||'', clientPhone: ev.clientPhone||'', eventName:'', eventDate: ev.date||'', venue: ev.venue||'', address: ev.address||'', city: ev.city||'', state: ev.state||'', occasion: ev.type||'' },
     performerArtistId, performerLabel:'',
     payeeProfileId: payeeProfile ? payeeProfile.id : null,
     fee: { amount: ev.price || (payeeProfile && payeeProfile.defaultFee) || 0, note:'' },
@@ -961,7 +961,7 @@ function doCreateContractFromLead(eventId, template){
 function doRefreshContractFromLead(id){
   const c = getContract(id); if(!c) return;
   const ev = getEvent(c.leadId); if(!ev){ toast('The original lead no longer exists.', 'system'); return; }
-  c.snapshot = { clientName: ev.clientName||'', clientEmail: ev.clientEmail||'', clientPhone: ev.clientPhone||'', eventName: c.snapshot.eventName||'', eventDate: ev.date||'', venue: ev.venue||'', city: ev.city||'', state: ev.state||'', occasion: c.snapshot.occasion || ev.type||'' };
+  c.snapshot = { clientName: ev.clientName||'', clientEmail: ev.clientEmail||'', clientPhone: ev.clientPhone||'', eventName: c.snapshot.eventName||'', eventDate: ev.date||'', venue: ev.venue||'', address: ev.address||'', city: ev.city||'', state: ev.state||'', occasion: c.snapshot.occasion || ev.type||'' };
   // The lead's negotiated price wins; otherwise keep the fee already on the contract (typed or prefilled); the profile default only fills a blank.
   if(c.template!=='multiline'){ const profile = getPayeeProfile(c.payeeProfileId); c.fee.amount = ev.price || Number(c.fee.amount) || (profile && profile.defaultFee) || 0; }
   refreshAutoOvertime(c);
@@ -1324,12 +1324,17 @@ async function createSignLink(c, html, clientEmail, pay){
 // Cancels a contract's unsigned links (deleted, voided, approval revoked or replaced by new terms), so a
 // client can't sign terms that no longer stand. Best-effort: the app also refuses to apply a signature
 // to changed terms, and the server refuses to sign a void or deleted contract.
+// A new link waits for these (doMakeSignLink): re-approving and then making a link at once could otherwise
+// let the cancel land after the insert and kill the brand-new link too (2026-10-16).
+let PENDING_SIGN_LINK_REVOKES = [];
 function revokeOpenSignLinks(c){
   if(!supabaseClient || !S.realSession || !isAdminUser(S.user)) return;
-  supabaseClient.from('contract_sign_requests').update({ revoked_at: new Date().toISOString() })
+  const p = supabaseClient.from('contract_sign_requests').update({ revoked_at: new Date().toISOString() })
     .eq('contract_legacy_id', signLinkContractKey(c)).eq('contract_created_at', c.createdAt)
     .is('signed_at', null).is('revoked_at', null)
-    .then(({ error })=>{ if(error) console.warn('could not cancel signing links', c.id, error.message); });
+    .then(({ error })=>{ if(error) console.warn('could not cancel signing links', c.id, error.message); }, ()=>{});
+  PENDING_SIGN_LINK_REVOKES.push(p);
+  p.finally(()=>{ PENDING_SIGN_LINK_REVOKES = PENDING_SIGN_LINK_REVOKES.filter(x=>x!==p); });
   revokeOpenPaymentLinks({ contract:c });
 }
 // Cancels unpaid payment links: a contract's (with its signing links, above, or once its deposit is
@@ -1359,6 +1364,7 @@ async function doMakeSignLink(id){
   if(c.status==='signed'){ c.status='sent'; c.updatedAt=new Date().toISOString(); saveContracts(); }
   if(!isContractApproved(c)){ toast(c.approvedAt ? 'Money/terms changed since this contract was approved — re-approve it first.' : 'Approve this contract for sending first — money/terms must be approved before a signing link can go out.', 'system'); return; }
   S.signLinkBusy = id; render();
+  await Promise.all(PENDING_SIGN_LINK_REVOKES); // never let a cancel of the old links land after this one
   const link = await createSignLink(c, clientContractHtml(c), c.snapshot.clientEmail, contractDepositPayment(c));
   S.signLinkBusy = null;
   if(!link.ok){ toast(link.error, 'system'); render(); return; }
@@ -1790,6 +1796,20 @@ const isMeRef = (ref)=>!!ref && (ref===S.user || (isAdminUser(S.user) && ref===a
 // just Rivky's real travel-booking email. Kept in its own tiny collection rather than folding into
 // per-user getUserSettings() since this is an office-wide fact, not a personal preference.
 const ORG_SETTINGS_LS_KEY = 'asp_mock_org_settings_v1';
+// Venues the office books (owner 2026-10-15 sent the list): name + street, city, state, zip. The office's
+// shared copy (app_records settings 'venues') wins at sign-in; this browser keeps a cache. New venues typed
+// on a lead are added, so the list grows with use.
+const VENUES_LS_KEY = 'asp_mock_venues_v1';
+let VENUES = (()=>{ try{ return JSON.parse(localStorage.getItem(VENUES_LS_KEY)||'[]') || []; }catch(e){ return []; } })();
+function saveVenues(){ const r = persist(VENUES_LS_KEY, VENUES, 'venues'); if(typeof SHARED!=='undefined' && SHARED) SHARED.settings.schedule(); return r; }
+function findVenue(name){ const n = String(name||'').trim().toLowerCase(); return n ? VENUES.find(v=>v.name.toLowerCase()===n) : null; }
+// Remember a venue the office typed with its address (case-insensitive by name; never overwrites a known one).
+function rememberVenue(f){
+  const name = String(f.venue||'').trim(); if(!name || findVenue(name) || !(f.address||'').trim() || !(f.city||'').trim()) return;
+  VENUES.push({ name, address:String(f.address).trim(), city:String(f.city).trim(), state:String(f.state||'').trim(), zip:'' });
+  VENUES.sort((a,b)=>a.name.localeCompare(b.name)); saveVenues();
+}
+function venueDatalistHtml(){ return `<datalist id="venueList">${VENUES.map(v=>`<option value="${esc(v.name)}">${esc([v.address, v.city].filter(Boolean).join(', '))}</option>`).join('')}</datalist>`; }
 function loadOrgSettings(){ try{ const raw = localStorage.getItem(ORG_SETTINGS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
 function saveOrgSettings(){ const r = persist(ORG_SETTINGS_LS_KEY, ORG_SETTINGS, 'office settings'); if(SHARED) SHARED.settings.schedule(); return r; }
 let ORG_SETTINGS = loadOrgSettings();
@@ -2721,13 +2741,14 @@ function remapState(keys, map){ keys.forEach(k=>{ if(map.has(S[k])) S[k]=map.get
 const sameByCreated = (a,b)=>!!a.createdAt && String(a.createdAt).length>10 && a.createdAt===b.createdAt;
 // Office-wide settings documents (0036): one record each, wrapping the live objects. A browser's own
 // copy is only ever defaults or older edits, so the office's shared copy wins at first sign-in.
-function settingsDocs(){ return [{ id:'org', value:ORG_SETTINGS }, { id:'pricing', value:PRICING }]; }
+function settingsDocs(){ return [{ id:'org', value:ORG_SETTINGS }, { id:'pricing', value:PRICING }, { id:'venues', value:VENUES }]; }
 let SETTINGS_DOCS = settingsDocs();
 function adoptSettingsDocs(list){
   const by = new Map(list.map(d=>[d.id, d]));
   if(by.get('org') && by.get('org').value) ORG_SETTINGS = by.get('org').value;
   if(by.get('pricing') && by.get('pricing').value) PRICING = by.get('pricing').value;
-  SETTINGS_DOCS = list.filter(d=>d.id==='org' || d.id==='pricing');
+  if(by.get('venues') && Array.isArray(by.get('venues').value)) VENUES = by.get('venues').value;
+  SETTINGS_DOCS = list.filter(d=>d.id==='org' || d.id==='pricing' || d.id==='venues');
   settingsDocs().forEach(d=>{ if(!by.has(d.id)) SETTINGS_DOCS.push(d); });
 }
 var SHARED = {
@@ -2765,7 +2786,7 @@ var SHARED = {
     prefix:'TRV-', getCounter:()=>TRVID, setCounter:n=>{ TRVID = n; }, sameRecord:sameByCreated, remapRefs:map=>remapState(['travelRequestDetailId'], map) }),
   settings: createSharedCollection({ name:'settings', label:'office settings', one:'office setting', table:'app_records', collection:'settings',
     get:()=>SETTINGS_DOCS, set:v=>adoptSettingsDocs(v), fromSeed:()=>true,
-    saveLocal:()=>{ adoptSettingsDocs(SETTINGS_DOCS); persist(ORG_SETTINGS_LS_KEY, ORG_SETTINGS, 'office settings'); persist(PRICING_LS_KEY, PRICING, 'pricing'); },
+    saveLocal:()=>{ adoptSettingsDocs(SETTINGS_DOCS); persist(ORG_SETTINGS_LS_KEY, ORG_SETTINGS, 'office settings'); persist(PRICING_LS_KEY, PRICING, 'pricing'); persist(VENUES_LS_KEY, VENUES, 'venues'); },
     prefix:'SET-', getCounter:()=>1, setCounter:()=>{}, sameRecord:()=>true, remapRefs:()=>{} }),
 };
 async function startSharedSync(){
@@ -3947,7 +3968,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.18'; // bump on every release so a phone can tell it has updated. v1.9.18: Inbox (office email read + matched to gigs)
+const APP_VERSION = 'v1.9.19'; // bump on every release so a phone can tell it has updated. v1.9.19: venue list autofills address; a new signing link no longer gets cancelled by the old links' cancel
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -5688,7 +5709,8 @@ function renderNewLeadModal(){
           <div class="field"><label>End Time</label><input type="time" data-field="endTime" value="${leadEndTime(f)||''}"/></div>
         </div>`}
         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-field="timeTbd" ${f.timeTbd?'checked':''} style="width:16px;height:16px;"/> Time TBD</label>
-        <div class="field"><label>Venue Name</label><input data-field="venue" value="${esc(f.venue||'')}" placeholder="${isInternal?'Studio name':'Ateres Chaya Hall'}"/></div>
+        <div class="field"><label>Venue Name</label><input data-field="venue" list="venueList" autocomplete="off" value="${esc(f.venue||'')}" placeholder="${isInternal?'Studio name':'Start typing — e.g. Ateres Chaya Hall'}"/>${venueDatalistHtml()}</div>
+        <div class="field"><label>Address</label><input data-field="address" value="${esc(f.address||'')}" placeholder="Street address"/></div>
         <div class="field-row">
           <div class="field"><label>City</label><input data-field="city" value="${esc(f.city||'')}" placeholder="Lakewood"/></div>
           <div class="field"><label>State</label><input data-field="state" value="${esc(f.state||'')}" placeholder="NJ"/></div>
@@ -6397,7 +6419,7 @@ function gigSheetDocHtml(ev){
   const mute = '#6B6B72', accent = '#5B78A8';
   const label = t=>`<div style="font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:${accent};font-weight:700;margin:22px 0 8px;padding-bottom:6px;border-bottom:2px solid #17171A;">${t}</div>`;
   const cell = 'padding:7px 12px 7px 0;border:none;border-bottom:1px solid #E3E3E8;background:none;font-size:12.5px;vertical-align:top;';
-  const where = [ev.venue, [ev.city, ev.state].filter(Boolean).join(', ')].filter(Boolean).join(', ');
+  const where = [ev.venue, ev.address, [ev.city, ev.state].filter(Boolean).join(', ')].filter(Boolean).join(', ');
   const facts = [['Date', ev.date? fmtDate(ev.date) : 'TBD'], ['Time', fmtTimeRange(ev.time, ev.endTime)], ['Venue', where || 'TBD'], ...lineup];
   const empty = !lineup.length && !(sheet.schedule||[]).length && !(sheet.songs||[]).length && !sheet.text && !(sheet.contacts||[]).length;
   return `<div style="background:#fff;color:#17171A;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.55;">
@@ -6577,7 +6599,8 @@ function renderEditEventFormOverlay(){
           <div class="field"><label>Start Time</label><input type="time" data-field="time" value="${f.time!==undefined?f.time:ev.time}"/></div>
           <div class="field"><label>End Time</label><input type="time" data-field="endTime" value="${f.endTime!==undefined?f.endTime:(ev.endTime||'')}"/></div>
         </div>
-        <div class="field"><label>Venue Name</label><input data-field="venue" value="${esc(f.venue!==undefined?f.venue:(ev.venue||''))}"/></div>
+        <div class="field"><label>Venue Name</label><input data-field="venue" list="venueList" autocomplete="off" value="${esc(f.venue!==undefined?f.venue:(ev.venue||''))}"/>${venueDatalistHtml()}</div>
+        <div class="field"><label>Address</label><input data-field="address" value="${esc(f.address!==undefined?f.address:(ev.address||''))}" placeholder="Street address"/></div>
         <div class="field-row">
           <div class="field"><label>City</label><input data-field="city" value="${esc(f.city!==undefined?f.city:(ev.city||''))}"/></div>
           <div class="field"><label>State</label><input data-field="state" value="${esc(f.state!==undefined?f.state:(ev.state||''))}"/></div>
@@ -7491,7 +7514,7 @@ function standardDocContent(c){
   const dateLong = dateObj ? dateObj.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'}) : 'TBD';
   const dateShort = dateObj ? dateObj.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) : 'Date TBD';
   const where = [c.snapshot.city, c.snapshot.state].filter(Boolean).join(', ');
-  const place = [c.snapshot.venue || 'TBD', where].filter(Boolean).join(', ');
+  const place = `${c.snapshot.venue || 'TBD'}${c.snapshot.address? ` — ${c.snapshot.address}` : ''}${where? `, ${where}` : ''}`;
   const hours = c.hoursOfEngagement || 'TBD';
   const hoursLine = `${hours}${start? `, starting ${start}` : ' (start time TBD)'}`;
   const timing = c.balanceDueTiming==='at_event' ? 'at the event' : c.balanceDueTiming==='on_completion' ? 'when the project is complete' : 'prior to the engagement';
@@ -8199,7 +8222,7 @@ function itineraryDocHtml(ev){
   const label = s=>`<div style="font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:${accent};font-weight:700;margin:22px 0 8px;padding-bottom:6px;border-bottom:2px solid #17171A;">${s}</div>`;
   const cell = 'padding:7px 12px 7px 0;border:none;border-bottom:1px solid #E3E3E8;background:none;font-size:12.5px;vertical-align:top;';
   const dt = v=>{ const s2 = travelDT(v); return s2 && s2!=='—' ? fmtFlightDateTime(s2) : ''; };
-  const where = [ev.venue, [ev.city, ev.state].filter(Boolean).join(', ')].filter(Boolean).join(', ');
+  const where = [ev.venue, ev.address, [ev.city, ev.state].filter(Boolean).join(', ')].filter(Boolean).join(', ');
   const sheet = gigInfoSheetOf(ev);
   return `<div style="background:#fff;color:#17171A;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.55;">
     ${aspDocHeaderHtml({ kicker:'TRAVEL ITINERARY', title:esc(artist.name), subtitle:[esc(ev.type||''), esc(where), ev.date? esc(fmtDateShort(ev.date)) : ''].filter(Boolean).join(' &middot; ') })}
@@ -8475,6 +8498,8 @@ function doSaveEditEvent(id){
   if(f.time!==undefined) p.time = f.time;
   if(f.endTime!==undefined) p.endTime = f.endTime || null;
   if(f.venue!==undefined) p.venue = f.venue.trim();
+  if(f.address!==undefined) p.address = f.address.trim();
+  rememberVenue({ venue:f.venue!==undefined?f.venue:ev.venue, address:f.address!==undefined?f.address:ev.address, city:f.city!==undefined?f.city:ev.city, state:f.state!==undefined?f.state:ev.state });
   if(f.city!==undefined) p.city = f.city.trim();
   if(f.state!==undefined) p.state = f.state.trim();
   const notes = [];
@@ -9003,7 +9028,7 @@ function doSubmitLead(){
     clientName: isInternal? null : f.clientName,
     clientEmail: isInternal? '' : (f.clientEmail||''), clientPhone: isInternal? '' : (f.clientPhone||''),
     date: f.date, time: f.timeTbd ? '' : (f.time||LEAD_DEFAULT_START), endTime: f.timeTbd ? null : (leadEndTime(f)||null),
-    venue: f.venue||'', city: f.city||'', state: f.state||'',
+    venue: f.venue||'', address: f.address||'', city: f.city||'', state: f.state||'',
     price, commission, status: isInternal? 'scheduled':'lead', depositReceived:false, depositReceivedDate:null,
     balanceReceived:false, balanceReceivedDate:null, reminderIntervalDays: defaultReminderCadence(f.date), lastReminderSent:null,
     flightNeeded: !!f.flightNeeded, flightBooked:false, flight:null,
@@ -9019,6 +9044,7 @@ function doSubmitLead(){
     log:[{ts:new Date().toISOString(), type:'system', text: isInternal? `${resolvedType} scheduled for ${artistById(f.artistId).name}.` : `Lead created for ${artistById(f.artistId).name} — client info entered by management.`}],
   };
   if(!isInternal && f.pasteNotes) ev.log.push({ts:new Date().toISOString(), type:'system', text:`From the pasted message: ${f.pasteNotes}`});
+  rememberVenue(f);
   S.events.unshift(ev); saveEvents();
   toast(isInternal? `Internal day added — penciled in on ${artistById(f.artistId).name}'s calendar.` : `Lead added — penciled in on ${artistById(f.artistId).name}'s calendar.`, 'success');
   if(findConflicts(ev).length) toast(`⚠ Scheduling conflict — ${artistById(f.artistId).name} already has something at that time.`, 'system');
@@ -9299,6 +9325,12 @@ function bindGlobal(){
       if(form && !formTargets[form]){ console.warn('data-field inside unknown data-form:', form, key); return; }
       const target = form ? formTargets[form] : S.newLeadForm;
       target[key] = el.type==='checkbox'? el.checked : el.value;
+      // Picking a known venue fills its address, city and state (owner 2026-10-15 venue list).
+      if((target===S.newLeadForm || target===S.editEventForm) && key==='venue'){
+        const v = findVenue(el.value);
+        if(v){ const box = el.closest('[data-form]') || document;
+          [['address',v.address],['city',v.city],['state',v.state]].forEach(([k,val])=>{ target[k] = val; const inp = box.querySelector(`[data-field="${k}"]`); if(inp) inp.value = val; }); }
+      }
       if(target===S.newLeadForm && key==='endTime') S.newLeadForm.endTimeManual = true;
       if(target===S.newLeadForm && key==='time' && !S.newLeadForm.endTimeManual){
         const endEl = el.closest('[data-form]')?.querySelector('[data-field="endTime"]');
