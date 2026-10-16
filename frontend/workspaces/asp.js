@@ -6428,7 +6428,7 @@ function gigSheetDocHtml(ev){
   const facts = [['Date', ev.date? fmtDate(ev.date) : 'TBD'], ['Time', fmtTimeRange(ev.time, ev.endTime)], ['Venue', where || 'TBD'], ...lineup];
   const empty = !lineup.length && !(sheet.schedule||[]).length && !(sheet.songs||[]).length && !sheet.text && !(sheet.contacts||[]).length;
   return `<div style="background:#fff;color:#17171A;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.55;">
-    ${aspDocHeaderHtml({ kicker:'GIG SHEET', title:esc(artist.name), subtitle:[esc(ev.type||''), ev.unpaid? '' : esc(ev.clientName||''), ev.date? esc(fmtDateShort(ev.date)) : ''].filter(Boolean).join(' &middot; ') })}
+    ${aspDocHeaderHtml({ light:true, kicker:'GIG SHEET', title:esc(artist.name), subtitle:[esc(ev.type||''), ev.unpaid? '' : esc(ev.clientName||''), ev.date? esc(fmtDateShort(ev.date)) : ''].filter(Boolean).join(' &middot; ') })}
     <table role="presentation" style="border-collapse:collapse;width:100%;margin-top:6px;border:none;background:none;">
       ${facts.map(([k,v])=>`<tr><td style="${cell}color:${mute};white-space:nowrap;width:130px;">${esc(k)}</td><td style="${cell}font-weight:700;">${esc(v)}</td></tr>`).join('')}
     </table>
@@ -7462,7 +7462,15 @@ function renderContractBuilderDoc(c){
 // Inline styles so it prints and emails the same.
 // The dark band at the top of contracts and gig sheets: the logo (version 1, white and blue on dark)
 // on its own line, then the document's title -- stacked, so it fits a phone and an email alike.
-function aspDocHeaderHtml({ kicker, title, subtitle, bsd }){
+function aspDocHeaderHtml({ kicker, title, subtitle, bsd, light }){
+  // light: white header with the dark logo -- gig sheets and itineraries (owner 2026-10-16: "remove the darker").
+  if(light) return `<div style="background:#fff;color:#17171A;padding:4px 0 14px;border-bottom:2px solid #17171A;position:relative;">
+      ${bsd? `<div style="position:absolute;top:0;right:0;font-size:11px;color:#5B78A8;">BS"D</div>` : ''}
+      <img src="${BRAND_ASSET_BASE}asp-horizontal-dark.png" alt="ASP Management" width="170" style="display:block;width:170px;max-width:100%;height:auto;border:0;margin:0 0 12px;"/>
+      <div style="font-size:10.5px;letter-spacing:.22em;color:#5B78A8;font-weight:700;">${kicker}</div>
+      <div style="font-size:24px;font-weight:700;line-height:1.2;overflow-wrap:anywhere;">${title}</div>
+      <div style="font-size:12.5px;color:#6B6B72;">${subtitle}</div>
+    </div>`;
   return `<div style="background:#14161C;color:#fff;border-radius:10px 10px 0 0;padding:20px 24px;position:relative;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
       ${bsd? `<div style="position:absolute;top:10px;right:16px;font-size:11px;color:#9FB3D6;">BS"D</div>` : ''}
       <img src="${BRAND_ASSET_BASE}asp-horizontal-light.png" alt="ASP Management" width="190" style="display:block;width:190px;max-width:100%;height:auto;border:0;margin:0 0 14px;"/>
@@ -8230,7 +8238,7 @@ function itineraryDocHtml(ev){
   const where = [ev.venue, ev.address, [ev.city, ev.state].filter(Boolean).join(', ')].filter(Boolean).join(', ');
   const sheet = gigInfoSheetOf(ev);
   return `<div style="background:#fff;color:#17171A;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.55;">
-    ${aspDocHeaderHtml({ kicker:'TRAVEL ITINERARY', title:esc(artist.name), subtitle:[esc(ev.type||''), esc(where), ev.date? esc(fmtDateShort(ev.date)) : ''].filter(Boolean).join(' &middot; ') })}
+    ${aspDocHeaderHtml({ light:true, kicker:'TRAVEL ITINERARY', title:esc(artist.name), subtitle:[esc(ev.type||''), esc(where), ev.date? esc(fmtDateShort(ev.date)) : ''].filter(Boolean).join(' &middot; ') })}
     <table role="presentation" style="border-collapse:collapse;width:100%;margin-top:6px;border:none;background:none;">
       ${[['Event', `${fmtDate(ev.date)} · ${fmtTimeRange(ev.time, ev.endTime)}`], ['Venue', where||'TBD'], ...(sheet.startTime? [['Artist starts', fmtTime(sheet.startTime)]] : [])]
         .map(([k,v])=>`<tr><td style="${cell}color:${mute};width:130px;">${esc(k)}</td><td style="${cell}font-weight:700;">${esc(v)}</td></tr>`).join('')}
