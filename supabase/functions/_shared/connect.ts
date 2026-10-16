@@ -18,6 +18,13 @@ export function balanceCentsOf(ev: Doc): number {
   return Math.round(((Number(ev.price) || 0) - (Number(ev.commission) || 0) + charges) * 100);
 }
 
+// A gig with more than one artist (ev.additionalArtists): its balance is owed to several payees, and
+// the figures above count only the main artist. Not payable online until the owner decides how a
+// split balance is collected (2026-10-16).
+export function isMultiArtist(ev: Doc): boolean {
+  return Array.isArray(ev.additionalArtists) && ev.additionalArtists.some((x: Doc) => x && x.artistId);
+}
+
 // The gig's balance payee: zellePayeeProfileFor() in the app -- the payee on its latest sent/signed
 // contract (the frozen payeeSnapshot), else the artist's own payee profile. Never the house's or
 // another artist's.

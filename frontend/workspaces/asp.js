@@ -1551,6 +1551,8 @@ function balancePayBlocker(ev){
   if(ev.balanceReceived) return 'The balance is already received.';
   if(!ev.depositReceived) return 'The deposit isn\'t in yet: the balance link goes out after it.';
   if(!isStandardPayment(ev)) return 'This gig\'s balance is paid another way.';
+  // Several artists: the balance is owed to several payees (and artistPayout counts only the main one).
+  if((ev.additionalArtists||[]).some(x=>x && x.artistId)) return 'This gig has more than one artist: its balance can\'t be paid online yet.';
   if(Math.round(artistPayout(ev)*100) < 50) return 'There\'s no balance left to pay.';
   const profile = zellePayeeProfileFor(ev);
   if(!profile) return 'This gig has no payee profile.';
@@ -4126,7 +4128,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.21'; // bump on every release so a phone can tell it has updated. v1.9.21: clients pay the balance online straight to the artist (Stripe Connect); creative deposits go to ASP
+const APP_VERSION = 'v1.9.22'; // bump on every release so a phone can tell it has updated. v1.9.22: no online balance link for gigs with more than one artist (yet)
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);

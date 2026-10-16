@@ -23,7 +23,7 @@ import { serviceClient } from "../_shared/auth.ts";
 import { brandFor } from "../_shared/config.ts";
 import { cardFeeCents, recordPaymentIntent, stripeApi, stripeConfigured, stripeMode } from "../_shared/stripe.ts";
 import { balanceZelle, depositZelle, officePhone } from "../_shared/payblock.ts";
-import { balanceCentsOf, balancePayeeProfile, gigCardFeeBps, payableAccount } from "../_shared/connect.ts";
+import { balanceCentsOf, balancePayeeProfile, gigCardFeeBps, isMultiArtist, payableAccount } from "../_shared/connect.ts";
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 const CT_RE = /^ctoken_[A-Za-z0-9]{8,}$/;
@@ -87,7 +87,7 @@ async function blocker(sb: any, r: Row, tokenHash: string): Promise<string | nul
       // The link pays what was owed, to whom, when it was made: if the balance or the gig's payee has
       // changed since, the office sends a new link (and nothing goes to an artist no longer on the gig).
       if (!ev.depositReceived || balanceCentsOf(ev) !== r.amount_cents) return "revoked";
-      if (ev.paymentMethod && ev.paymentMethod !== "standard") return "revoked";
+      if ((ev.paymentMethod && ev.paymentMethod !== "standard") || isMultiArtist(ev)) return "revoked";
       // Never more card fee than the office's setting allows for this gig (none in CT/MA).
       if (r.card_fee_bps > await gigCardFeeBps(sb, ev)) return "revoked";
       const payee = await balancePayeeProfile(sb, r.event_legacy_id, ev);
