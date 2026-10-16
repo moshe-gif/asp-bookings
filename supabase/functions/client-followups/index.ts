@@ -11,7 +11,7 @@ import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 import { sendRelayEmail } from "../_shared/mail.ts";
 import { brandLogoHtml } from "../_shared/config.ts";
-import { mintContractLink } from "../_shared/paylinks.ts";
+import { mintContractLink, mintBalanceLink } from "../_shared/paylinks.ts";
 import { paymentOptionsHtml, depositZelle, balanceZelle, officePhone } from "../_shared/payblock.ts";
 
 const DAY = 86_400_000;
@@ -120,11 +120,15 @@ Deno.serve(async (req) => {
         });
       } else {
         subject = `Balance reminder — ${p.when}`;
+        // Pay online when the artist's payee has Stripe payouts set up (a new link row per send, so never for a
+        // preview: that would leave a real payable link to a real gig). Otherwise Zelle/check as before.
+        const bal = previewTo ? null : await mintBalanceLink(sb, p.gig);
+        const payUrl = bal && bal.ok ? bal.url : null;
         html = emailHtml({
           greeting: p.greeting, phone,
           lines: [`Thank you for booking with ASP Management. Your date on <strong>${esc(p.when)}</strong> is confirmed.`,
             `This is a reminder that the remaining balance of <strong>${money(p.balance)}</strong> is due before the event.`],
-          payment: paymentOptionsHtml({ kind: "balance", payUrl: null, amount: p.balance, memo: `${p.ev.clientName || ""} ${p.when}`.trim(), zelle: await balanceZelle(sb, p.gig), officePhone: phone }),
+          payment: paymentOptionsHtml({ kind: "balance", payUrl, amount: p.balance, memo: `${p.ev.clientName || ""} ${p.when}`.trim(), zelle: await balanceZelle(sb, p.gig), officePhone: phone }),
         });
       }
       const sent = await sendRelayEmail(sb, { to: p.to, subject: previewTo ? `[Preview] ${subject}` : subject, html, brand: "asp" });
