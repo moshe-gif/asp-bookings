@@ -1345,8 +1345,12 @@ function revokeOpenPaymentLinks({ contract, invoice }){
   let q = supabaseClient.from('payment_requests').update({ revoked_at: new Date().toISOString() });
   q = contract ? q.eq('contract_legacy_id', signLinkContractKey(contract)).eq('contract_created_at', contract.createdAt)
     : q.eq('invoice_legacy_id', invoicePayKey(invoice)).eq('invoice_created_at', invoice.createdTs||'');
-  q.is('revoked_at', null).in('pay_status', ['open','failed'])
-    .then(({ error })=>{ if(error) console.warn('could not cancel payment links', error.message); });
+  const p = q.is('revoked_at', null).in('pay_status', ['open','failed'])
+    .then(({ error })=>{ if(error) console.warn('could not cancel payment links', error.message); }, ()=>{});
+  // Tracked like the signing-link cancel: it would otherwise also cancel the deposit row the next
+  // createSignLink() makes, or an invoice's new link (2026-10-16).
+  PENDING_SIGN_LINK_REVOKES.push(p);
+  p.finally(()=>{ PENDING_SIGN_LINK_REVOKES = PENDING_SIGN_LINK_REVOKES.filter(x=>x!==p); });
 }
 // What the client receives: the contract as it reads once it has gone out. Rendered from a draft it
 // would carry a "Draft" status pill on the letterhead (every emailed contract did, until 2026-10-13).
@@ -1476,6 +1480,7 @@ async function createInvoicePayLink(inv, html){
   if(!inv.createdTs){ inv.createdTs = new Date().toISOString(); saveCustomInvoices(); }
   // The server checks the link against the shared copy of the invoice, so send this one's latest first.
   if(SHARED.invoices.on) await SHARED.invoices.flush();
+  await Promise.all(PENDING_SIGN_LINK_REVOKES); // an earlier cancel must not land after this link
   if(typeof html==='function') html = html(inv);
   const token = newLinkToken();
   const { error } = await supabaseClient.from('payment_requests').insert({
@@ -3968,7 +3973,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.19'; // bump on every release so a phone can tell it has updated. v1.9.19: venue list autofills address; a new signing link no longer gets cancelled by the old links' cancel
+const APP_VERSION = 'v1.9.20'; // bump on every release so a phone can tell it has updated. v1.9.20: a new deposit or invoice payment link no longer gets cancelled by the old links' cancel
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
