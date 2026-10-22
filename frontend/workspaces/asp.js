@@ -1357,7 +1357,9 @@ function revokeOpenPaymentLinks({ contract, invoice }){
 function clientContractHtml(c){ return contractEmailHtml(c.status==='draft' ? { ...c, status:'sent' } : c); }
 function contractEmailWithSignButton(html, url, withPay){
   const button = `<div style="max-width:640px;margin:0 auto 16px;text-align:center;"><a href="${esc(url)}" style="display:inline-block;background:#4C6FA5;color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">${withPay?'Review, sign &amp; pay online':'Review &amp; sign online'}</a></div>`;
-  return html.replace('<body>', '<body>' + button);
+  // At the bottom, after the contract and payment options (owner 2026-10-21: "move the pay button to bottom of email").
+  const i = html.lastIndexOf('</body>');
+  return i<0 ? html + button : html.slice(0, i) + button.replace('margin:0 auto 16px', 'margin:16px auto') + html.slice(i);
 }
 async function doMakeSignLink(id){
   const c = getContract(id); if(!c || S.signLinkBusy) return;
@@ -2766,6 +2768,9 @@ function createSharedCollection(cfg){
         }
         if(lastServerHash){ if(lastServerHash!==localHash && canon(rec)!==canon(shared)) byId.set(rec.id, rec); continue; } // unsent local edits win
         if(canon(rec)===canon(shared)) continue;
+        // Office settings: a browser that never synced this doc (e.g. an old cache from before the venue
+        // list existed) must not overwrite the shared copy -- that is how the venues were wiped (2026-10-21).
+        if(cfg.serverWinsUnsynced) continue;
         if(cfg.sameRecord(rec, shared)){ byId.set(rec.id, rec); continue; } // same record, this browser's version wins once (backup kept)
         const newId = nextFreeId(taken); taken.add(newId);                   // a DIFFERENT record with the same id
         remap.set(rec.id, newId); byId.set(newId, { ...rec, id:newId }); uploaded++;
@@ -2947,7 +2952,7 @@ var SHARED = {
   settings: createSharedCollection({ name:'settings', label:'office settings', one:'office setting', table:'app_records', collection:'settings',
     get:()=>SETTINGS_DOCS, set:v=>adoptSettingsDocs(v), fromSeed:()=>true,
     saveLocal:()=>{ adoptSettingsDocs(SETTINGS_DOCS); persist(ORG_SETTINGS_LS_KEY, ORG_SETTINGS, 'office settings'); persist(PRICING_LS_KEY, PRICING, 'pricing'); persist(VENUES_LS_KEY, VENUES, 'venues'); },
-    prefix:'SET-', getCounter:()=>1, setCounter:()=>{}, sameRecord:()=>true, remapRefs:()=>{} }),
+    prefix:'SET-', getCounter:()=>1, setCounter:()=>{}, sameRecord:()=>true, serverWinsUnsynced:true, remapRefs:()=>{} }),
 };
 async function startSharedSync(){
   // Payee profiles before contracts, gigs before what references them: re-numbering upstream first.
@@ -4128,7 +4133,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.22'; // bump on every release so a phone can tell it has updated. v1.9.22: no online balance link for gigs with more than one artist (yet)
+const APP_VERSION = 'v1.9.23'; // bump on every release so a phone can tell it has updated. v1.9.23: sign/pay button at the bottom of the contract email; office settings a browser never synced can't overwrite the shared copy
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
