@@ -1420,11 +1420,13 @@ function startClientSignatureWatch(){
     .subscribe();
   applyClientSignatures();
   applyClientPayments();
+  startBankAlertWatch();
 }
 function stopClientSignatureWatch(){
   if(clientSignatureChannel){ supabaseClient.removeChannel(clientSignatureChannel); clientSignatureChannel = null; }
   S.earlierClientSignatures = {};
   S.clientPayments = {};
+  stopBankAlertWatch();
 }
 
 /* ---- Client online payments (migration 0056, Edge Functions client-pay / stripe-webhook / stripe-status,
@@ -3473,7 +3475,7 @@ async function doAddGmailMailbox(){
   if(!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ toast('Enter a valid mailbox email.', 'system'); return; }
   const { error } = await supabaseClient.from('gmail_mailboxes').insert({
     // No artist picked = the office's sending mailbox (the dropdown's first option); it always saved as artist_payment before.
-    mailbox_type: f.artistId ? 'artist_payment' : 'asp_sending', artist_id: f.artistId||null, email,
+    mailbox_type: f.artistId==='__payments' ? 'payments' : f.artistId ? 'artist_payment' : 'asp_sending', artist_id: f.artistId && f.artistId!=='__payments' ? f.artistId : null, email,
   });
   if(error){ toast(/duplicate key|gmail_mailboxes_email_key/.test(error.message) ? `${email} is already added — click Connect next to it below.` : 'Could not add mailbox: ' + error.message, 'system'); loadGmailStatus(); return; }
   S.newGmailMailboxForm = {};
@@ -4151,7 +4153,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.24'; // bump on every release so a phone can tell it has updated. v1.9.24: a multi-artist gig's balance is paid online in one payment, split between the artists
+const APP_VERSION = 'v1.9.25'; // bump on every release so a phone can tell it has updated. v1.9.25: Inbox money in -- payment emails matched to their invoice/deposit/balance, one-click record, exact bank alerts recorded on their own; payments mailbox in Settings
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -4948,29 +4950,126 @@ function doInboxAct(id){
     S.verifyDepositEventId=gig.id; S.showVerifyDeposit=true; S.verifyDepositForm={ method:'zelle', note:`From email: ${it.summary||''}`.slice(0,300) }; render();
   }
 }
+/* ---- Money in (0064, owner 2026-10-21: "i need all emails integrated into the app so it can moniter money
+   coming in") ----
+   inbox-scan reads every connected mailbox and, for a payment email, records in it.money what it pays
+   (match: an open invoice, a gig's deposit or its balance), the amount, and whether it is a bank's own
+   DKIM-signed alert. A bank alert whose amount is exactly what's due is recorded here on its own; any
+   other payment email (a client saying "I sent it", a partial amount) waits for one click. Each email is
+   recorded once, by whichever admin browser claims it first (money_applied_at). */
+function inboxMoneyTarget(it){
+  const m = it.money && it.money.match; if(!m) return null;
+  if(m.kind==='invoice'){ const inv = getInvoice(m.ref); return inv ? { inv } : null; }
+  const ev = getEvent(m.ref); return ev ? { ev } : null;
+}
+function inboxMoneyRecorded(it){
+  const m = it.money && it.money.match, t = inboxMoneyTarget(it); if(!m || !t) return false;
+  return m.kind==='invoice' ? t.inv.status==='paid' : m.kind==='deposit' ? !!t.ev.depositReceived : !!t.ev.balanceReceived;
+}
+function inboxMoneyText(x){
+  return `${x.amount_cents ? moneyCents(x.amount_cents/100) : 'Amount not stated'}${x.method?` by ${x.method}`:''}${x.payer?` from ${x.payer}`:''}${x.date?` (${fmtDateShort(x.date)})`:''}`;
+}
+const INBOX_MONEY_METHOD = m=>/zelle/i.test(m||'') ? 'zelle' : /wire/i.test(m||'') ? 'wire' : /check/i.test(m||'') ? 'check' : 'other';
+async function applyInboxMoney(it, auto){
+  const m = it.money && it.money.match, t = inboxMoneyTarget(it);
+  if(!m || !t || !supabaseClient || !S.realSession || !isAdminUser(S.user)) return false;
+  if(inboxMoneyRecorded(it)){ if(!auto) toast('That payment is already recorded.', 'system'); return false; }
+  const now = new Date().toISOString();
+  const { data, error } = await supabaseClient.from('inbox_items').update({ money_applied_at:now, status:'done', handled_at:now })
+    .eq('id', it.id).is('money_applied_at', null).select('id');
+  if(error){ if(!auto) toast('Could not record it: ' + error.message, 'system'); return false; }
+  S.inboxItems = (S.inboxItems||[]).filter(x=>x.id!==it.id);
+  if(!data || !data.length) return false;   // another admin's browser recorded it
+  const note = `${inboxMoneyText(it.money)} — ${auto ? `${it.money.bank} alert, recorded automatically` : 'from the email'}: ${it.subject||''}`.slice(0, 300);
+  if(m.kind==='invoice'){
+    const inv = t.inv;
+    inv.status = 'paid'; inv.paidAt = it.money.date || todayISO();
+    inv.log = [...(inv.log||[]), { ts:now, type:'success', text:`Paid: ${note}.` }];
+    if(inv.createdTs) revokeOpenPaymentLinks({ invoice:inv });
+    saveCustomInvoices();
+    toast(`Invoice ${inv.id} marked paid (${inboxMoneyText(it.money)}).`, 'success');
+  } else if(m.kind==='deposit'){
+    // What an online deposit does (applyOnlineDeposit): deposit received with its evidence, an open lead
+    // becomes booked, the contract's pay links close, and the client gets the booking confirmation only
+    // when this is what booked it (many gigs were booked before their deposit was recorded).
+    const ev = t.ev, booking = STATUS_GROUPS.open.includes(ev.status);
+    logEvent(ev, 'success', `Deposit received: ${note}.${booking ? ' Job officially booked & locked on calendar.' : ''}`);
+    const patch = { depositReceived:true, depositReceivedDate: it.money.date || todayISO(),
+      depositVerification:{ method: INBOX_MONEY_METHOD(it.money.method), note, loggedBy: auto ? null : S.user, loggedAt: now, inboxItemId: it.id } };
+    if(booking) patch.status = 'booked';
+    if(!reportEventSave(updateEvent(ev.id, patch), 'recording the deposit')) return false;
+    contractsForLead(ev.id).forEach(c=>revokeOpenPaymentLinks({ contract:c }));
+    toast(`${ev.clientName||'The client'} paid the deposit${booking ? ' — booked' : ''}.`, 'success');
+    if(booking && ev.clientEmail && !ev.bookingConfirmationSentAt && !isHarnessBrowser()) doSendBookingConfirmationEmail(ev.id);
+  } else {
+    const ev = t.ev;
+    logEvent(ev, 'success', `Balance received: ${note} — paid in full.`);
+    if(reportEventSave(updateEvent(ev.id, { balanceReceived:true, balanceReceivedDate: it.money.date || todayISO(), status:'paid',
+      balanceVerification:{ method: INBOX_MONEY_METHOD(it.money.method), note, loggedBy: auto ? null : S.user, loggedAt: now, inboxItemId: it.id } }), 'recording the balance'))
+      toast(`${ev.clientName||'The client'} paid the balance — paid in full.`, 'success');
+  }
+  render();
+  return true;
+}
+// Bank alerts that match exactly are recorded without anyone opening the Inbox: checked at sign-in and
+// every few minutes after (the scan itself runs every 10).
+async function applyBankAlertPayments(){
+  if(!supabaseClient || !S.realSession || !isAdminUser(S.user)) return;
+  const { data, error } = await supabaseClient.from('inbox_items').select('*').eq('status','new').is('money_applied_at', null).not('money','is',null);
+  if(error) return;
+  for(const it of data||[]){
+    const x = it.money||{}, m = x.match;
+    if(x.bank_verified && m && m.exact && inboxMoneyTarget(it) && !inboxMoneyRecorded(it)) await applyInboxMoney(it, true);
+  }
+}
+let bankAlertTimer = null;
+function startBankAlertWatch(){
+  if(bankAlertTimer || !supabaseClient || !S.realSession || !isAdminUser(S.user)) return;
+  bankAlertTimer = setInterval(applyBankAlertPayments, 5*60*1000);
+  setTimeout(applyBankAlertPayments, 4000);   // after the gigs and invoices have loaded
+}
+function stopBankAlertWatch(){ if(bankAlertTimer){ clearInterval(bankAlertTimer); bankAlertTimer = null; } }
+function inboxMoneyHtml(it){
+  const x = it.money; if(!x) return '';
+  const m = x.match, t = inboxMoneyTarget(it), done = inboxMoneyRecorded(it);
+  const what = !m || !t ? 'Not matched to an invoice or gig yet'
+    : m.kind==='invoice' ? `Invoice ${esc(m.ref)} (${esc(t.inv.clientName||'')}) — ${moneyCents(invoiceTotal(t.inv))} due`
+    : `${m.kind==='deposit'?'Deposit':'Balance'} for ${esc((artistById(t.ev.artistId)||{}).name||'')} · ${esc(fmtDateShort(t.ev.date))} · ${esc(t.ev.clientName||'')}${m.due_cents?` — ${moneyCents(m.due_cents/100)} due`:''}`;
+  const fit = !m || !t ? '' : done ? '<span class="pill pill-good">Already recorded</span>'
+    : m.exact ? '<span class="pill pill-good">Exact amount</span>'
+    : x.amount_cents && m.due_cents ? `<span class="pill pill-warn">${x.amount_cents < m.due_cents ? `Partial — ${moneyCents((m.due_cents-x.amount_cents)/100)} still due` : 'More than what is due'}</span>`
+    : '<span class="pill pill-neutral">Amount not stated — check the bank</span>';
+  return `<div style="font-size:13px;overflow-wrap:anywhere;"><strong>${esc(inboxMoneyText(x))}</strong>${x.bank_verified?` <span class="pill pill-good">${esc(x.bank)} alert</span>`:''}</div>
+    <div style="font-size:12px;color:var(--ink-2);overflow-wrap:anywhere;">Pays: ${what} ${fit}</div>`;
+}
 function renderMessagesPage(){
   if(S.inboxItems==null && !S.inboxBusy) setTimeout(loadInbox, 0);
-  const items = S.inboxItems || [];
+  const items = (S.inboxItems || []).slice().sort((a,b)=>(b.money?1:0)-(a.money?1:0));
   const when = iso=>{ if(!iso) return ''; return new Date(iso).toLocaleString('en-US',{ month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }); };
   return `
   <div class="section-head"><h2>Inbox${items.length?` (${items.length})`:''}</h2>
     <button class="btn btn-sm" data-action="inbox-check-now" ${S.inboxScanBusy?'disabled':''}>${S.inboxScanBusy?'Checking…':'Check now'}</button></div>
-  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">office@aspmgmt.com is read every 10 minutes. Each email is matched to its gig with a suggested next step; nothing changes until you act on it.</p>
+  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Every connected mailbox (Settings → Gmail Mailboxes) is read every 10 minutes. Each email is matched to its gig with a suggested next step. Payments come first: a bank's own alert for exactly what's due is recorded automatically; anything else waits for your click.</p>
   ${S.inboxItems==null? `<div class="card card-pad" style="font-size:13px;color:var(--ink-2);">Loading…</div>`
   : !items.length? `<div class="card empty">Nothing waiting — you're all caught up.</div>`
   : items.map(it=>{ const [label, cls] = INBOX_KINDS[it.kind] || INBOX_KINDS.other; const gig = it.event_legacy_id && getEvent(it.event_legacy_id);
       const canAct = it.kind==='booking_inquiry' || (gig && !(it.kind==='payment_notice' && gig.depositReceived));
+      const mm = it.money && it.money.match;
+      const moneyAct = mm && inboxMoneyTarget(it) && !inboxMoneyRecorded(it)
+        ? (mm.kind==='invoice' ? `Mark ${mm.ref} paid` : mm.kind==='deposit' ? 'Record deposit & book' : (mm.exact ? 'Record balance — paid in full' : '')) : '';
       return `<div class="card card-pad" style="margin-bottom:10px;display:flex;flex-direction:column;gap:6px;" data-testid="inbox-item">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="pill ${cls}">${esc(label)}</span>
           <strong style="font-size:13px;min-width:0;overflow-wrap:anywhere;">${esc(it.subject||'(no subject)')}</strong>
           <span style="margin-left:auto;font-size:11px;color:var(--ink-3);">${esc(when(it.received_at))}</span></div>
         <div style="font-size:12px;color:var(--ink-3);overflow-wrap:anywhere;">${esc(it.from_addr||'')}</div>
         <div style="font-size:13px;overflow-wrap:anywhere;">${esc(it.summary||'')}</div>
+        ${inboxMoneyHtml(it)}
         ${gig? `<div style="font-size:12px;"><a href="#" data-action="open-event" data-id="${esc(gig.id)}" style="color:var(--accent);">${esc((artistById(gig.artistId)||{}).name||'')} · ${esc(fmtDateShort(gig.date))} · ${esc(gig.clientName||gig.type||'')}</a></div>`
           : it.event_legacy_id? `<div style="font-size:12px;color:var(--ink-3);">Gig ${esc(it.event_legacy_id)}</div>` : ''}
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
-          ${canAct? `<button class="btn btn-sm btn-primary" data-action="inbox-act" data-id="${esc(it.id)}">${esc(INBOX_ACTION_LABEL[it.kind]||'Open gig')}</button>` : ''}
-          ${it.gmail_thread_id? `<a class="btn btn-sm" href="https://mail.google.com/mail/u/?authuser=office@aspmgmt.com#all/${esc(it.gmail_thread_id)}" target="_blank" rel="noopener" data-action="external-link">Open email</a>` : ''}
+          ${moneyAct? `<button class="btn btn-sm btn-primary" data-action="inbox-money" data-id="${esc(it.id)}">${esc(moneyAct)}</button>`
+            : canAct? `<button class="btn btn-sm btn-primary" data-action="inbox-act" data-id="${esc(it.id)}">${esc(INBOX_ACTION_LABEL[it.kind]||'Open gig')}</button>` : ''}
+          ${it.gmail_thread_id? `<a class="btn btn-sm" href="https://mail.google.com/mail/u/?authuser=${encodeURIComponent(it.mailbox_email||'office@aspmgmt.com')}#all/${esc(it.gmail_thread_id)}" target="_blank" rel="noopener" data-action="external-link">Open email</a>` : ''}
           <button class="btn btn-sm btn-ghost" data-action="inbox-done" data-id="${esc(it.id)}">Done</button>
           <button class="btn btn-sm btn-ghost" data-action="inbox-dismiss" data-id="${esc(it.id)}">Dismiss</button>
         </div>
@@ -8113,12 +8212,13 @@ function renderGmailMailboxesCard(){
   const busy = !!S.gmailMailboxesBusy;
   const f = S.newGmailMailboxForm||{};
   return `<div class="card card-pad" style="margin-bottom:20px;">
-    <h3 style="margin-bottom:6px;">Gmail Mailboxes (Zelle Matching)</h3>
-    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 12px;">Each artist's own mailbox is connected separately (narrowest read-only scope) so incoming Zelle notifications can be matched to a balance automatically. ${!configured? 'Not set up yet -- see <code>ops/GMAIL_SETUP.md</code>.' : ''}</p>
+    <h3 style="margin-bottom:6px;">Gmail Mailboxes (Inbox &amp; Money In)</h3>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 12px;">Every connected mailbox is read (read-only) every 10 minutes for the Inbox. Add the inbox your bank's Zelle "you received money" alerts go to as a <strong>Payments inbox</strong> — only payment emails are read there — so money coming in is matched to its invoice or gig. ${!configured? 'Not set up yet -- see <code>ops/GMAIL_SETUP.md</code>.' : ''}</p>
     <div class="field-row" style="align-items:flex-end;">
       <div class="field"><label>Artist</label>
         <select data-field="artistId" data-form="gmailmailbox">
           <option value="">— ASP sending mailbox —</option>
+          <option value="__payments" ${f.artistId==='__payments'?'selected':''}>Payments inbox (Zelle / bank alerts)</option>
           ${ARTISTS.map(a=>`<option value="${a.id}" ${f.artistId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
         </select>
       </div>
@@ -8129,7 +8229,7 @@ function renderGmailMailboxesCard(){
     : boxes.length===0? `<p style="font-size:12px;color:var(--ink-3);margin:0;">No mailboxes added yet.</p>`
     : `<div style="display:flex;flex-direction:column;gap:8px;">
         ${boxes.map(m=>{ const a = m.artist_id ? artistById(m.artist_id) : null; return `<div class="settings-row">
-          <div><h4>${esc(a?a.name:'ASP Sending')}</h4><p>${esc(m.email)}</p></div>
+          <div><h4>${esc(a?a.name:m.mailbox_type==='payments'?'Payments inbox':'ASP Sending')}</h4><p>${esc(m.email)}</p></div>
           ${m.connected? `<span class="pill pill-good">Connected</span>` : configured? `<button class="btn btn-sm btn-primary" data-action="oauth-connect" data-provider="gmail" data-id="${esc(m.id)}">Connect</button>` : `<span class="pill">Not connected</span>`}
         </div>`; }).join('')}
         <button class="btn btn-sm btn-ghost" style="align-self:flex-start;" data-action="check-gmail-mailboxes">Refresh</button>
@@ -9910,6 +10010,7 @@ function bindGlobal(){
       case 'close-booking-confirmation': S.showBookingConfirmation=false; render(); break;
       case 'overlay-close-bookingconfirmation': if(e.target===t){ S.showBookingConfirmation=false; render(); } break;
       case 'mark-balance': doMarkBalance(id); break;
+      case 'inbox-money': { const it = (S.inboxItems||[]).find(x=>x.id===id); if(it) applyInboxMoney(it, false); break; }
       case 'toggle-artist-paidout': doToggleArtistPaidOut(id); break;
       case 'gcal': window.open(gcalUrl(getEvent(id)), '_blank'); break;
       case 'ics': downloadIcs(getEvent(id)); break;

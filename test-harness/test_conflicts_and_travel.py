@@ -304,6 +304,47 @@ def test_inbox_lists_emails_and_actions_open_the_right_form(live_server, page):
     assert not errors, f"console errors: {errors}"
 
 
+def test_inbox_money_in_records_payments(live_server, page):
+    """Money in (owner 2026-10-21): a payment email matched to a gig's deposit is recorded with one click
+    (deposit received, lead booked), and a bank's own alert for exactly the balance due is recorded on its
+    own. inbox_items is stubbed (no real email); the claim (money_applied_at) answers for one browser."""
+    import json as _json
+    errors = collect_console_errors(page)
+    items = [
+        {"id": "33333333-3333-3333-3333-333333333333", "mailbox_email": "office@aspmgmt.com", "gmail_message_id": "m3", "gmail_thread_id": "t3",
+         "received_at": "2026-10-20T15:00:00Z", "from_addr": "Client <client@example.com>", "subject": "Sent the deposit", "snippet": "",
+         "kind": "payment_notice", "summary": "Client says the deposit was sent by Zelle.", "event_legacy_id": "EV-9902", "match_note": "", "status": "new",
+         "extracted": {}, "money_applied_at": None,
+         "money": {"amount_cents": 150000, "payer": "Money Test Client", "method": "Zelle", "date": "2026-10-20", "memo": "", "bank_verified": False, "bank": None,
+                   "match": {"kind": "deposit", "ref": "EV-9902", "due_cents": 150000, "exact": True}}},
+        {"id": "44444444-4444-4444-4444-444444444444", "mailbox_email": "pay@example.com", "gmail_message_id": "m4", "gmail_thread_id": "t4",
+         "received_at": "2026-10-21T15:00:00Z", "from_addr": "Chase <no.reply.alerts@chase.com>", "subject": "You received money with Zelle", "snippet": "",
+         "kind": "payment_notice", "summary": "Zelle received for the balance.", "event_legacy_id": "EV-9903", "match_note": "", "status": "new",
+         "extracted": {}, "money_applied_at": None,
+         "money": {"amount_cents": 850000, "payer": "Balance Test Client", "method": "Zelle", "date": "2026-10-21", "memo": "", "bank_verified": True, "bank": "chase.com",
+                   "match": {"kind": "balance", "ref": "EV-9903", "due_cents": 850000, "exact": True}}},
+    ]
+    def handle(route):
+        cors = {"Access-Control-Allow-Origin": "*"}
+        if route.request.method == "GET":
+            route.fulfill(status=200, content_type="application/json", headers=cors, body=_json.dumps(items))
+        else:   # the claim: this browser wins it
+            route.fulfill(status=200, content_type="application/json", headers=cors, body=_json.dumps([{"id": "x"}]))
+    page.route("**/rest/v1/inbox_items*", handle)
+    seed_events(page, [fake_gig("EV-9902", "benny", "2027-10-31", clientName="Money Test Client", status="contract_sent", depositReceived=False),
+                       fake_gig("EV-9903", "benny", "2027-11-07", clientName="Balance Test Client", status="booked", depositReceived=True, balanceReceived=False)])
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    goto_nav(page, "messages")
+    page.locator('[data-action="inbox-money"][data-id="33333333-3333-3333-3333-333333333333"]').click()
+    page.wait_for_function("() => { const e = JSON.parse(localStorage.getItem('asp_mock_state_v3')||'[]').find(x => x.id === 'EV-9902'); return e && e.depositReceived && e.status === 'booked'; }", timeout=10000)
+    ev = page.evaluate("() => JSON.parse(localStorage.getItem('asp_mock_state_v3')||'[]').find(x => x.id === 'EV-9902')")
+    assert ev["depositVerification"]["method"] == "zelle" and ev["depositReceivedDate"] == "2026-10-20", ev.get("depositVerification")
+    # The Chase alert for exactly the balance is recorded with nobody clicking.
+    page.wait_for_function("() => { const e = JSON.parse(localStorage.getItem('asp_mock_state_v3')||'[]').find(x => x.id === 'EV-9903'); return e && e.balanceReceived && e.status === 'paid'; }", timeout=20000)
+    assert not errors, f"console errors: {errors}"
+
+
 def test_venue_pick_fills_address(live_server, page):
     """Venue list (owner 2026-10-15): picking a known venue on New Lead fills address/city/state; the gig keeps them."""
     import json as _json
