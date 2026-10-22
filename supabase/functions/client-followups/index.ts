@@ -12,6 +12,7 @@ import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 import { sendRelayEmail } from "../_shared/mail.ts";
 import { brandLogoHtml } from "../_shared/config.ts";
 import { mintContractLink, mintBalanceLink } from "../_shared/paylinks.ts";
+import { clientOwedCentsOf, gigContracts } from "../_shared/connect.ts";
 import { paymentOptionsHtml, depositZelle, balanceZelle, officePhone } from "../_shared/payblock.ts";
 
 const DAY = 86_400_000;
@@ -86,9 +87,11 @@ Deno.serve(async (req) => {
       if (now - since < EVERY_DAYS * DAY) continue;
       planned.push({ kind: "deposit_reminder", gig: e.legacy_id, contract: sr.contract_legacy_id, contractCreatedAt: sr.contract_created_at, to, greeting, when, ev });
     } else if (e.status === "booked" && ev.depositReceived && !ev.balanceReceived) {
-      const charges = (Array.isArray(ev.charges) ? ev.charges : []).reduce((n: number, c: Row) => n + (Number(c.amount) || 0), 0);
-      const balance = (Number(ev.price) || 0) + charges - (Number(ev.commission) || 0);
-      if (balance <= 0) continue;
+      // What the client owes after the contract's deposit (clientOwedCentsOf, the same figure as the app,
+      // the pay link and the inbox's payment matching). NaN (an extra artist's figures missing) sends nothing.
+      const owed = clientOwedCentsOf(ev, await gigContracts(sb, e.legacy_id));
+      if (!Number.isFinite(owed) || owed <= 0) continue;
+      const balance = owed / 100;
       // Weekly from the deposit on (owner 2026-10-14: "right after the deposit"); a gig with no deposit
       // date (imported) is due at once. Gigs still flagged for review keep their reminders until reviewed.
       if (ev.needsReview) continue;

@@ -12,7 +12,7 @@
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 import { gmailToken } from "../_shared/mail.ts";
-import { balanceCentsOf } from "../_shared/connect.ts";
+import { clientOwedCentsOf, depositCentsOf } from "../_shared/connect.ts";
 // Pinned here, not in _shared/deps.ts, so only the functions that call Claude load the SDK.
 import Anthropic from "npm:@anthropic-ai/sdk@0.130.0";
 
@@ -62,18 +62,6 @@ function walk(part: Any, out: { text: string[]; html: string[]; attach: Any[] })
 }
 const stripHtml = (h: string) => h.replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
 
-// The deposit still due on a gig, in cents: its live contract's deposit (contractPaymentFigures() in the
-// app: percent of the fee, else the $ amount), else ASP's commission from every artist on it.
-function depositCentsOf(ev: Any, cts: Any[]): number {
-  const c = cts.find((x) => x.status === "signed") || cts.find((x) => x.status === "sent") || cts[0];
-  if (c && c.fee && c.deposit) {
-    const total = Number(c.fee.amount) || 0;
-    const dep = Number(c.deposit.percent) > 0 ? Math.round(total * Number(c.deposit.percent) / 100) : Number(c.deposit.amount) || 0;
-    if (dep > 0) return Math.round(dep * 100);
-  }
-  return Math.round(((Number(ev.commission) || 0) + extraCutOf(ev)) * 100);
-}
-const extraCutOf = (ev: Any) => (Array.isArray(ev.additionalArtists) ? ev.additionalArtists : []).reduce((s: number, a: Any) => s + (Number(a?.aspCut) || 0), 0);
 // The bank, when the email is its own alert: From is the bank's domain AND Gmail saw a passing DKIM
 // signature for that same domain (so it can't be a look-alike or a client's forward).
 function bankVerified(msg: Any, fromAddr: string): string | null {
@@ -103,15 +91,13 @@ Deno.serve(async (req) => {
   const { data: artists } = await sb.from("artists").select("id, legacy_id, name");
   const artistName = new Map((artists || []).flatMap((a: Any) => [[a.id, a.name], [a.legacy_id, a.name]]));
   const { data: recs } = await sb.from("app_records").select("collection, legacy_id, app_doc").in("collection", ["contracts", "invoices"]);
-  const contracts = (recs || []).filter((r: Any) => r.collection === "contracts").map((r: Any) => r.app_doc).filter((c: Any) => c && c.status !== "void");
+  const contracts = (recs || []).filter((r: Any) => r.collection === "contracts").map((r: Any) => r.app_doc).filter(Boolean);
   const due = new Map<string, { deposit: number; balance: number }>();
   for (const e of evs || []) {
     const ev = e.app_doc || {};
-    const dep = depositCentsOf(ev, contracts.filter((c: Any) => c.leadId === e.legacy_id));
-    // What the client still owes after the deposit: every artist's fee plus charges, less the deposit the
-    // contract asked for (a 25% contract deposit leaves less than balanceCentsOf's fee-less-commission).
-    const owed = balanceCentsOf(ev) + Math.round(((Number(ev.commission) || 0) + extraCutOf(ev)) * 100) - dep;
-    due.set(e.legacy_id, { deposit: ev.depositReceived ? 0 : dep, balance: ev.balanceReceived ? 0 : owed });
+    // The same figures as the app, the reminders and the pay links (_shared/connect.ts).
+    const cts = contracts.filter((c: Any) => c.leadId === e.legacy_id);
+    due.set(e.legacy_id, { deposit: ev.depositReceived ? 0 : depositCentsOf(ev, cts), balance: ev.balanceReceived ? 0 : clientOwedCentsOf(ev, cts) });
   }
   const usd = (c: number) => Number.isFinite(c) && c > 0 ? "$" + (c / 100).toFixed(2) : "-";
   const gigLines = (evs || []).map((e: Any) => { const d = due.get(e.legacy_id)!; return `${e.legacy_id} | ${e.date} | ${artistName.get(e.artist_id) || artistName.get(e.app_doc?.artistId) || ""} | ${e.client_name || ""} | ${e.type || ""} | ${[e.venue, e.city, e.state].filter(Boolean).join(", ")} | ${e.status} | ${usd(d.deposit)} | ${usd(d.balance)}`; }).join("\n");
