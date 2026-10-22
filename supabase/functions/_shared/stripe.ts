@@ -95,7 +95,7 @@ const isTestRow = (r: { kind?: string; contract_legacy_id?: string | null; invoi
 // What a payment link was for, in the office's words.
 // deno-lint-ignore no-explicit-any
 const whatOf = (p: any) => p.kind === "contract_deposit" ? `deposit for contract ${p.contract_legacy_id}`
-  : p.kind === "event_balance" ? `balance for gig ${p.event_legacy_id} (paid to the artist's Stripe account)` : `invoice ${p.invoice_legacy_id}`;
+  : p.kind === "event_balance" ? `balance for gig ${p.event_legacy_id} (paid to the artists' Stripe accounts)` : `invoice ${p.invoice_legacy_id}`;
 
 function methodLabel(r: { pay_method: string | null; card_brand: string | null; card_funding: string | null; pay_last4: string | null }): string {
   if (r.pay_method === "us_bank_account") return `bank account${r.pay_last4 ? " ending " + r.pay_last4 : ""}`;
@@ -164,7 +164,11 @@ export async function recordPaymentIntent(sb: any, pi: any): Promise<void> {
     if (curErr) throw new Error(`reload payment link: ${curErr.message}`);
     if (isTestRow(cur)) return;
     if (cur.payment_intent_id !== pi.id) await reportSecondCharge(sb, cur, pi);
-    else await ledgerInsert(sb, cur, pi);
+    else {
+      await ledgerInsert(sb, cur, pi);
+      // Never pay the artists out for a payment since refunded or disputed.
+      if (cur.pay_status === "paid") await splitTransfers(sb, cur, pi);
+    }
     return;
   }
   if (isTestRow(p)) return;
@@ -197,8 +201,54 @@ export async function recordPaymentIntent(sb: any, pi: any): Promise<void> {
       "ASP Bookings", null));
   }
   await Promise.all(tasks);
-  // Last, so a failure here (retried by Stripe) never sends the receipt twice.
+  // Last, so a failure here (retried by Stripe) never sends the receipt twice; the retry comes back
+  // through the "already recorded" path above, which does both again (each is idempotent).
   await ledgerInsert(sb, p, pi);
+  await splitTransfers(sb, p, pi);
+}
+
+// A gig balance split between several artists (client-pay froze who gets what in the charge's
+// metadata): one transfer per artist's Stripe account from the charge, once. Stripe is asked which
+// transfers already exist (by the charge's transfer group), so running this again -- a webhook retry,
+// the client's next view of the paid page -- never pays anyone twice. On a failure the office is
+// emailed (once per payment: marked on the PaymentIntent) and it throws, so the webhook retries.
+// deno-lint-ignore no-explicit-any
+async function splitTransfers(sb: any, p: any, pi: any): Promise<void> {
+  try { await makeSplitTransfers(pi); } catch (err) {
+    if (pi?.metadata?.split_alerted !== "1") {
+      await stripeApi("POST", `/payment_intents/${pi.id}`, { metadata: { split_alerted: "1" } });
+      const brand = await brandFor(sb, p.brand_key || undefined);
+      if (brand.replyTo) {
+        await relay(brand.replyTo, `Action needed: an artist's share of ${p.client_name || "a client"}'s balance didn't go out`,
+          `<p style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;">${escapeHtml(p.client_name || "A client")} paid ${escapeHtml(p.description)} online (Stripe ${escapeHtml(pi.id)}), split between several artists, but Stripe refused a transfer to one of them: ${escapeHtml(String(err).slice(0, 300))}. The money is in ASP's Stripe balance. It is retried automatically for a few days; if the artist's Stripe account needs attention, fix it there, or send their share by hand (Stripe → Connect → the artist → Send funds).</p>`,
+          "ASP Bookings", null);
+      }
+    }
+    throw err;
+  }
+}
+// deno-lint-ignore no-explicit-any
+async function makeSplitTransfers(pi: any): Promise<void> {
+  const raw = pi?.metadata?.split;
+  if (!raw || !pi.transfer_group) return;
+  let split: [string, number][];
+  try { split = JSON.parse(raw); } catch { throw new Error(`bad split on ${pi.id}`); }
+  const charge = typeof pi.latest_charge === "string" ? pi.latest_charge : pi.latest_charge?.id;
+  if (!charge) throw new Error(`no charge on ${pi.id}`);
+  const have = await stripeApi("GET", `/transfers?transfer_group=${encodeURIComponent(pi.transfer_group)}&limit=100`);
+  if (!have.ok) throw new Error(`list transfers ${pi.id}: ${have.status}`);
+  // deno-lint-ignore no-explicit-any
+  const done = new Set((have.data?.data || []).filter((t: any) => t.metadata?.payment_intent === pi.id).map((t: any) => t.metadata?.split_index));
+  for (let i = 0; i < split.length; i++) {
+    const [destination, cents] = split[i];
+    if (done.has(String(i)) || !(cents > 0)) continue;
+    const t = await stripeApi("POST", "/transfers", {
+      amount: cents, currency: "usd", destination, source_transaction: charge, transfer_group: pi.transfer_group,
+      description: `${pi.description || "Balance"} — share ${i + 1} of ${split.length}`.slice(0, 300),
+      metadata: { payment_request_id: pi.metadata.payment_request_id || "", payment_intent: pi.id, split_index: String(i) },
+    }, `split-${pi.id}-${i}`);
+    if (!t.ok) throw new Error(`transfer ${i} of ${pi.id}: ${t.data?.error?.message || t.status}`);
+  }
 }
 
 // The ledger of money received (payments, 0012/0022). Idempotent: one row per Stripe charge.
@@ -220,7 +270,7 @@ async function ledgerInsert(sb: any, p: any, pi: any): Promise<void> {
     payment_rail: p.pay_method === "us_bank_account" ? "ach" : "credit_card",
     destination: p.kind === "event_balance" ? "artist_direct" : "asp_operating",
     allocation_status: "allocated",
-    notes: `Paid online (${methodLabel(p)}): ${what}${fee ? (toArtist ? `; the client also paid a ${dollars(fee)} card fee, which ASP kept` : `, including a ${dollars(fee)} card fee`) : ""}.`,
+    notes: `Paid online (${methodLabel(p)}): ${what}${pi.metadata?.split ? `, split between ${JSON.parse(pi.metadata.split).length} artists' Stripe accounts` : ""}${fee ? (toArtist ? `; the client also paid a ${dollars(fee)} card fee, which ASP kept` : `, including a ${dollars(fee)} card fee`) : ""}.`,
   }, { onConflict: "source,source_ref", ignoreDuplicates: true });
   // Thrown so the webhook answers 500 and Stripe redelivers (the next delivery re-runs this).
   if (error) throw new Error(`payments ledger insert: ${error.message}`);
@@ -233,14 +283,14 @@ async function reportSecondCharge(sb: any, r: any, pi: any): Promise<void> {
     amount: total / 100, expected_amount: 0, kind: "overpayment", source: "stripe", source_ref: pi.id, status: "received",
     received_at: new Date().toISOString(), payer: r.client_name || null, payment_rail: pi.metadata?.pay_method === "us_bank_account" ? "ach" : "credit_card",
     destination: r.kind === "event_balance" ? "artist_direct" : "asp_operating", allocation_status: "needs_review",
-    notes: `SECOND online payment for ${r.description} (already paid by ${r.payment_intent_id}). Refund one in Stripe${r.kind === "event_balance" ? " and tick Reverse transfer (the artist received it)" : ""}.`,
+    notes: `SECOND online payment for ${r.description} (already paid by ${r.payment_intent_id}). Refund one in Stripe${r.kind === "event_balance" && !pi.metadata?.split ? " and tick Reverse transfer (the artist received it)" : ""}.`,
   }, { onConflict: "source,source_ref", ignoreDuplicates: true });
   if (error) throw new Error(`ledger second charge: ${error.message}`);
   console.error("payments: second charge", r.id, pi.id);
   const brand = await brandFor(sb, r.brand_key || undefined);
   if (brand.replyTo) {
     await relay(brand.replyTo, `Action needed: ${r.client_name || "a client"} was charged twice`,
-      `<p style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;">A second online payment of ${dollars(total)} came in for ${escapeHtml(r.description)}, which was already paid (Stripe ${escapeHtml(r.payment_intent_id)}). Please refund one of them in Stripe: ${escapeHtml(pi.id)}.${r.kind === "event_balance" ? " It went to the artist's Stripe account: tick <strong>Reverse transfer</strong> when refunding, or ASP pays the refund." : ""}</p>`,
+      `<p style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;">A second online payment of ${dollars(total)} came in for ${escapeHtml(r.description)}, which was already paid (Stripe ${escapeHtml(r.payment_intent_id)}). Please refund one of them in Stripe: ${escapeHtml(pi.id)}.${r.kind === "event_balance" && !pi.metadata?.split ? " It went to the artist's Stripe account: tick <strong>Reverse transfer</strong> when refunding, or ASP pays the refund." : ""}</p>`,
       "ASP Bookings", null);
   }
 }

@@ -73,12 +73,21 @@ client only ever deals with ASP: ASP's name is on their card statement, the page
   (`_shared/paylinks.ts`). The artist's Zelle stays as the
   other option. When the money arrives the app marks the balance received (status Paid in Full), like
   Mark Balance Received.
+- **Gigs with several artists (owner 2026-10-16: one payment, split automatically):** the client pays
+  the whole balance once: the main artist's (fee − ASP's commission + extra charges) plus each additional
+  artist's (their fee − ASP's cut, as saved on the gig). ASP takes the payment, and when it has gone
+  through each artist's share is transferred to their own Stripe account (*separate charges and
+  transfers*, one transfer per account, made once even if Stripe resends the event). Every artist on
+  the gig must be Active, or the gig gets no online link. One Zelle can't be split, so these gigs'
+  emails show no Zelle box (the check/cash line stays). The webhook must be set up: it's what retries a
+  transfer that failed the first time.
 - **Fees:** a credit card's card fee (Settings, 0-3%) goes to ASP, to cover Stripe's fee. The artist always
   gets the full balance, so on a **debit card or bank transfer ASP pays Stripe's fee** (about 2.9% + 30¢
   for a debit card; 0.8%, max $5, for a bank transfer).
 - **Refunds and disputes:** ASP is the business the client paid, so a refund or chargeback comes out of
   ASP's Stripe balance. When refunding a balance in Stripe, tick **Reverse transfer** to take it back from
-  the artist's account. A dispute emails the office as usual; reverse the transfer in Stripe if ASP loses it.
+  the artist's account. A split balance has one transfer per artist: reverse each one (Stripe →
+  Connect → Transfers, filtered by the payment). A dispute emails the office as usual; reverse the transfer in Stripe if ASP loses it.
 - **Safety:** the server works out the gig's balance, its payee and that payee's Stripe account itself,
   never from the browser. A balance link stops working if the balance or the gig's payee changes after
   it was made (the next reminder carries a fresh one), and only one link per gig can take the money.

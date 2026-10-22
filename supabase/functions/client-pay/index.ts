@@ -23,7 +23,7 @@ import { serviceClient } from "../_shared/auth.ts";
 import { brandFor } from "../_shared/config.ts";
 import { cardFeeCents, recordPaymentIntent, stripeApi, stripeConfigured, stripeMode } from "../_shared/stripe.ts";
 import { balanceZelle, depositZelle, officePhone } from "../_shared/payblock.ts";
-import { balanceCentsOf, balancePayeeProfile, gigCardFeeBps, isMultiArtist, payableAccount } from "../_shared/connect.ts";
+import { balanceCentsOf, balancePayeeProfile, balanceSplit, gigCardFeeBps, isMultiArtist, splitAccounts } from "../_shared/connect.ts";
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 const CT_RE = /^ctoken_[A-Za-z0-9]{8,}$/;
@@ -87,11 +87,18 @@ async function blocker(sb: any, r: Row, tokenHash: string): Promise<string | nul
       // The link pays what was owed, to whom, when it was made: if the balance or the gig's payee has
       // changed since, the office sends a new link (and nothing goes to an artist no longer on the gig).
       if (!ev.depositReceived || balanceCentsOf(ev) !== r.amount_cents) return "revoked";
-      if ((ev.paymentMethod && ev.paymentMethod !== "standard") || isMultiArtist(ev)) return "revoked";
+      if (ev.paymentMethod && ev.paymentMethod !== "standard") return "revoked";
       // Never more card fee than the office's setting allows for this gig (none in CT/MA).
       if (r.card_fee_bps > await gigCardFeeBps(sb, ev)) return "revoked";
       const payee = await balancePayeeProfile(sb, r.event_legacy_id, ev);
       if (!payee || payee.id !== r.payee_profile_id) return "revoked";
+      // Several artists: every one of them must have a payee with a working Stripe account, or the page
+      // would show a form whose Pay then fails.
+      if (isMultiArtist(ev)) {
+        const parts = await balanceSplit(sb, r.event_legacy_id, ev);
+        if (!parts || parts.reduce((t, p) => t + p.cents, 0) !== r.amount_cents) return "revoked";
+        if (stripeConfigured() && !(await splitAccounts(sb, parts, stripeMode() === "live"))) return "revoked";
+      }
     }
   } else if (!isTest(r)) {
     const { data: rec } = await sb.from("app_records").select("app_doc").eq("collection", "invoices").eq("legacy_id", r.invoice_legacy_id).maybeSingle();
@@ -180,6 +187,11 @@ Deno.serve(async (req) => {
     if (!r) return json({ ok: true, payment: null });
     if (!r.first_viewed_at) await sb.from("payment_requests").update({ first_viewed_at: new Date().toISOString() }).eq("id", r.id);
     let row = r;
+    // A paid balance split between artists: make sure every share went out (a no-op once they have).
+    if (r.kind === "event_balance" && r.pay_status === "paid" && r.payment_intent_id && stripeConfigured()) {
+      const pi = await stripeApi("GET", `/payment_intents/${r.payment_intent_id}`);
+      if (pi.ok && pi.data?.metadata?.split) { try { await recordPaymentIntent(sb, pi.data); } catch (err) { console.error("client-pay view split", String(err)); } }
+    }
     if (r.payment_intent_id && ["open", "failed", "processing"].includes(r.pay_status) && stripeConfigured()) {
       const pi = await stripeApi("GET", `/payment_intents/${r.payment_intent_id}`);
       if (pi.ok) {
@@ -251,11 +263,24 @@ Deno.serve(async (req) => {
   }
 
   const ref = referenceOf(r);
-  // A balance goes to the artist's Stripe account, checked live: Stripe must say it can receive money now.
+  // A balance goes to the artists' Stripe accounts, checked live: Stripe must say each can receive money
+  // now. One artist: a destination charge. Several (owner 2026-10-16: one payment, split
+  // automatically): the charge stays on ASP's account and each share is transferred from it once it's
+  // paid (recordPaymentIntent), as frozen in the charge's metadata here. The split always adds up to
+  // the link's amount (checked against the gig just now by blocker()).
   let destination: string | null = null;
+  let split: { account: string; cents: number }[] | null = null;
   if (r.kind === "event_balance") {
-    destination = await payableAccount(sb, r.payee_profile_id, stripeMode() === "live");
-    if (!destination) { await release(); return json({ ok: false, error: "unavailable" }, 503); }
+    let parts = null;
+    if (isTest(r)) parts = [{ payeeProfileId: r.payee_profile_id, cents: r.amount_cents, name: "" }];
+    else {
+      const { data: evRow } = await sb.from("events").select("app_doc").eq("legacy_id", r.event_legacy_id).maybeSingle();
+      parts = evRow?.app_doc ? await balanceSplit(sb, r.event_legacy_id, evRow.app_doc) : null;
+    }
+    const accounts = parts && parts.reduce((t, p) => t + p.cents, 0) === r.amount_cents ? await splitAccounts(sb, parts, stripeMode() === "live") : null;
+    if (!accounts?.length) { await release(); return json({ ok: false, error: "unavailable" }, 503); }
+    if (accounts.length === 1) destination = accounts[0].account;
+    else split = accounts;
   }
   const params = {
     amount: quote.totalCents, currency: "usd", confirm: true, confirmation_token: body.confirmationTokenId,
@@ -270,7 +295,9 @@ Deno.serve(async (req) => {
       base_cents: String(r.amount_cents), fee_cents: String(quote.feeCents), pay_method: quote.method,
       card_brand: quote.method === "card" ? (quote.brand || "") : "", card_funding: quote.funding || "", last4: quote.last4 || "",
       payee_profile_id: r.payee_profile_id || "", destination: destination || "",
+      ...(split ? { split: JSON.stringify(split.map((x) => [x.account, x.cents])) } : {}),
     },
+    ...(split ? { transfer_group: `pr_${r.id}` } : {}),
   };
   const idem = `pr-${r.id}-${body.confirmationTokenId}`;
   let pi = await stripeApi("POST", "/payment_intents", params, idem);

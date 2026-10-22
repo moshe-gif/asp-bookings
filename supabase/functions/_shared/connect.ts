@@ -10,19 +10,53 @@ type Sb = any;
 // deno-lint-ignore no-explicit-any
 type Doc = Record<string, any>;
 
-// What the client still owes the artist: artistPayout() in the app (fee less ASP's commission, plus
-// the gig's extra charges), in cents.
-export function balanceCentsOf(ev: Doc): number {
-  // deno-lint-ignore no-explicit-any
-  const charges = (ev.charges || []).reduce((s: number, c: any) => s + (Number(c?.amount) || 0), 0);
+// What the client still owes the MAIN artist: artistPayout() in the app (fee less ASP's commission,
+// plus the gig's extra charges), in cents.
+export function mainBalanceCentsOf(ev: Doc): number {
+  const charges = (ev.charges || []).reduce((s: number, c: Doc) => s + (Number(c?.amount) || 0), 0);
   return Math.round(((Number(ev.price) || 0) - (Number(ev.commission) || 0) + charges) * 100);
 }
-
-// A gig with more than one artist (ev.additionalArtists): its balance is owed to several payees, and
-// the figures above count only the main artist. Not payable online until the owner decides how a
-// split balance is collected (2026-10-16).
+// A gig with more than one artist (ev.additionalArtists, each {artistId, feeAmount, aspCut}).
 export function isMultiArtist(ev: Doc): boolean {
   return Array.isArray(ev.additionalArtists) && ev.additionalArtists.some((x: Doc) => x && x.artistId);
+}
+const extraArtists = (ev: Doc): Doc[] => (Array.isArray(ev.additionalArtists) ? ev.additionalArtists : []).filter((x: Doc) => x && x.artistId);
+// Each additional artist's share of the balance: their fee less ASP's cut (both frozen on the gig when
+// it was made). The deposit covers ASP's cut from every artist. null when a figure is missing.
+function extraNetCents(x: Doc): number | null {
+  const fee = Number(x.feeAmount), cut = Number(x.aspCut);
+  if (!Number.isFinite(fee) || !Number.isFinite(cut) || x.aspCut == null) return null;
+  return Math.round((fee - cut) * 100);
+}
+// What the client owes for the whole gig: the main artist's balance plus each additional artist's
+// share (clientBalanceDue() in the app). NaN when an additional artist's figures are missing.
+export function balanceCentsOf(ev: Doc): number {
+  let total = mainBalanceCentsOf(ev);
+  for (const x of extraArtists(ev)) { const n = extraNetCents(x); if (n == null) return NaN; total += n; }
+  return total;
+}
+
+// Who gets what of a gig's balance (owner 2026-10-16: one payment, split automatically): the main
+// artist's share to the gig's balance payee, each additional artist's share to that artist's own payee
+// profile. Shares of 0 are left out. null when a payee or a figure is missing.
+export type SplitPart = { payeeProfileId: string; cents: number; name: string };
+export async function balanceSplit(sb: Sb, eventLegacyId: string, ev: Doc): Promise<SplitPart[] | null> {
+  const main = await balancePayeeProfile(sb, eventLegacyId, ev);
+  if (!main?.id) return null;
+  const parts: SplitPart[] = [{ payeeProfileId: main.id, cents: mainBalanceCentsOf(ev), name: main.entityName || "" }];
+  const extras = extraArtists(ev);
+  if (extras.length) {
+    const { data: pRows } = await sb.from("app_records").select("app_doc").eq("collection", "payee_profiles");
+    const profiles = (pRows || []).map((r: Doc) => r.app_doc).filter(Boolean);
+    for (const x of extras) {
+      const prof = profiles.find((p: Doc) => p.artistId === x.artistId);
+      const cents = extraNetCents(x);
+      if (!prof?.id || cents == null || cents < 0) return null;
+      parts.push({ payeeProfileId: prof.id, cents, name: prof.entityName || "" });
+    }
+  }
+  if (parts.some((p) => p.cents < 0)) return null;
+  return parts.filter((p) => p.cents > 0);
 }
 
 // The gig's balance payee: zellePayeeProfileFor() in the app -- the payee on its latest sent/signed
@@ -80,6 +114,18 @@ export async function refreshPayeeAccount(sb: Sb, stripeAccountId: string): Prom
   const { error } = await sb.from("stripe_payees").update({ ...accountStatus(acct.data), updated_at: new Date().toISOString() }).eq("stripe_account_id", stripeAccountId);
   if (error) console.error("connect: store status", error.message);
   return acct.data;
+}
+
+// The Stripe accounts a split goes to, one entry per account (two profiles of one company share an
+// account, so their shares add up): null unless every one of them can receive money right now.
+export async function splitAccounts(sb: Sb, parts: SplitPart[], live: boolean): Promise<{ account: string; cents: number }[] | null> {
+  const out = new Map<string, number>();
+  for (const p of parts) {
+    const acct = await payableAccount(sb, p.payeeProfileId, live);
+    if (!acct) return null;
+    out.set(acct, (out.get(acct) || 0) + p.cents);
+  }
+  return [...out].map(([account, cents]) => ({ account, cents }));
 }
 
 // The account a balance for this payee profile goes to, checked live with Stripe: null unless Stripe

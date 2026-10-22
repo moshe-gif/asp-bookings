@@ -1553,12 +1553,21 @@ function balancePayBlocker(ev){
   if(ev.balanceReceived) return 'The balance is already received.';
   if(!ev.depositReceived) return 'The deposit isn\'t in yet: the balance link goes out after it.';
   if(!isStandardPayment(ev)) return 'This gig\'s balance is paid another way.';
-  // Several artists: the balance is owed to several payees (and artistPayout counts only the main one).
-  if((ev.additionalArtists||[]).some(x=>x && x.artistId)) return 'This gig has more than one artist: its balance can\'t be paid online yet.';
-  if(Math.round(artistPayout(ev)*100) < 50) return 'There\'s no balance left to pay.';
+  if(Math.round(clientBalanceDue(ev)*100) < 50) return 'There\'s no balance left to pay.';
   const profile = zellePayeeProfileFor(ev);
   if(!profile) return 'This gig has no payee profile.';
-  if(!stripePayeeActive(stripePayeeOf(profile.id))) return `${profile.entityName||'The payee'} hasn't finished setting up online payouts (Settings → Payee Profiles).`;
+  // One payment, split automatically (owner 2026-10-16): every artist on the gig gets their share, so
+  // each one's payee must be set up -- the main artist's, and each additional artist's own profile.
+  const payees = [profile];
+  for(const x of gigExtraArtists(ev)){
+    const a = artistById(x.artistId);
+    const p = PAYEE_PROFILES.find(pp=>pp.artistId===x.artistId);
+    if(!p) return `${a?a.name:'An artist on this gig'} has no payee profile.`;
+    if(x.aspCut==null) return `${a?a.name:'An artist on this gig'}'s share isn't set on the gig.`;
+    payees.push(p);
+  }
+  const notReady = payees.find(p=>!stripePayeeActive(stripePayeeOf(p.id)));
+  if(notReady) return `${notReady.entityName||'A payee'} hasn't finished setting up online payouts (Settings → Payee Profiles).`;
   return '';
 }
 async function createBalancePayLink(ev){
@@ -1571,7 +1580,7 @@ async function createBalancePayLink(ev){
   const { error } = await supabaseClient.from('payment_requests').insert({
     token_hash: await sha256Hex(token), kind:'event_balance', event_legacy_id: balancePayKey(ev), payee_profile_id: zellePayeeProfileFor(ev).id,
     brand_key:'asp', client_name: ev.clientName||null, client_email: ev.clientEmail||null,
-    description: balanceDescription(ev), amount_cents: Math.round(artistPayout(ev)*100),
+    description: balanceDescription(ev), amount_cents: Math.round(clientBalanceDue(ev)*100),
     card_fee_bps: NO_CARD_FEE_STATES.includes(normalizeState(ev.state)) ? 0 : Math.round(cardFeePercentSetting() * 100),
   });
   if(error) return { ok:false, error:'Could not make a payment link: ' + error.message };
@@ -1754,7 +1763,8 @@ function applyOnlineDeposit(ev, c, r){
 function applyOnlineBalance(ev, r){
   const text = paidOnlineText(r);
   const payee = zellePayeeProfileFor(ev);
-  logEvent(ev, 'success', `Balance paid online (${text}), sent straight to ${payee ? payee.entityName : 'the artist'}'s Stripe account — paid in full.`);
+  const names = [payee ? payee.entityName : 'the artist', ...gigExtraArtists(ev).map(x=>{ const p = PAYEE_PROFILES.find(pp=>pp.artistId===x.artistId); return p ? p.entityName : x.artistId; })];
+  logEvent(ev, 'success', `Balance paid online (${text}), sent straight to ${names.length>1 ? `the artists' Stripe accounts (${names.join(', ')})` : `${names[0]}'s Stripe account`} — paid in full.`);
   const result = updateEvent(ev.id, { balanceReceived:true, balanceReceivedDate:String(r.paid_at).slice(0,10), status:'paid',
     balanceVerification:{ method:'stripe', note:`Paid online: ${text}`, loggedAt:r.paid_at, paymentRequestId:r.id } });
   if(!result.ok){ toast(`${ev.clientName||'A client'} paid the balance online, but this gig couldn't be updated — reload and mark the balance received.`, 'system'); return; }
@@ -2192,7 +2202,9 @@ function depositZelle(){
   return null;
 }
 // Zelle for a gig's balance: the artist's payee profile (never another artist's -- zellePayeeFor).
+// A gig with several artists gets none: one Zelle can't split its balance (the client pays online, or calls).
 function balanceZelle(ev){
+  if(gigExtraArtists(ev).length) return null;
   const payee = zellePayeeFor(ev); if(!payee) return null;
   const prof = payee.profile;
   // Only the public copy (https): an email can't show an image embedded as data:, so without one the
@@ -2218,7 +2230,7 @@ function gigPaymentMemo(ev){ return `${ev.clientName||'Event'} ${fmtDateShort(ev
 // actually differs between the two.
 function clientNoticeEmailHtml(ev, artist, introHtml, payUrl){
   const brand = getBrandConfig('asp');
-  const balance = artistPayout(ev);
+  const balance = clientBalanceDue(ev);
   return `<!doctype html><html><head><meta charset="utf-8"/><style>
     body{ margin:0; padding:24px; background:#F5F4EF; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#17171A; }
     .doc{ max-width:560px; margin:0 auto; background:#fff; padding:28px; border-radius:10px; }
@@ -2257,7 +2269,8 @@ function sendClientNoticeEmail(ev, subject, html){ return sendEmail({ to: ev.cli
 // How the client pays the balance, for the emails' sentence: online first when there's a link.
 function balanceHowSentence(ev, payUrl){
   if(!isStandardPayment(ev)) return ` (${esc(paymentMethodLabel(ev))})`;
-  return payUrl ? ` — pay online with the button below${zellePayeeFor(ev)?', or by Zelle':''}` : zellePaymentSentence(ev);
+  if(payUrl) return ` — pay online with the button below${balanceZelle(ev)?', or by Zelle':''}`;
+  return gigExtraArtists(ev).length ? ' — please contact our office for how to pay' : zellePaymentSentence(ev);
 }
 function bookingConfirmationIntroHtml(ev, artist, balance, payUrl){
   return `<p style="margin:0 0 8px;">Hi ${esc((ev.clientName||'').split(' ')[0])},</p>
@@ -2271,7 +2284,7 @@ function reminderIntroHtml(ev, artist, balance, payUrl){
 async function doSendBookingConfirmationEmail(id){
   const ev = getEvent(id); if(!ev) return;
   const artist = artistById(ev.artistId);
-  const balance = artistPayout(ev);
+  const balance = clientBalanceDue(ev);
   const subject = `You're booked! — ${artist.name}, ${fmtDateShort(ev.date)}`;
   S.bookingConfirmationBusy = true; render();
   const payUrl = await balancePayUrl(ev);
@@ -2292,7 +2305,7 @@ async function doSendBookingConfirmationEmail(id){
 async function doSendReminderEmail(id){
   const ev = getEvent(id); if(!ev) return;
   const artist = artistById(ev.artistId);
-  const balance = artistPayout(ev);
+  const balance = clientBalanceDue(ev);
   const subject = `Balance reminder — ${artist.name}, ${fmtDateShort(ev.date)}`;
   S.reminderBusy = true; render();
   const payUrl = await balancePayUrl(ev);
@@ -2407,6 +2420,11 @@ function eventBalance(ev){ return (ev.price||0) - (ev.commission||0); }
 // What the artist is owed for a gig: the balance after ASP's commission, plus any charges -- whatever
 // the payment method (was named zelleBalance, though it applies to cash/check too; 2026-10-09 audit 6.8).
 function artistPayout(ev){ return eventBalance(ev) + chargesTotal(ev); }
+// What the CLIENT still owes for the whole gig: the main artist's payout plus each additional artist's
+// share (their fee less ASP's cut, both saved on the gig). The deposit covers ASP's cut from every
+// artist. artistPayout() stays the main artist's own figure. Owner 2026-10-16 (multi-artist balances).
+function gigExtraArtists(ev){ return (ev.additionalArtists||[]).filter(x=>x && x.artistId); }
+function clientBalanceDue(ev){ return artistPayout(ev) + gigExtraArtists(ev).reduce((t,x)=>t + (Number(x.feeAmount)||0) - (Number(x.aspCut)||0), 0); }
 // The standard ASP booking fee / commission. Single owner of the rate (it was a 0.15 literal in 3
 // places and "15%"/"85%" label text in 4 -- 2026-10-09 audit 3.8). Each gig still stores its own
 // ev.commission, which can differ (negotiated), so labels show the real figures, not this rate.
@@ -4133,7 +4151,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.23'; // bump on every release so a phone can tell it has updated. v1.9.23: sign/pay button at the bottom of the contract email; office settings a browser never synced can't overwrite the shared copy
+const APP_VERSION = 'v1.9.24'; // bump on every release so a phone can tell it has updated. v1.9.24: a multi-artist gig's balance is paid online in one payment, split between the artists
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -6041,8 +6059,8 @@ function zelleQrUrl(ev, artist, profile){
 }
 function renderZelleQrBlock(ev, artist){
   const payee = zellePayeeFor(ev);
-  if(payee) return `<div style="background:#fff;color:#17171A;border-radius:var(--r-md);padding:4px 12px 12px;">${paymentOptionsEmailBlock({ kind:'balance', amount:artistPayout(ev), memo:gigPaymentMemo(ev), zelle:balanceZelle(ev) })}</div>
-    ${balanceZelle(ev).qrUrl ? '' : `<p style="font-size:10.5px;color:var(--ink-3);margin:10px 0 0;text-align:center;">No Zelle QR uploaded for this artist yet, so the email shows their Zelle address instead. Upload it in Settings → Payee Profiles.</p>`}`;
+  if(payee) return `<div style="background:#fff;color:#17171A;border-radius:var(--r-md);padding:4px 12px 12px;">${paymentOptionsEmailBlock({ kind:'balance', amount:clientBalanceDue(ev), memo:gigPaymentMemo(ev), zelle:balanceZelle(ev) })}</div>
+    ${(balanceZelle(ev)||{}).qrUrl || gigExtraArtists(ev).length ? '' : `<p style="font-size:10.5px;color:var(--ink-3);margin:10px 0 0;text-align:center;">No Zelle QR uploaded for this artist yet, so the email shows their Zelle address instead. Upload it in Settings → Payee Profiles.</p>`}`;
   if(!payee) return `<p style="font-size:12px;color:var(--warn-ink);background:var(--warn-wash);padding:10px 12px;border-radius:var(--r-md);margin:0;">${esc(artist.name)} ${esc(zellePayeeReason(ev))} — the client will be told to contact the office for Zelle details. Fix it in Settings → Payee Profiles.</p>`;
   const profile = payee.profile;
   const usingRealQr = !!profile.zelleQrDataUrl;
@@ -6057,7 +6075,7 @@ function renderZelleQrBlock(ev, artist){
 function renderReminderPreview(){
   const ev = getEvent(S.eventId); if(!ev) return '';
   const artist = artistById(ev.artistId);
-  const balance = artistPayout(ev);
+  const balance = clientBalanceDue(ev);
   return `<div class="overlay center" data-action="overlay-close-reminderpreview">
     <div class="doc" data-stop style="width:440px;">
       <div class="sheet-head"><h2 style="font-size:1.1rem;">Reminder Email Preview</h2><button class="icon-btn" data-action="close-reminder-preview" aria-label="Close">${ICO.x}</button></div>
@@ -6079,7 +6097,7 @@ function renderReminderPreview(){
 function renderBookingConfirmationPreview(){
   const ev = getEvent(S.eventId); if(!ev) return '';
   const artist = artistById(ev.artistId);
-  const balance = artistPayout(ev);
+  const balance = clientBalanceDue(ev);
   const busy = !!S.bookingConfirmationBusy;
   return `<div class="overlay center" data-action="overlay-close-bookingconfirmation">
     <div class="doc" data-stop style="width:440px;">
