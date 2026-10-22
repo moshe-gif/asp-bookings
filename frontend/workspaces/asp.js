@@ -2422,11 +2422,22 @@ function eventBalance(ev){ return (ev.price||0) - (ev.commission||0); }
 // What the artist is owed for a gig: the balance after ASP's commission, plus any charges -- whatever
 // the payment method (was named zelleBalance, though it applies to cash/check too; 2026-10-09 audit 6.8).
 function artistPayout(ev){ return eventBalance(ev) + chargesTotal(ev); }
-// What the CLIENT still owes for the whole gig: the main artist's payout plus each additional artist's
-// share (their fee less ASP's cut, both saved on the gig). The deposit covers ASP's cut from every
-// artist. artistPayout() stays the main artist's own figure. Owner 2026-10-16 (multi-artist balances).
+// What the CLIENT still owes for the whole gig: every artist's fee plus the gig's charges, less the
+// deposit (owner 2026-10-16: multi-artist balances; EV-5020: a 25% contract deposit leaves less than
+// fee-less-commission). artistPayout() stays the main artist's own figure. The server twin is
+// clientOwedCentsOf() in supabase/functions/_shared/connect.ts -- keep the two in step.
 function gigExtraArtists(ev){ return (ev.additionalArtists||[]).filter(x=>x && x.artistId); }
-function clientBalanceDue(ev){ return artistPayout(ev) + gigExtraArtists(ev).reduce((t,x)=>t + (Number(x.feeAmount)||0) - (Number(x.aspCut)||0), 0); }
+function gigAspCuts(ev){ return (Number(ev.commission)||0) + gigExtraArtists(ev).reduce((t,x)=>t + (Number(x.aspCut)||0), 0); }
+function clientOwed(ev, deposit){ return artistPayout(ev) + gigExtraArtists(ev).reduce((t,x)=>t + (Number(x.feeAmount)||0) - (Number(x.aspCut)||0), 0) + gigAspCuts(ev) - deposit; }
+// The deposit the gig's newest signed (else sent, else any live) contract asked for; without one, ASP's
+// cut from every artist (the usual deposit).
+function gigDepositDue(ev){
+  const live = contractsForLead(ev.id).filter(c=>c.status!=='void').sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+  const c = live.find(x=>x.status==='signed') || live.find(x=>x.status==='sent') || live[0];
+  const d = c && c.fee && c.deposit ? contractPaymentFigures(c).deposit : 0;
+  return d > 0 ? d : gigAspCuts(ev);
+}
+function clientBalanceDue(ev){ return clientOwed(ev, gigDepositDue(ev)); }
 // The standard ASP booking fee / commission. Single owner of the rate (it was a 0.15 literal in 3
 // places and "15%"/"85%" label text in 4 -- 2026-10-09 audit 3.8). Each gig still stores its own
 // ev.commission, which can differ (negotiated), so labels show the real figures, not this rate.
@@ -4153,7 +4164,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.25'; // bump on every release so a phone can tell it has updated. v1.9.25: Inbox money in -- payment emails matched to their invoice/deposit/balance, one-click record, exact bank alerts recorded on their own; payments mailbox in Settings
+const APP_VERSION = 'v1.9.26'; // bump on every release so a phone can tell it has updated. v1.9.26: the balance a client owes is the gig's fees and charges less the contract's deposit
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);

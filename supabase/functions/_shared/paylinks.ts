@@ -9,7 +9,7 @@
 // Service role only (these write rows the app's admins normally create).
 import { appUrl } from "./config.ts";
 import { stripeConfigured, stripeMode } from "./stripe.ts";
-import { balanceCentsOf, balanceDescription, balancePayeeProfile, balanceSplit, gigCardFeeBps, splitAccounts } from "./connect.ts";
+import { balanceDescription, balancePayeeProfile, balanceSplit, gigCardFeeBps, splitAccounts } from "./connect.ts";
 
 // deno-lint-ignore no-explicit-any
 type Sb = any;
@@ -113,13 +113,14 @@ export async function mintBalanceLink(sb: Sb, eventLegacyId: string): Promise<Mi
   if (ev.balanceReceived) return { ok: false, error: "paid" };
   if (!ev.depositReceived) return { ok: false, error: "no_deposit" };
   if (ev.paymentMethod && ev.paymentMethod !== "standard") return { ok: false, error: "not_online" };
-  const cents = balanceCentsOf(ev);
-  if (!Number.isFinite(cents)) return { ok: false, error: "payee_not_set_up" };
+  // What the client owes after the contract's deposit, and who gets which part of it.
+  const split = await balanceSplit(sb, eventLegacyId, ev);
+  if (!split) return { ok: false, error: "payee_not_set_up" };
+  const cents = split.totalCents;
   if (cents < 50) return { ok: false, error: "nothing_due" };
   if (!stripeConfigured()) return { ok: false, error: "unavailable" };
   // Every artist on the gig gets their share, so every one of their payees must be set up.
-  const split = await balanceSplit(sb, eventLegacyId, ev);
-  if (!split?.length || !(await splitAccounts(sb, split, stripeMode() === "live"))) return { ok: false, error: "payee_not_set_up" };
+  if (split.parts.length && !(await splitAccounts(sb, split.parts, stripeMode() === "live"))) return { ok: false, error: "payee_not_set_up" };
   const payee = await balancePayeeProfile(sb, eventLegacyId, ev);   // the main payee: what the link is checked against
   if (!payee?.id) return { ok: false, error: "payee_not_set_up" };
   const { data: pays, error } = await sb.from("payment_requests").select("pay_status")

@@ -36,13 +36,47 @@ export function balanceCentsOf(ev: Doc): number {
   return total;
 }
 
-// Who gets what of a gig's balance (owner 2026-10-16: one payment, split automatically): the main
-// artist's share to the gig's balance payee, each additional artist's share to that artist's own payee
-// profile. Shares of 0 are left out. null when a payee or a figure is missing.
+// The deposit the gig's contract asked for, in cents (contractPaymentFigures() in the app: a percent of
+// the contract's fee, else its $ amount) -- its newest signed contract, else sent, else any live one.
+// Without a contract (or one with no deposit), ASP's cut from every artist: the usual deposit.
+export function depositCentsOf(ev: Doc, contracts: Doc[]): number {
+  const live = contracts.filter((c) => c && c.status !== "void").sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const c = live.find((x) => x.status === "signed") || live.find((x) => x.status === "sent") || live[0];
+  if (c && c.fee && c.deposit) {
+    const total = Number(c.fee.amount) || 0;
+    const dep = Number(c.deposit.percent) > 0 ? Math.round(total * Number(c.deposit.percent) / 100) : Number(c.deposit.amount) || 0;
+    if (dep > 0) return Math.round(dep * 100);
+  }
+  return Math.round(((Number(ev.commission) || 0) + extraArtists(ev).reduce((t, x) => t + (Number(x.aspCut) || 0), 0)) * 100);
+}
+// What the client owes after the deposit: every artist's fee plus the gig's charges, less the deposit
+// (owner's EV-5020: a 25% contract deposit leaves less than fee-less-commission). NaN when an
+// additional artist's figures are missing.
+export function clientOwedCentsOf(ev: Doc, contracts: Doc[]): number {
+  const nets = balanceCentsOf(ev);
+  if (!Number.isFinite(nets)) return NaN;
+  const cuts = Math.round(((Number(ev.commission) || 0) + extraArtists(ev).reduce((t, x) => t + (Number(x.aspCut) || 0), 0)) * 100);
+  return nets + cuts - depositCentsOf(ev, contracts);
+}
+export async function gigContracts(sb: Sb, eventLegacyId: string): Promise<Doc[]> {
+  const { data } = await sb.from("app_records").select("app_doc").eq("collection", "contracts").eq("app_doc->>leadId", eventLegacyId);
+  return (data || []).map((r: Doc) => r.app_doc).filter(Boolean);
+}
+
+// Who gets what of the balance the client pays (owner 2026-10-16: one payment, split automatically):
+// each artist's own share -- the main artist's (fee − commission + charges) to the gig's balance payee,
+// each additional artist's (fee − ASP's cut) to that artist's own payee profile -- adjusted by how far
+// the deposit was from ASP's cut. A deposit SMALLER than ASP's cut leaves ASP's rest in this payment
+// (aspCents, kept by ASP). A deposit BIGGER than ASP's cut means ASP already holds part of the
+// artists' money: it comes off the main artist's share here (then the next ones') and ASP pays it to
+// them itself (heldByAspCents). Shares of 0 are left out. null when a payee or a figure is missing.
 export type SplitPart = { payeeProfileId: string; cents: number; name: string };
-export async function balanceSplit(sb: Sb, eventLegacyId: string, ev: Doc): Promise<SplitPart[] | null> {
+export type Split = { parts: SplitPart[]; aspCents: number; heldByAspCents: number; totalCents: number };
+export async function balanceSplit(sb: Sb, eventLegacyId: string, ev: Doc): Promise<Split | null> {
   const main = await balancePayeeProfile(sb, eventLegacyId, ev);
   if (!main?.id) return null;
+  const totalCents = clientOwedCentsOf(ev, await gigContracts(sb, eventLegacyId));
+  if (!Number.isFinite(totalCents)) return null;
   const parts: SplitPart[] = [{ payeeProfileId: main.id, cents: mainBalanceCentsOf(ev), name: main.entityName || "" }];
   const extras = extraArtists(ev);
   if (extras.length) {
@@ -56,7 +90,16 @@ export async function balanceSplit(sb: Sb, eventLegacyId: string, ev: Doc): Prom
     }
   }
   if (parts.some((p) => p.cents < 0)) return null;
-  return parts.filter((p) => p.cents > 0);
+  const shares = parts.reduce((t, p) => t + p.cents, 0);
+  let aspCents = 0, heldByAspCents = 0;
+  if (totalCents >= shares) aspCents = totalCents - shares;
+  else {
+    heldByAspCents = shares - totalCents;
+    let left = heldByAspCents;
+    for (const p of parts) { const take = Math.min(p.cents, left); p.cents -= take; left -= take; }
+    if (left > 0) return null;   // the deposit was more than the whole gig
+  }
+  return { parts: parts.filter((p) => p.cents > 0), aspCents, heldByAspCents, totalCents };
 }
 
 // The gig's balance payee: zellePayeeProfileFor() in the app -- the payee on its latest sent/signed

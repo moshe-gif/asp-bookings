@@ -23,7 +23,7 @@ import { serviceClient } from "../_shared/auth.ts";
 import { brandFor } from "../_shared/config.ts";
 import { cardFeeCents, recordPaymentIntent, stripeApi, stripeConfigured, stripeMode } from "../_shared/stripe.ts";
 import { balanceZelle, depositZelle, officePhone } from "../_shared/payblock.ts";
-import { balanceCentsOf, balancePayeeProfile, balanceSplit, gigCardFeeBps, isMultiArtist, splitAccounts } from "../_shared/connect.ts";
+import { balancePayeeProfile, balanceSplit, gigCardFeeBps, splitAccounts } from "../_shared/connect.ts";
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 const CT_RE = /^ctoken_[A-Za-z0-9]{8,}$/;
@@ -86,19 +86,17 @@ async function blocker(sb: any, r: Row, tokenHash: string): Promise<string | nul
       if (ev.balanceReceived) return "paid_elsewhere";
       // The link pays what was owed, to whom, when it was made: if the balance or the gig's payee has
       // changed since, the office sends a new link (and nothing goes to an artist no longer on the gig).
-      if (!ev.depositReceived || balanceCentsOf(ev) !== r.amount_cents) return "revoked";
+      if (!ev.depositReceived) return "revoked";
       if (ev.paymentMethod && ev.paymentMethod !== "standard") return "revoked";
+      // What the client owes now (after the contract's deposit) must still be what the link asks for,
+      // and every artist's payee must have a working Stripe account, or Pay would fail.
+      const split = await balanceSplit(sb, r.event_legacy_id, ev);
+      if (!split || split.totalCents !== r.amount_cents) return "revoked";
+      if (stripeConfigured() && split.parts.length && !(await splitAccounts(sb, split.parts, stripeMode() === "live"))) return "revoked";
       // Never more card fee than the office's setting allows for this gig (none in CT/MA).
       if (r.card_fee_bps > await gigCardFeeBps(sb, ev)) return "revoked";
       const payee = await balancePayeeProfile(sb, r.event_legacy_id, ev);
       if (!payee || payee.id !== r.payee_profile_id) return "revoked";
-      // Several artists: every one of them must have a payee with a working Stripe account, or the page
-      // would show a form whose Pay then fails.
-      if (isMultiArtist(ev)) {
-        const parts = await balanceSplit(sb, r.event_legacy_id, ev);
-        if (!parts || parts.reduce((t, p) => t + p.cents, 0) !== r.amount_cents) return "revoked";
-        if (stripeConfigured() && !(await splitAccounts(sb, parts, stripeMode() === "live"))) return "revoked";
-      }
     }
   } else if (!isTest(r)) {
     const { data: rec } = await sb.from("app_records").select("app_doc").eq("collection", "invoices").eq("legacy_id", r.invoice_legacy_id).maybeSingle();
@@ -268,34 +266,39 @@ Deno.serve(async (req) => {
   // automatically): the charge stays on ASP's account and each share is transferred from it once it's
   // paid (recordPaymentIntent), as frozen in the charge's metadata here. The split always adds up to
   // the link's amount (checked against the gig just now by blocker()).
+  // ASP keeps the card fee, plus its part of the balance when the deposit was less than its cut.
   let destination: string | null = null;
   let split: { account: string; cents: number }[] | null = null;
+  let aspCents = 0, heldByAspCents = 0;
   if (r.kind === "event_balance") {
-    let parts = null;
-    if (isTest(r)) parts = [{ payeeProfileId: r.payee_profile_id, cents: r.amount_cents, name: "" }];
+    let plan = null;
+    if (isTest(r)) plan = { parts: [{ payeeProfileId: r.payee_profile_id, cents: r.amount_cents, name: "" }], aspCents: 0, heldByAspCents: 0, totalCents: r.amount_cents };
     else {
       const { data: evRow } = await sb.from("events").select("app_doc").eq("legacy_id", r.event_legacy_id).maybeSingle();
-      parts = evRow?.app_doc ? await balanceSplit(sb, r.event_legacy_id, evRow.app_doc) : null;
+      plan = evRow?.app_doc ? await balanceSplit(sb, r.event_legacy_id, evRow.app_doc) : null;
     }
-    const accounts = parts && parts.reduce((t, p) => t + p.cents, 0) === r.amount_cents ? await splitAccounts(sb, parts, stripeMode() === "live") : null;
-    if (!accounts?.length) { await release(); return json({ ok: false, error: "unavailable" }, 503); }
+    const accounts = plan && plan.totalCents === r.amount_cents ? (plan.parts.length ? await splitAccounts(sb, plan.parts, stripeMode() === "live") : []) : null;
+    if (!plan || !accounts) { await release(); return json({ ok: false, error: "unavailable" }, 503); }
+    aspCents = plan.aspCents; heldByAspCents = plan.heldByAspCents;
     if (accounts.length === 1) destination = accounts[0].account;
-    else split = accounts;
+    else if (accounts.length > 1) split = accounts;
   }
+  const aspFee = quote.feeCents + aspCents;
   const params = {
     amount: quote.totalCents, currency: "usd", confirm: true, confirmation_token: body.confirmationTokenId,
     payment_method_types: [quote.method],
     // Instant bank verification only: micro-deposits would leave the client stuck on this page.
     ...(quote.method === "us_bank_account" ? { payment_method_options: { us_bank_account: { verification_method: "instant" } } } : {}),
     description: `${r.description}${quote.feeCents ? " (incl. credit card fee)" : ""}`.slice(0, 300),
-    // The artist gets the balance; ASP keeps only the card fee the client paid (if any).
-    ...(destination ? { transfer_data: { destination }, ...(quote.feeCents ? { application_fee_amount: quote.feeCents } : {}) } : {}),
+    // The artist gets their share; ASP keeps the card fee (if any) and its own part (aspCents).
+    ...(destination ? { transfer_data: { destination }, ...(aspFee ? { application_fee_amount: aspFee } : {}) } : {}),
     metadata: {
       payment_request_id: r.id, kind: r.kind, reference: ref, event: r.event_legacy_id || "",
       base_cents: String(r.amount_cents), fee_cents: String(quote.feeCents), pay_method: quote.method,
       card_brand: quote.method === "card" ? (quote.brand || "") : "", card_funding: quote.funding || "", last4: quote.last4 || "",
       payee_profile_id: r.payee_profile_id || "", destination: destination || "",
       ...(split ? { split: JSON.stringify(split.map((x) => [x.account, x.cents])) } : {}),
+      ...(aspCents ? { asp_cents: String(aspCents) } : {}), ...(heldByAspCents ? { held_by_asp_cents: String(heldByAspCents) } : {}),
     },
     ...(split ? { transfer_group: `pr_${r.id}` } : {}),
   };

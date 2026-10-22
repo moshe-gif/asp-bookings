@@ -197,7 +197,7 @@ export async function recordPaymentIntent(sb: any, pi: any): Promise<void> {
   if (p.client_email) tasks.push(relay(p.client_email, `Receipt: ${p.description}`, receipt, brand.senderName, brand.replyTo));
   if (brand.replyTo) {
     tasks.push(relay(brand.replyTo, `Paid online: ${dollars(total)}${p.client_name ? " — " + p.client_name : ""}`,
-      `<p style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;">${escapeHtml(p.client_name || "A client")} paid the ${escapeHtml(what)} online. ASP Bookings marks it received automatically.</p>${receipt}`,
+      `<p style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;">${escapeHtml(p.client_name || "A client")} paid the ${escapeHtml(what)} online. ASP Bookings marks it received automatically.${Number(pi.metadata?.held_by_asp_cents) ? ` <strong>ASP owes the artist ${dollars(Number(pi.metadata.held_by_asp_cents))}</strong>: the deposit was more than ASP's cut, so that part of their money is with ASP. Pay it to them by hand.` : ""}</p>${receipt}`,
       "ASP Bookings", null));
   }
   await Promise.all(tasks);
@@ -262,15 +262,16 @@ async function ledgerInsert(sb: any, p: any, pi: any): Promise<void> {
     eventUuid = ev?.id || null;
   }
   const what = whatOf(p);
-  // A balance went to the artist without the card fee, which ASP kept (application_fee_amount).
-  const toArtist = p.kind === "event_balance";
+  // A balance went to the artists without the card fee and ASP's own part (both kept by ASP).
+  const toArtist = p.kind === "event_balance" && !!(pi.transfer_data?.destination || pi.metadata?.split);
+  const aspPart = Number(pi.metadata?.asp_cents) || 0, held = Number(pi.metadata?.held_by_asp_cents) || 0;
   const { error } = await sb.from("payments").upsert({
-    event_id: eventUuid, amount: (toArtist ? total - fee : total) / 100, expected_amount: p.amount_cents / 100, kind: p.kind === "contract_deposit" ? "deposit" : "balance",
+    event_id: eventUuid, amount: (toArtist ? total - fee - aspPart : total) / 100, expected_amount: p.amount_cents / 100, kind: p.kind === "contract_deposit" ? "deposit" : "balance",
     source: "stripe", source_ref: pi.id, status: "received", received_at: p.paid_at || new Date().toISOString(), payer: p.client_name || null,
     payment_rail: p.pay_method === "us_bank_account" ? "ach" : "credit_card",
     destination: p.kind === "event_balance" ? "artist_direct" : "asp_operating",
     allocation_status: "allocated",
-    notes: `Paid online (${methodLabel(p)}): ${what}${pi.metadata?.split ? `, split between ${JSON.parse(pi.metadata.split).length} artists' Stripe accounts` : ""}${fee ? (toArtist ? `; the client also paid a ${dollars(fee)} card fee, which ASP kept` : `, including a ${dollars(fee)} card fee`) : ""}.`,
+    notes: `Paid online (${methodLabel(p)}): ${what}${aspPart ? `; ASP kept ${dollars(aspPart)} of it (the deposit was less than its cut)` : ""}${held ? `; ASP OWES THE ARTIST ${dollars(held)} from the deposit (it was more than ASP's cut): pay it by hand` : ""}${pi.metadata?.split ? `, split between ${JSON.parse(pi.metadata.split).length} artists' Stripe accounts` : ""}${fee ? (toArtist ? `; the client also paid a ${dollars(fee)} card fee, which ASP kept` : `, including a ${dollars(fee)} card fee`) : ""}.`,
   }, { onConflict: "source,source_ref", ignoreDuplicates: true });
   // Thrown so the webhook answers 500 and Stripe redelivers (the next delivery re-runs this).
   if (error) throw new Error(`payments ledger insert: ${error.message}`);

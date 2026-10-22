@@ -163,17 +163,19 @@ def test_bad_payout_setup_link_explains_itself(live_server, page):
 
 
 def test_multi_artist_balance_is_the_whole_gig(page):
-    # A gig with two artists (like EV-5016): the client owes the main artist's balance (fee − ASP's
-    # commission + extra charges) PLUS the second artist's (fee − ASP's cut) -- one payment, split
-    # between them. Runs the app's own one-line money helpers (the app keeps them in a closure).
+    # What the client owes = every artist's fee + the gig's charges − the deposit. Two artists (like
+    # EV-5016) with the usual deposit (ASP's cut from both): $11,850 in one payment, split between them.
+    # A 25% contract deposit on a $4,500 gig (EV-5020): $3,375, not fee-less-commission's $3,825.
+    # Runs the app's own one-line money helpers (the app keeps them in a closure).
     import re, pathlib
     src = (pathlib.Path(__file__).parent.parent / "frontend/workspaces/asp.js").read_text()
-    names = ["chargesTotal", "eventBalance", "artistPayout", "gigExtraArtists", "clientBalanceDue"]
-    helpers = "\n".join(re.search(rf"^function {n}\(ev\)\{{.*\}}$", src, re.M).group(0) for n in names)
+    names = ["chargesTotal", "eventBalance", "artistPayout", "gigExtraArtists", "gigAspCuts", "clientOwed"]
+    helpers = "\n".join(re.search(rf"^function {n}\([^)]*\)\{{.*\}}$", src, re.M).group(0) for n in names)
     out = page.evaluate(f"""() => {{ {helpers}
       const ev = {{ price:6000, commission:900, charges:[{{ amount:2500 }}], additionalArtists:[{{ artistId:'shmili', feeAmount:5000, aspCut:750 }}] }};
-      return {{ multi: clientBalanceDue(ev), main: artistPayout(ev), single: clientBalanceDue({{ ...ev, additionalArtists:[] }}), extras: gigExtraArtists(ev).length }};
+      const one = {{ price:4500, commission:675, charges:[], additionalArtists:[] }};
+      return {{ multi: clientOwed(ev, gigAspCuts(ev)), main: artistPayout(ev), usual: clientOwed(one, gigAspCuts(one)), bigDeposit: clientOwed(one, 1125) }};
     }}""")
-    assert out == {"multi": 11850, "main": 7600, "single": 7600, "extras": 1}, out
+    assert out == {"multi": 11850, "main": 7600, "usual": 3825, "bigDeposit": 3375}, out
     # One Zelle can't split the balance: a multi-artist gig gets none.
     assert "if(gigExtraArtists(ev).length) return null;" in src
