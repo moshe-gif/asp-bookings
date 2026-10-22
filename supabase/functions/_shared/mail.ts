@@ -20,7 +20,12 @@ const b64url = (bytes: Uint8Array) => b64(bytes).replace(/\+/g, "-").replace(/\/
 // the inbox watcher (inbox-scan), which reads the same mailbox.
 export async function gmailSender(sb: Sb): Promise<{ email: string; token: string } | null> {
   const { data: box } = await sb.from("gmail_mailboxes").select("id, email").eq("mailbox_type", "asp_sending").limit(1).maybeSingle();
-  if (!box) return null;
+  return box ? gmailToken(sb, box) : null;
+}
+
+// A usable access token for any connected mailbox (refreshed when it's about to expire); null when it
+// isn't connected or the refresh fails. inbox-scan reads every connected mailbox with it.
+export async function gmailToken(sb: Sb, box: { id: string; email: string }): Promise<{ email: string; token: string } | null> {
   const { data: tok } = await sb.from("gmail_oauth_tokens").select("access_token, refresh_token, access_token_expires_at").eq("gmail_mailbox_id", box.id).maybeSingle();
   if (!tok) return null;
   if (Date.parse(tok.access_token_expires_at) - Date.now() > 120_000) return { email: box.email, token: tok.access_token };
