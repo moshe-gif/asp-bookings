@@ -49,6 +49,7 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0062_inbox_items | Applied 2026-10-15 — inbox watch: `inbox_items` (one row per office email, classified + matched to a gig by the inbox-scan job) and `inbox_scan_state`. pg_cron job `inbox-scan` runs every 10 minutes (reads only). |
 | 0063_stripe_payees | Applied 2026-10-16 — balances paid online straight to the artist (Stripe Connect): `stripe_payees` (one Stripe Express account per payee profile, server-written), payment link kind `event_balance` + `payee_profile_id`, guard and `claim_payment_attempt` updated. |
 | 0064_money_in | Applied 2026-10-22 — money in from email: inbox-scan reads every connected Gmail mailbox (per-mailbox read position, new type `payments` read only for payment mail) and stores on each payment email what it pays (`inbox_items.money`: invoice / deposit / balance, exact or not, bank DKIM-verified); `money_applied_at` makes recording it once-only. |
+| 0065_thanks_and_chat_intake | **Not applied yet** (owner applies after review) — `client_followups.kind` allows `post_event_thanks`, with a unique index so a gig is thanked once (send-thanks); `intake_requests` + `intake_create_lead()` for chat intake (intake-lead): idempotency key, hourly cap, EV- id allocated and the gig inserted in one locked transaction. Service role only. |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in
