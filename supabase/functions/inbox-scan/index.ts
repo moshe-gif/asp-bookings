@@ -26,6 +26,9 @@ const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 const BANK_DOMAINS = ["chase.com", "bankofamerica.com", "wellsfargo.com", "zellepay.com", "tdbank.com", "citi.com", "capitalone.com", "usbank.com", "pnc.com", "ally.com", "valley.com", "mtb.com", "santander.us"];
 // A 'payments' mailbox (e.g. the Zelle inbox) is only searched for payment mail.
 const PAYMENT_TERMS = "(zelle OR payment OR paid OR deposit OR received OR invoice OR transfer OR sent you)";
+// A singer's own mailbox (artist_payment) is personal: only money-received alerts are ever read from it
+// (owner 2026-10-26: "read all emails from all my singers so you'll see their zelle come in").
+const ARTIST_PAYMENT_TERMS = '(zelle OR quickpay OR "sent you" OR "you received" OR "money received")';
 
 const str = (d: string) => ({ type: "string", description: d });
 const schema = {
@@ -123,7 +126,9 @@ Deno.serve(async (req) => {
     const g = (path: string) => fetch(`${GMAIL}${path}`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json());
     const since = Number(box.last_internal_date) || (Date.now() - FIRST_RUN_DAYS * 86_400_000);
     // Not "category:primary": this Workspace inbox has tabs off, so that matches nothing. Skip the bulk categories instead.
-    const q = box.mailbox_type === "payments"
+    const q = box.mailbox_type === "artist_payment"
+      ? `after:${Math.floor(since / 1000)} -in:spam -in:trash -from:${box.email} ${ARTIST_PAYMENT_TERMS}`
+      : box.mailbox_type === "payments"
       ? `after:${Math.floor(since / 1000)} -in:spam -in:trash -from:${box.email} ${PAYMENT_TERMS}`
       : `in:inbox after:${Math.floor(since / 1000)} -from:${box.email} -category:promotions -category:social -category:forums`;
     // Gmail lists newest first: page back through everything since the last run, then work oldest first,
