@@ -1,9 +1,10 @@
 // Automatic client follow-ups (owner 2026-10-14), run once a day by pg_cron (and on demand by an admin):
 //  - Deposit reminder every 7 days while a gig's contract has gone out (contract_sent) and no deposit is
 //    recorded -- with a fresh link to the same contract + deposit payment (old links keep working).
-//  - Balance reminder every 7 days while a confirmed date (booked) has its balance due, until it's paid.
+//  - Balance reminder while a confirmed date (booked) has its balance due, until it's paid: every 7 days
+//    within 8 weeks of the gig, every 14 days before that (owner 2026-10-26).
 // Upcoming gigs only; never when the client has no email, and never for gigs still flagged needsReview. Every send (or failure) is logged in
-// client_followups (0058), which is also how the 7-day rhythm is kept.
+// client_followups (0058), which is also how the rhythm is kept.
 //
 // Auth: the cron call sends header x-cron-secret = CRON_SECRET; an admin can also call it (dryRun:true
 // lists what would go out without sending). Deployed with JWT verification off for the cron call.
@@ -16,7 +17,9 @@ import { clientOwedCentsOf, gigContracts } from "../_shared/connect.ts";
 import { paymentOptionsHtml, depositZelle, balanceZelle, officePhone } from "../_shared/payblock.ts";
 
 const DAY = 86_400_000;
-const EVERY_DAYS = 7;
+const EVERY_DAYS = 7;          // deposit reminders, and balance reminders within CLOSE_DAYS of the gig
+const FAR_EVERY_DAYS = 14;     // balance reminders further out
+const CLOSE_DAYS = 56;         // 8 weeks
 const MAX_SENDS_PER_RUN = 40;
 
 // deno-lint-ignore no-explicit-any
@@ -76,11 +79,14 @@ Deno.serve(async (req) => {
       const owed = clientOwedCentsOf(ev, await gigContracts(sb, e.legacy_id));
       if (!Number.isFinite(owed) || owed <= 0) continue;
       const balance = owed / 100;
-      // Weekly from the deposit on (owner 2026-10-14: "right after the deposit"); a gig with no deposit
-      // date (imported) is due at once. Gigs still flagged for review keep their reminders until reviewed.
+      // From the deposit on (owner 2026-10-14: "right after the deposit"): weekly within 8 weeks of the gig,
+      // every 2 weeks before that (owner 2026-10-26). A gig never reminded yet is due at once. Gigs still
+      // flagged for review get no balance reminders until reviewed.
       if (ev.needsReview) continue;
       const last = lastSent.get(`${e.legacy_id}|balance_reminder`);
-      if (last !== undefined && now - last < EVERY_DAYS * DAY) continue;
+      const daysOut = (Date.parse(e.date + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / DAY;
+      const every = daysOut <= CLOSE_DAYS ? EVERY_DAYS : FAR_EVERY_DAYS;
+      if (last !== undefined && now - last < every * DAY) continue;
       planned.push({ kind: "balance_reminder", gig: e.legacy_id, to, greeting, when, balance, ev });
     }
   }
