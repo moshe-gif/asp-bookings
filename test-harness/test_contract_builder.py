@@ -98,7 +98,12 @@ def test_comedian_contract_defaults_no_recording_and_credit_cancellation(live_se
     doc_text = doc.inner_text()
     assert "COMEDIAN AGREEMENT" in doc_text
     assert "No Recording Clause" in doc_text
-    assert "credited toward a future event" in doc_text
+    assert "apply the full amount paid toward a future event" in doc_text
+    # As in Dovi's own contracts (owner 2026-10-26): a non-refundable deposit, mic + spotlight, 45 min - 1 hour.
+    assert "(non-refundable)" in doc_text
+    assert "Wired Microphone & Spotlight" in doc_text
+    assert "45 min – 1 hour" in doc_text
+    assert "material breach" in doc_text
 
     assert not errors, f"console errors during comedian contract defaults: {errors}"
 
