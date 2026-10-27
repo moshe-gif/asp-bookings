@@ -3823,7 +3823,7 @@ function closeAllOverlays(){
   S.showNewInvoice=false; S.showInvoiceDoc=false; S.invoiceDocId=null; S.showNewOutsideBooking=false;
   S.showOutsideBookingDetail=false; S.outsideBookingDetailId=null;
   S.showDocumentBuilder=false; S.documentId=null; S.showAiEditNotice=false;
-  S.showAddCharge=false; S.showEventMenu=false; S.projectTab='tasks'; S.taskAssigneeFilter=null; S.showReminderPreview=false; S.showBookingConfirmation=false;
+  S.showAddCharge=false; S.showEventMenu=false; S.projectTab='tasks'; S.taskAssigneeFilter=null; S.showReminderPreview=false; S.showBookingConfirmation=false; S.showThanks=false; S.thanksForm={};
   S.showMobileMenu=false; S.showAddRealUser=false; S.showEditRealUser=false;
   S.showContractBuilder=false; S.contractBuilderId=null; S.showContractBuilderDoc=false;
   S.showTemplatePicker=false; S.templatePickerLeadId=null;
@@ -4061,6 +4061,7 @@ function renderNow(){
     ${S.showTravelRequestDetail ? renderTravelRequestDetailSheet() : ''}
     ${S.showReminderPreview ? renderReminderPreview() : ''}
     ${S.showBookingConfirmation ? renderBookingConfirmationPreview() : ''}
+    ${S.showThanks ? renderThanksModal() : ''}
     ${renderInstallBanner()}
   `;
   pendingViewTransition = false;
@@ -4184,7 +4185,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.29'; // bump on every release so a phone can tell it has updated. v1.9.29: "Received so far" counts as the deposit; artists see what to collect at the event (Mezumin)
+const APP_VERSION = 'v1.9.30'; // bump on every release so a phone can tell it has updated. v1.9.30: post-event thank-you as a reviewed draft; Settings backup wording (v1.9.29: "Received so far" counts as the deposit; artists see what to collect at the event)
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -4593,6 +4594,7 @@ function renderMgmtDashboard(){
         <span style="text-decoration:underline;">Resolve</span></div>`;}).join('')}
     </div>
   </div>` : ''}
+  ${renderThanksDueCard()}
 
   <div class="section-head"><h2>Open Leads</h2><button class="btn btn-sm btn-ghost" data-action="nav" data-view="leads">View all ${ICO.chev('r')}</button></div>
   ${renderEventTable(open.slice(0,6), {showArtist:true})}
@@ -6247,6 +6249,94 @@ function renderBookingConfirmationPreview(){
     </div>
   </div>`;
 }
+// Post-event thank-you (owner 2026-10-23): a reviewed draft, never automatic. "Send thank-you" on a past
+// booked/paid gig opens this; the office edits the wording, sees the exact email (send-thanks renders it,
+// preview only), and only their Send click emails it -- once per gig, logged in client_followups
+// (migration 0065). THANKS_SENT is that log's gig ids; null until loaded.
+let THANKS_SENT = null, thanksLoading = false;
+async function loadThanksSent(){
+  if(thanksLoading || THANKS_SENT) return;
+  if(!supabaseClient){ THANKS_SENT = new Set(); return; }
+  thanksLoading = true;
+  try{
+    const { data, error } = await supabaseClient.from('client_followups').select('event_legacy_id').eq('kind','post_event_thanks').eq('ok', true);
+    THANKS_SENT = new Set(error ? [] : (data||[]).map(r=>r.event_legacy_id)); // unreadable: send-thanks still refuses a second one
+  }finally{ thanksLoading = false; }
+  render();
+}
+function thanksEligible(ev){ return !!ev && !ev.unpaid && ['booked','paid'].includes(ev.status) && isPast(ev.date) && !!(ev.clientEmail||'').trim(); }
+function thanksDraft(ev){
+  const artist = artistById(ev.artistId);
+  const first = String(ev.clientName||'').trim().split(/\s+/)[0];
+  const what = ev.type && ev.type!=='Other' ? `${ev.type.toLowerCase()}` : 'event';
+  return {
+    gig: ev.id, to: (ev.clientEmail||'').trim(),
+    subject: `Thank you — ${artist.name}, ${fmtDateShort(ev.date)}`,
+    text: `${first ? `Dear ${first},` : 'Hello,'}\n\nThank you so much for having ${artist.name} and ASP Management at your ${what} on ${fmtDateShort(ev.date)}. It was an honor to be part of it, and we hope it was everything you wanted.\n\nIf you have a moment, we'd love to hear how it went. Any feedback helps us, and we're always here for your next simcha.`,
+  };
+}
+// Dashboard: gigs from the last 30 days still waiting for a thank-you (past gigs aren't in the gig lists).
+function renderThanksDueCard(){
+  if(!THANKS_SENT){ loadThanksSent(); return ''; }
+  const due = S.events.filter(e=>thanksEligible(e) && daysUntil(e.date)>=-30 && !THANKS_SENT.has(e.id)).sort((a,b)=>b.date.localeCompare(a.date));
+  if(!due.length) return '';
+  return `<div class="card card-pad" style="margin-bottom:20px;">
+    <div class="u-label" style="margin-bottom:8px;">Thank-you emails to send (${due.length})</div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      ${due.map(e=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12.5px;">
+        <span style="min-width:0;overflow-wrap:anywhere;cursor:pointer;" data-action="open-event" data-id="${e.id}"><strong>${esc(e.clientName||'—')}</strong> · ${esc(artistById(e.artistId).name)} · ${fmtDateShort(e.date)}</span>
+        <button class="btn btn-sm" data-action="open-thanks" data-id="${e.id}">Write thank-you</button></div>`).join('')}
+    </div>
+  </div>`;
+}
+function thanksFormKey(f){ return JSON.stringify([f.to||'', f.subject||'', f.text||'']); }
+async function doPreviewThanks(id){
+  const f = S.thanksForm; const key = thanksFormKey(f); // what this preview shows, not what's typed when it returns
+  S.thanksBusy = true; render();
+  try{
+    const res = await callEdgeFunction('send-thanks', { gig:id, to:f.to, subject:f.subject, text:f.text, preview:true });
+    if(res.ok){ f.previewHtml = res.html; f.previewOf = key; }
+    else toast(res.error || 'Could not show the preview.', 'system');
+  }finally{ S.thanksBusy = false; render(); }
+}
+async function doSendThanks(id){
+  const ev = getEvent(id); const f = S.thanksForm;
+  if(!ev || S.thanksBusy) return;
+  // Only ever send what was previewed: an edit since the last preview refreshes it first.
+  if(f.previewOf !== thanksFormKey(f)){ await doPreviewThanks(id); toast('Preview updated — check it, then press Send.', 'system'); return; }
+  S.thanksBusy = true; render();
+  try{
+    const res = await callEdgeFunction('send-thanks', { gig:id, to:f.to, subject:f.subject, text:f.text });
+    if(!res.ok){ toast(res.error || 'Could not send.', 'system'); if(/already thanked/.test(res.error||'')){ THANKS_SENT = null; loadThanksSent(); } return; }
+    if(res.testMode){ toast(`Test mode: sent to ${res.testTo} only — ${ev.clientName||'the client'} got nothing and the gig isn't marked thanked.`, 'system'); }
+    else {
+      if(THANKS_SENT) THANKS_SENT.add(id);
+      logEvent(ev, 'success', `Thank-you email sent to ${f.to}.`);
+      reportEventSave(updateEvent(id, {}), 'logging the thank-you');
+      toast('Thank-you sent.', 'success');
+    }
+    S.showThanks = false; S.thanksForm = {};
+  }finally{ S.thanksBusy = false; render(); }
+}
+function renderThanksModal(){
+  const f = S.thanksForm; const busy = !!S.thanksBusy;
+  const ev = getEvent(f.gig); if(!ev) return '';
+  return `<div class="overlay center" data-action="overlay-close-thanks">
+    <div class="doc" data-stop style="width:560px;">
+      <div class="sheet-head"><h2 style="font-size:1.1rem;">Thank-you email</h2><button class="icon-btn" data-action="close-thanks" aria-label="Close">${ICO.x}</button></div>
+      <div class="doc-body" style="padding:22px 24px 26px;" data-form="thanks">
+        <div class="field"><label>To</label><input type="email" data-field="to" value="${esc(f.to||'')}"/></div>
+        <div class="field"><label>Subject</label><input data-field="subject" value="${esc(f.subject||'')}"/></div>
+        <div class="field"><label>Message</label><textarea data-field="text" rows="8">${esc(f.text||'')}</textarea></div>
+        <button class="btn btn-sm" data-action="preview-thanks" data-id="${ev.id}" ${busy?'disabled':''}>Update preview</button>
+        <div class="u-label" style="margin:14px 0 6px;">Exactly what ${esc(f.to||'the client')} will get</div>
+        ${f.previewHtml ? `<iframe title="Email preview" sandbox="" srcdoc="${esc(f.previewHtml)}" style="width:100%;height:420px;border:1px solid var(--border);border-radius:8px;background:#fff;"></iframe>` : `<div class="empty">${busy?'Loading preview…':'No preview yet.'}</div>`}
+        <button class="btn btn-primary btn-block" style="margin-top:14px;" data-action="send-thanks" data-id="${ev.id}" ${busy||!f.previewHtml?'disabled':''}>${busy?'Working…':'Send'}</button>
+        <p style="font-size:11px;color:var(--ink-3);text-align:center;margin:8px 0 0;">Sent once per gig. Nothing is sent until you press Send.</p>
+      </div>
+    </div>
+  </div>`;
+}
 function renderWelcomeEmailPreview(){
   const w = S.newArtistWelcome; if(!w) return '';
   return `<div class="overlay center" data-action="overlay-close-welcome">
@@ -6810,6 +6900,11 @@ function renderAdminActions(ev){
       </div>
       ${standard? `<button class="btn btn-sm btn-ghost" data-action="preview-reminder" data-id="${ev.id}" style="color:var(--ink-2);">${ICO.sms} Preview reminder email (Zelle QR)</button>` : ''}
     </div>`);
+  }
+  if(thanksEligible(ev)){
+    if(!THANKS_SENT) loadThanksSent();
+    else if(THANKS_SENT.has(ev.id)) buttons.push(`<div style="font-size:12px;color:var(--ink-3);">${ICO.check} Thank-you email sent</div>`);
+    else buttons.push(`<button class="btn btn-sm btn-block" data-action="open-thanks" data-id="${ev.id}">${ICO.sms} Send thank-you</button>`);
   }
   return buttons.length? `<div style="display:flex;flex-direction:column;gap:10px;">${buttons.join('')}</div>` : '';
 }
@@ -8376,8 +8471,8 @@ function renderBackupCard(){
   const ageDays = last ? Math.floor((Date.now() - Date.parse(last)) / 86400000) : null;
   const stale = ageDays===null || ageDays > 7;
   return `<div class="card card-pad" style="margin-bottom:20px;">
-    <h3 style="margin-bottom:6px;">Back up &amp; restore this browser's data</h3>
-    <p style="font-size:12.5px;color:var(--ink-2);margin:0 0 10px;">Gigs, contracts, payee profiles and the rest are stored <strong>only in this browser</strong> on this computer for now. Clearing browser data or switching computers loses them unless you have a backup.</p>
+    <h3 style="margin-bottom:6px;">Back up &amp; restore</h3>
+    <p style="font-size:12.5px;color:var(--ink-2);margin:0 0 10px;">Gigs, contracts, payee profiles and the rest are saved to the office's shared database and stay in step on every signed-in device. <strong>Back up my data</strong> downloads a copy of them to this computer as a file, as an extra safety copy you can keep or restore from.</p>
     <p style="font-size:12px;margin:0 0 12px;color:${stale?'var(--warn-ink)':'var(--ink-3)'};">${last ? `Last backup: ${esc(fmtDateShort(localISO(new Date(last))))}${stale?' — time for a new one':''}` : 'No backup yet from this browser.'}</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn btn-sm btn-primary" data-action="download-backup">${ICO.check} Back up my data</button>
@@ -9487,6 +9582,11 @@ function registerAction(name, fn){
   ACTIONS[name] = fn;
 }
 registerAction('download-backup', ()=>doDownloadBackup());
+registerAction('open-thanks', ({ id })=>{ const ev = getEvent(id); if(!thanksEligible(ev)) return; S.thanksForm = thanksDraft(ev); S.showThanks = true; doPreviewThanks(id); });
+registerAction('preview-thanks', ({ id })=>doPreviewThanks(id));
+registerAction('send-thanks', ({ id })=>doSendThanks(id));
+registerAction('close-thanks', ()=>{ S.showThanks = false; S.thanksForm = {}; render(); });
+registerAction('overlay-close-thanks', ({ e, t })=>{ if(e.target===t){ S.showThanks = false; S.thanksForm = {}; render(); } });
 registerAction('make-sign-link', ({ id })=>doMakeSignLink(id));
 registerAction('edit-contract-from-doc', ({ id })=>{ S.showContractBuilderDoc = false; S.showContractBuilder = true; S.contractBuilderId = id; render(); });
 registerAction('inbox-check-now', ()=>doInboxCheckNow());
@@ -9667,6 +9767,7 @@ function bindGlobal(){
       formTargets.lead = S.newLeadForm;
       formTargets.traveldrop = S.travelDropForm = S.travelDropForm || {};
       formTargets.gigfee = S.gigFeeForm = S.gigFeeForm || {};
+      formTargets.thanks = S.thanksForm = S.thanksForm || {};
       // A misspelled data-form used to write silently into the New Lead form (2026-10-09 audit 5.2).
       // Fields with no data-form at all keep the old New-Lead default.
       if(form && !formTargets[form]){ console.warn('data-field inside unknown data-form:', form, key); return; }
