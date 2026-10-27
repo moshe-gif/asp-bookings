@@ -5,15 +5,20 @@
 //    within 8 weeks of the gig, every 14 days before that (owner 2026-10-26).
 // Upcoming gigs only; never when the client has no email, and never for gigs still flagged needsReview. Every send (or failure) is logged in
 // client_followups (0058), which is also how the rhythm is kept.
+//  - A gig paid another way (paymentMethod cash / check / other) gets no weekly balance reminders, as the
+//    app's Payment Method field promises. A Mezumin (cash) gig's client instead gets ONE reminder 3 days
+//    before the gig -- email + WhatsApp: have $X in cash ready for the artist (owner 2026-10-27). The
+//    artist sees what to collect in their gig info (artist_gig_view, migration 0066), not by message.
 //
 // Auth: the cron call sends header x-cron-secret = CRON_SECRET; an admin can also call it (dryRun:true
 // lists what would go out without sending). Deployed with JWT verification off for the cron call.
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 import { sendRelayEmail } from "../_shared/mail.ts";
+import { sendWhatsApp } from "../_shared/whatsapp.ts";
 import { emailHtml, esc } from "../_shared/clientmail.ts";
 import { mintContractLink, mintBalanceLink } from "../_shared/paylinks.ts";
-import { clientOwedCentsOf, gigContracts } from "../_shared/connect.ts";
+import { clientOwedCentsOf, depositCentsOf, gigContracts } from "../_shared/connect.ts";
 import { paymentOptionsHtml, depositZelle, balanceZelle, officePhone } from "../_shared/payblock.ts";
 
 const DAY = 86_400_000;
@@ -57,9 +62,26 @@ Deno.serve(async (req) => {
   for (const l of logs || []) { const k = `${l.event_legacy_id}|${l.kind}`; if (!lastSent.has(k)) lastSent.set(k, Date.parse(l.sent_at)); }
 
   const planned: Row[] = [];
+  const CASH_DAYS_BEFORE = 3;
+  const { data: roster } = await sb.from("artists").select("id, legacy_id, name");
+  const artistName = (id: string) => String((roster || []).find((r: Row) => r.legacy_id === id || r.id === id)?.name || "");
   for (const e of events || []) {
     const ev: Row = e.app_doc || {};
     const to = String(ev.clientEmail || "").trim();
+    if (e.status === "booked" && ev.paymentMethod === "cash" && !ev.balanceReceived && !ev.unpaid && !ev.needsReview) {
+      const daysOut = Math.round((Date.parse(e.date + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / DAY);
+      const last = lastSent.get(`${e.legacy_id}|balance_reminder`);
+      if (daysOut < 1 || daysOut > CASH_DAYS_BEFORE || (last !== undefined && now - last < 7 * DAY)) continue;
+      if (!to && !ev.clientPhone) continue;
+      const contracts = await gigContracts(sb, e.legacy_id);
+      // No deposit received: the whole amount is due in cash (the same rule as the artist's view, 0066).
+      const owed = clientOwedCentsOf(ev, contracts) + (ev.depositReceived ? 0 : depositCentsOf(ev, contracts));
+      if (!Number.isFinite(owed) || owed <= 0) continue;
+      const who = String(ev.clientName || "").trim();
+      planned.push({ kind: "balance_reminder", cash: true, gig: e.legacy_id, to, phone: String(ev.clientPhone || "").trim(),
+        greeting: who ? `Dear ${who.split(/\s+/)[0]},` : "Hello,", when: fmtDate(e.date), balance: owed / 100, artist: artistName(ev.artistId), ev });
+      continue;
+    }
     if (!to || ev.unpaid) continue;
     const who = String(ev.clientName || "").trim();
     const greeting = who ? `Dear ${who.split(/\s+/)[0]},` : "Hello,";
@@ -73,7 +95,7 @@ Deno.serve(async (req) => {
       const since = lastSent.get(`${e.legacy_id}|deposit_reminder`) ?? Date.parse(sr.created_at);
       if (now - since < EVERY_DAYS * DAY) continue;
       planned.push({ kind: "deposit_reminder", gig: e.legacy_id, contract: sr.contract_legacy_id, contractCreatedAt: sr.contract_created_at, to, greeting, when, ev });
-    } else if (e.status === "booked" && ev.depositReceived && !ev.balanceReceived) {
+    } else if (e.status === "booked" && ev.depositReceived && !ev.balanceReceived && (!ev.paymentMethod || ev.paymentMethod === "standard")) {
       // What the client owes after the contract's deposit (clientOwedCentsOf, the same figure as the app,
       // the pay link and the inbox's payment matching). NaN (an extra artist's figures missing) sends nothing.
       const owed = clientOwedCentsOf(ev, await gigContracts(sb, e.legacy_id));
@@ -111,6 +133,14 @@ Deno.serve(async (req) => {
           button: { label: "Review & pay deposit", url: link.url },
           payment: paymentOptionsHtml({ kind: "deposit", payUrl: link.withPay ? link.url : null, memo: `${p.ev.clientName || ""} ${p.when}`.trim(), zelle: await depositZelle(sb), officePhone: phone }),
         });
+      } else if (p.cash) {
+        const by = p.artist ? ` for ${p.artist}` : "";
+        subject = `Reminder: ${p.when} — please have ${money(p.balance)} in cash ready`;
+        html = emailHtml({
+          greeting: p.greeting, phone,
+          lines: [`This is a friendly reminder that your event is coming up on <strong>${esc(p.when)}</strong>.`,
+            `As arranged, the balance of <strong>${money(p.balance)}</strong> is paid in cash at the event. Please have it ready${esc(by)}.`],
+        });
       } else {
         subject = `Balance reminder — ${p.when}`;
         // Pay online when the artist's payee has Stripe payouts set up (a new link row per send, so never for a
@@ -124,10 +154,25 @@ Deno.serve(async (req) => {
           payment: paymentOptionsHtml({ kind: "balance", payUrl, amount: p.balance, memo: `${p.ev.clientName || ""} ${p.when}`.trim(), zelle: await balanceZelle(sb, p.gig), officePhone: phone }),
         });
       }
-      const sent = await sendRelayEmail(sb, { to: p.to, subject: previewTo ? `[Preview] ${subject}` : subject, html, brand: "asp" });
+      const sent: { ok: boolean; error?: string; id?: string } = p.to
+        ? await sendRelayEmail(sb, { to: p.to, subject: previewTo ? `[Preview] ${subject}` : subject, html, brand: "asp" })
+        : { ok: false, error: "no client email" };
       if (previewTo) { results.push({ kind: p.kind, gig: p.gig, ok: sent.ok, error: sent.error, preview: true }); continue; }
-      await sb.from("client_followups").insert({ event_legacy_id: p.gig, contract_legacy_id: contract, kind: p.kind, sent_to: p.to, ok: sent.ok, error: sent.ok ? null : sent.error, provider_id: sent.id || null });
-      results.push({ kind: p.kind, gig: p.gig, ok: sent.ok, error: sent.error });
+      // The cash reminder also goes by WhatsApp (test mode: to the owner's phone). A business may only start a
+      // chat with an approved template: WHATSAPP_TEMPLATE_CASH (params: first name, date, amount, artist) once
+      // one is approved; until then a plain message, which WhatsApp only delivers inside a 24-hour window.
+      let wa: { ok: boolean; error?: string } | null = null;
+      if (p.cash && p.phone) {
+        const tpl = Deno.env.get("WHATSAPP_TEMPLATE_CASH");
+        const first = String(p.ev.clientName || "").trim().split(/\s+/)[0] || "there";
+        wa = await sendWhatsApp(tpl
+          ? { to: p.phone, template: { name: tpl, params: [first, p.when, money(p.balance), p.artist || "the artist"] } }
+          : { to: p.phone, text: `Hi ${first}, a reminder from ASP Management: your event is on ${p.when}. As arranged, the balance of ${money(p.balance)} is paid in cash at the event -- please have it ready${p.artist ? ` for ${p.artist}` : ""}. Thank you!` });
+      }
+      const ok = sent.ok || !!wa?.ok;
+      const err = [sent.ok ? "" : `email: ${sent.error}`, wa && !wa.ok ? `whatsapp: ${wa.error}` : ""].filter(Boolean).join("; ");
+      await sb.from("client_followups").insert({ event_legacy_id: p.gig, contract_legacy_id: contract, kind: p.kind, sent_to: p.to || p.phone, ok, error: err ? err.slice(0, 500) : null, provider_id: sent.id || null });
+      results.push({ kind: p.kind, gig: p.gig, ok, error: err || undefined, ...(wa ? { whatsapp: wa.ok } : {}) });
     } catch (err) {
       const msg = String((err as Error)?.message || err);
       await sb.from("client_followups").insert({ event_legacy_id: p.gig, contract_legacy_id: contract, kind: p.kind, sent_to: p.to, ok: false, error: msg.slice(0, 500) });
