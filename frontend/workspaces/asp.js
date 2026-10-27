@@ -105,6 +105,11 @@ let ARTISTS = [
   {id:'shmili', name:'Shmili Landau', slot:5, initials:'SL', email:'shmili@aspmanagement.com', role:'DJ'},
 ];
 const artistById = (id)=>ARTISTS.find(a=>a.id===id);
+// Supabase tables reference artists by their row uuid (artists.id), while the app's id is the
+// legacy_id ('baruch') when there is one -- convert at that boundary (2026-10-26: adding Baruch's
+// mailbox failed with "invalid input syntax for type uuid").
+const artistDbId = (id)=>{ const a = artistById(id); return (a && a.dbId) || (/^[0-9a-f-]{36}$/i.test(id||'') ? id : null); };
+const artistByDbId = (uuid)=>ARTISTS.find(a=>a.dbId===uuid || a.id===uuid);
 const ARTISTS_LS_KEY = 'asp_mock_artists_v1';
 function loadArtists(){ try{ const raw = localStorage.getItem(ARTISTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
 function saveArtists(){ return persist(ARTISTS_LS_KEY, ARTISTS, 'the artist roster'); }
@@ -809,7 +814,9 @@ function contractDateSentence(c){
 function contractCancellationText(c){
   const p = c.cancellationPolicy || {};
   if(p.type==='credit_future'){
-    return `Cancellation Clause: If the Client cancels, the Client agrees to pay 80% of the contracted amount, which will be credited toward a future event within ${p.creditWindowMonths||6}-${(p.creditWindowMonths||6)+2} months.`;
+    // Dovi's own wording (owner 2026-10-26, from his signed contracts).
+    const m = p.creditWindowMonths||6;
+    return `Cancellation Clause: In the event of cancellation for any reason, the Client agrees to pay 80% of the contracted amount. This is due to the fact that we reserve the event date(s) exclusively and turn down other potential bookings for that period. However, we are happy to apply the full amount paid toward a future event scheduled within the next ${m} to ${m+2} months from the original event date, subject to availability and mutual agreement.`;
   }
   if(p.type==='credit_reschedule'){
     return 'In the event of cancellation or postponement, the Artist will use the deposit towards the rescheduled date (pending availability).';
@@ -861,7 +868,8 @@ function contractIpClauseText(){
   return 'Videos of the performance may not be taken and/or disseminated in any way without the express consent of the performer.';
 }
 function contractNoRecordingText(){
-  return 'No Recording Clause. Audience members and staff are strictly prohibited from recording, photographing, or livestreaming the performance in any form without the Artist\'s express written consent. Violation of this clause may result in legal remedies.';
+  // Dovi's own wording (owner 2026-10-26, from his signed contracts).
+  return 'No Recording Clause. The Artist strictly prohibits any form of video or audio recording of the performance, including but not limited to filming, live streaming, or posting on social media, without prior written consent. The Venue and Client shall ensure that all attendees, staff, and third parties comply with this restriction. Any unauthorized recording constitutes a material breach of this Agreement and may result in immediate termination of the performance without refund, and the Artist reserves the right to pursue legal remedies.';
 }
 
 /* ---- Contract CRUD (direct-mutate + autosave, same convention as project board cards/tasks) ---- */
@@ -922,6 +930,11 @@ function doCreateContractFromLead(eventId, template){
     bsdHeader: true,
   };
   if(template==='comedian'){
+    // As in Dovi's contracts (owner 2026-10-26): a non-refundable deposit, mic + spotlight, 45 min - 1 hour.
+    // The deposit %, his other terms and where it's paid come from his payee profile (PP for 'dovie').
+    contract.deposit.nonRefundable = true;
+    if(!contract.clientProvides.length) contract.clientProvides = ['Appropriate Venue & Sound System', 'Wired Microphone & Spotlight'];
+    contract.performanceDuration = '45 min – 1 hour';
     contract.boilerplate.acceptanceClause = true;
     contract.boilerplate.noRecording = true;
     contract.cancellationPolicy = { type:'credit_future', flatPercent:80, tiers:[], creditWindowMonths:6, withinDays:40 };
@@ -2430,8 +2443,11 @@ function gigExtraArtists(ev){ return (ev.additionalArtists||[]).filter(x=>x && x
 function gigAspCuts(ev){ return (Number(ev.commission)||0) + gigExtraArtists(ev).reduce((t,x)=>t + (Number(x.aspCut)||0), 0); }
 function clientOwed(ev, deposit){ return artistPayout(ev) + gigExtraArtists(ev).reduce((t,x)=>t + (Number(x.feeAmount)||0) - (Number(x.aspCut)||0), 0) + gigAspCuts(ev) - deposit; }
 // The deposit the gig's newest signed (else sent, else any live) contract asked for; without one, ASP's
-// cut from every artist (the usual deposit).
+// cut from every artist (the usual deposit). Money paid early on top of the deposit counts as deposit
+// (owner 2026-10-27): once received, ev.depositPaid (everything in so far) replaces it -- the server
+// twin is depositCentsOf() in _shared/connect.ts.
 function gigDepositDue(ev){
+  if(ev.depositReceived && Number(ev.depositPaid) > 0) return Number(ev.depositPaid);
   const live = contractsForLead(ev.id).filter(c=>c.status!=='void').sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
   const c = live.find(x=>x.status==='signed') || live.find(x=>x.status==='sent') || live[0];
   const d = c && c.fee && c.deposit ? contractPaymentFigures(c).deposit : 0;
@@ -3058,6 +3074,9 @@ function artistPortalEvent(g, m, artistId){
     groundTransportNeeded: !!g.ground_transport_needed, groundTransportBooked: !!(g.ground_transport_booked && g.ground_transport), groundTransport: g.ground_transport || null,
     travel: g.travel || null, gigInfoSheet: g.gig_sheet || null, // itinerary + gig sheet (0060)
     coPerformers: Array.isArray(g.co_performers) ? g.co_performers : [],
+    // What to collect at the event on a gig not paid the standard way, e.g. Mezumin (0066; main artist only).
+    collectMethod: g.collect_method || null, collectNote: g.collect_note || null,
+    collectAmount: g.collect_amount==null ? null : Number(g.collect_amount),
     moneyPending: pending,
     price: num(m && m.gross_amount), commission: num(m && m.asp_cut), netAmount: num(m && m.net_amount),
     aspCutPct: (pending || !m || m.asp_cut_pct===null) ? null : Number(m.asp_cut_pct),
@@ -3450,8 +3469,9 @@ async function loadCalendarMappings(){
 }
 async function doSaveCalendarMapping(target, calendarId){
   if(!supabaseClient) return;
-  const artistId = target==='asp_main' ? null : target;
-  const label = artistId ? (artistById(artistId)||{}).name || target : 'ASP Main Calendar';
+  const artistId = target==='asp_main' ? null : artistDbId(target);
+  if(target!=='asp_main' && !artistId){ toast('That artist isn\'t saved in Supabase yet — reload and try again.', 'system'); return; }
+  const label = artistId ? (artistByDbId(artistId)||{}).name || target : 'ASP Main Calendar';
   const existing = (S.calendarMappings||[]).find(m=> artistId? m.artist_id===artistId : !m.artist_id);
   if(existing){
     const { error } = await supabaseClient.from('integration_connections').update({ config:{calendar_id:calendarId}, account_label:label, updated_at:new Date().toISOString() }).eq('id', existing.id);
@@ -3486,7 +3506,7 @@ async function doAddGmailMailbox(){
   if(!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ toast('Enter a valid mailbox email.', 'system'); return; }
   const { error } = await supabaseClient.from('gmail_mailboxes').insert({
     // No artist picked = the office's sending mailbox (the dropdown's first option); it always saved as artist_payment before.
-    mailbox_type: f.artistId==='__payments' ? 'payments' : f.artistId ? 'artist_payment' : 'asp_sending', artist_id: f.artistId && f.artistId!=='__payments' ? f.artistId : null, email,
+    mailbox_type: f.artistId==='__payments' ? 'payments' : f.artistId ? 'artist_payment' : 'asp_sending', artist_id: f.artistId && f.artistId!=='__payments' ? artistDbId(f.artistId) : null, email,
   });
   if(error){ toast(/duplicate key|gmail_mailboxes_email_key/.test(error.message) ? `${email} is already added — click Connect next to it below.` : 'Could not add mailbox: ' + error.message, 'system'); loadGmailStatus(); return; }
   S.newGmailMailboxForm = {};
@@ -4165,7 +4185,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.27'; // bump on every release so a phone can tell it has updated. v1.9.27: post-event thank-you as a reviewed draft; Settings backup wording
+const APP_VERSION = 'v1.9.30'; // bump on every release so a phone can tell it has updated. v1.9.30: post-event thank-you as a reviewed draft; Settings backup wording (v1.9.29: "Received so far" counts as the deposit; artists see what to collect at the event)
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -6402,6 +6422,7 @@ function renderEventSheet(ev){
           ${isAdmin && !ev.unpaid?`<div class="kv-row" data-action="open-client-contact" data-id="${ev.id}" style="cursor:pointer;"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;color:var(--accent);">${ev.clientEmail||ev.clientPhone? `${esc(ev.clientEmail)}${ev.clientEmail&&ev.clientPhone?'<br/>':''}<span style="font-weight:500;">${esc(ev.clientPhone)}</span>` : '<span style="font-weight:500;">+ Add contact</span>'}</strong></div>`:''}
           ${!isAdmin && !ev.unpaid && (ev.clientPhone || ev.clientEmail) ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;">${ev.clientPhone?`<a href="tel:${esc(telHref(ev.clientPhone))}" style="color:var(--accent);text-decoration:none;">${esc(ev.clientPhone)}</a>`:''}${ev.clientPhone&&ev.clientEmail?'<br/>':''}${ev.clientEmail?`<a href="mailto:${esc(ev.clientEmail)}" style="color:var(--accent);text-decoration:none;font-weight:500;">${esc(ev.clientEmail)}</a>`:''}</strong></div>` : ''}
           ${!isAdmin && (ev.coPerformers||[]).length ? `<div class="kv-row"><span style="color:var(--ink-2);">Performing with</span><strong style="text-align:right;">${ev.coPerformers.map(c=>`${esc(c.name)}${c.role?` <span style="font-weight:500;color:var(--ink-2);">(${esc(c.role)})</span>`:''}`).join('<br/>')}</strong></div>` : ''}
+          ${!isAdmin && ev.collectMethod ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.money} Collect at the event</span><strong style="text-align:right;color:var(--warn-ink);">${ev.collectAmount!=null?`${money(ev.collectAmount)} `:''}${esc(ev.collectMethod==='cash'?'cash (mezumin)':ev.collectMethod==='check'?'by check':'balance')}${ev.collectNote?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.collectNote)}</span>`:''}</strong></div>` : ''}
           ${isAdmin && !ev.unpaid && !isStandardPayment(ev) ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.money} Payment Method</span><strong style="text-align:right;color:var(--warn-ink);">${esc(paymentMethodLabel(ev))}${ev.paymentMethodNote?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.paymentMethodNote)}</span>`:''}</strong></div>` : ''}
         </div>
 
@@ -7017,6 +7038,9 @@ function renderEditEventFormOverlay(){
           <div class="field"><label>Deposit / Booking Fee</label><input type="number" data-field="commission" value="${f.commission!==undefined?f.commission:ev.commission}"/></div>
           <div class="field"><label>Payment Method</label><select class="edit-event-payment-select">${PAYMENT_METHODS.map(([k,l])=>`<option value="${k}" ${paymentMethod===k?'selected':''}>${esc(l)}</option>`).join('')}</select></div>
         </div>
+        ${ev.depositReceived? `<div class="field"><label>Received So Far (optional)</label><input type="number" data-field="depositPaid" value="${f.depositPaid!==undefined?f.depositPaid:(ev.depositPaid||'')}" placeholder="Leave blank if only the deposit came in"/>
+          <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Everything the client has paid so far. It counts as the deposit, so balance reminders ask only for what's left.</p>
+        </div>` : ''}
         ${paymentMethod!=='standard'? `<div class="field"><label>Payment Note (optional)</label><input data-field="paymentMethodNote" value="${esc(f.paymentMethodNote!==undefined?f.paymentMethodNote:(ev.paymentMethodNote||''))}" placeholder="e.g. paying cash at the event"/>
           <p style="font-size:11px;color:var(--warn-ink);margin:4px 0 0;">Alternative payment method — no automated QuickBooks invoice or Zelle reminder for this booking. It'll show up under Payment Follow-Up until marked paid.</p>
         </div>` : ''}`;
@@ -8292,7 +8316,7 @@ function renderGoogleCalendarSyncCard(){
 function renderCalendarMappingSection(){
   const mappings = S.calendarMappings;
   const busy = !!S.calendarMappingsBusy;
-  const mapFor = (artistId)=> (mappings||[]).find(m=> artistId? m.artist_id===artistId : !m.artist_id);
+  const mapFor = (artistId)=> (mappings||[]).find(m=> artistId? m.artist_id===artistDbId(artistId) : !m.artist_id);
   return `<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
     <h4 style="font-size:12px;margin:0 0 8px;color:var(--ink-2);">Calendar ID Mapping</h4>
     ${!mappings? `<button class="btn btn-sm btn-ghost" data-action="check-calendar-mappings" ${busy?'disabled':''}>${busy?'Loading…':'Load Mapping'}</button>`
@@ -8334,7 +8358,7 @@ function renderGmailMailboxesCard(){
     ${!boxes? `<button class="btn btn-sm btn-ghost" data-action="check-gmail-mailboxes" ${busy?'disabled':''}>${busy?'Checking…':'Check Mailboxes'}</button>`
     : boxes.length===0? `<p style="font-size:12px;color:var(--ink-3);margin:0;">No mailboxes added yet.</p>`
     : `<div style="display:flex;flex-direction:column;gap:8px;">
-        ${boxes.map(m=>{ const a = m.artist_id ? artistById(m.artist_id) : null; return `<div class="settings-row">
+        ${boxes.map(m=>{ const a = m.artist_id ? artistByDbId(m.artist_id) : null; return `<div class="settings-row">
           <div><h4>${esc(a?a.name:m.mailbox_type==='payments'?'Payments inbox':'ASP Sending')}</h4><p>${esc(m.email)}</p></div>
           ${m.connected? `<span class="pill pill-good">Connected</span>` : configured? `<button class="btn btn-sm btn-primary" data-action="oauth-connect" data-provider="gmail" data-id="${esc(m.id)}">Connect</button>` : `<span class="pill">Not connected</span>`}
         </div>`; }).join('')}
@@ -8934,6 +8958,10 @@ function doSaveEditEvent(id){
     if(p.paymentMethod!==(ev.paymentMethod || 'standard')) notes.push(`payment method changed to ${paymentMethodLabel({ ...ev, ...p })}`);
   }
   if(!ev.unpaid && f.paymentMethodNote!==undefined) p.paymentMethodNote = f.paymentMethodNote.trim();
+  if(!ev.unpaid && f.depositPaid!==undefined){
+    p.depositPaid = Math.max(0, Number(f.depositPaid)||0) || null;
+    if(p.depositPaid!==(ev.depositPaid||null)) notes.push(p.depositPaid ? `received so far set to ${money(p.depositPaid)}` : 'received so far cleared');
+  }
   logEvent(ev, 'system', notes.length? `Details updated by office — ${notes.join('; ')}.` : 'Details updated by office.');
   S.showEditEvent=false; S.editEventForm={};
   if(reportEventSave(updateEvent(id, p), 'saving these changes')) toast('Changes saved.', 'success');
