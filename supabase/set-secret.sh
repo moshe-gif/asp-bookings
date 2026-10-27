@@ -17,7 +17,6 @@ case "$NAME" in
   RESEND_API_KEY)         [[ "$VALUE" =~ ^re_ ]]                  || { echo "That isn't a Resend API key (re_…)."; exit 1; } ;;
   ANTHROPIC_API_KEY)      [[ "$VALUE" =~ ^sk-ant- ]]              || { echo "That isn't an Anthropic API key (sk-ant-…)."; exit 1; } ;;
   GMAIL_CLIENT_SECRET)    [[ "$VALUE" =~ ^GOCSPX- ]]              || { echo "That isn't a Google client secret (GOCSPX-…). Copy the secret itself, then run this again."; exit 1; } ;;
-  MERCURY_API_TOKEN)      [[ "$VALUE" =~ ^secret-token: ]]        || { echo "That isn't a Mercury API token (secret-token:…)."; exit 1; } ;;
   GMAIL_CLIENT_ID)        [[ "$VALUE" =~ \.apps\.googleusercontent\.com$ ]] || { echo "That isn't a Google client ID (…apps.googleusercontent.com)."; exit 1; } ;;
 esac
 python3 -c 'import json,sys; print(json.dumps([{"name": sys.argv[1], "value": sys.argv[2]}]))' "$NAME" "$VALUE" |
