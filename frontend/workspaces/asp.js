@@ -3171,7 +3171,7 @@ async function linkRealSessionToRosterNow(session){
   // sign-in showed QuickBooks/Calendar as "not connected" until a reload, and an artist's reload
   // called the admin-only status functions.
   loadBrandConfig();
-  if(adminRow){ refreshQboStatus(); refreshGcalStatus(); refreshStripeStatus(); loadInbox(); }
+  if(adminRow){ refreshQboStatus(); refreshGcalStatus(); refreshStripeStatus(); loadInbox(); refreshMercuryStatus(); }
   await syncArtistRoster();
   startSharedSync().then(startClientSignatureWatch); // after contracts load, so signatures land on them
 }
@@ -4187,7 +4187,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.31'; // bump on every release so a phone can tell it has updated. v1.9.31: connecting a Gmail mailbox opens Google on that mailbox's own account
+const APP_VERSION = 'v1.9.32'; // bump on every release so a phone can tell it has updated. v1.9.32: Mercury -- bank money in, singers' shares moved into their own accounts on approval
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -4428,6 +4428,7 @@ function renderSettingsPage(){
 
   ${isAdmin ? renderQuickBooksCard() : ''}
   ${isAdmin ? renderOnlinePaymentsCard() : ''}
+  ${isAdmin ? renderMercuryCard() : ''}
 
   ${isAdmin ? renderGoogleCalendarSyncCard() : ''}
 
@@ -5083,6 +5084,7 @@ function renderMessagesPage(){
   return `
   <div class="section-head"><h2>Inbox${items.length?` (${items.length})`:''}</h2>
     <button class="btn btn-sm" data-action="inbox-check-now" ${S.inboxScanBusy?'disabled':''}>${S.inboxScanBusy?'Checking…':'Check now'}</button></div>
+  ${renderMercuryTransfers()}
   <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Every connected mailbox (Settings → Gmail Mailboxes) is read every 10 minutes. Each email is matched to its gig with a suggested next step. Payments come first: a bank's own alert for exactly what's due is recorded automatically; anything else waits for your click.</p>
   ${S.inboxItems==null? `<div class="card card-pad" style="font-size:13px;color:var(--ink-2);">Loading…</div>`
   : !items.length? `<div class="card empty">Nothing waiting — you're all caught up.</div>`
@@ -8171,6 +8173,75 @@ function renderOnlinePaymentsCard(){
     <p style="font-size:11.5px;color:var(--ink-3);margin:4px 0 0;">Added to <strong>credit</strong> card payments only (never debit cards or bank transfer), shown to the client before they pay, max 3%. Notify Visa and Mastercard at least 30 days before turning it on. Never charged for gigs in CT or MA. Bank transfers cost ASP 0.8% (max $5).</p>
   </div>`;
 }
+/* ---- Mercury (0067, owner 2026-10-27: "create sub accounts that the money can automatically get split up so
+   my payouts are easier") ----
+   ASP's main Mercury account plus one account per singer. The mercury function reads the bank's incoming
+   money into the Inbox (bank-verified, so exact matches record themselves) and, once a gig's balance paid
+   into ASP's main account or ASP's own Stripe is recorded, proposes each artist's share as a transfer to
+   their own account. Nothing moves until someone with a money role approves it. */
+async function refreshMercuryStatus(){
+  const data = await callEdgeFunction('mercury', { action:'status' });
+  S.mercuryStatus = data && data.ok ? data : { configured:false, accounts:[], transfers:[], error:(data && data.error) || 'Could not check Mercury.' };
+  render();
+}
+async function doMercuryCall(body, okMsg){
+  if(S.mercuryBusy) return;
+  S.mercuryBusy = true; render();
+  try{
+    const res = await callEdgeFunction('mercury', body);
+    if(!res.ok) toast(res.error || 'Mercury did not accept that.', 'system');
+    else toast(res.test ? 'Test mode: recorded, no money moved.' : okMsg, 'success');
+    if(res.ok && body.action==='sync') loadInbox();
+  } finally { S.mercuryBusy = false; await refreshMercuryStatus(); }
+}
+const MERCURY_WAITING = ['proposed','failed'];
+function mercuryTransfersWaiting(){ return ((S.mercuryStatus && S.mercuryStatus.transfers) || []).filter(t=>MERCURY_WAITING.includes(t.status)); }
+function renderMercuryTransfers(){
+  const list = mercuryTransfersWaiting(); if(!list.length) return '';
+  const st = S.mercuryStatus;
+  return `<div class="card card-pad" style="margin-bottom:14px;" data-testid="mercury-transfers">
+    <h3 style="margin:0 0 4px;">Singers' shares to move (${list.length})</h3>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 10px;">Balances paid into ASP's main Mercury account: each artist's share (fee less commission, plus charges) goes to their own Mercury account.${st.canMoveMoney ? '' : ' <strong>Test mode</strong>: approving records it but moves no money.'}</p>
+    ${list.map(t=>{ const ev = getEvent(t.event_legacy_id); return `<div class="settings-row" style="flex-wrap:wrap;gap:8px;">
+      <div style="min-width:0;flex:1 1 220px;"><h4 style="overflow-wrap:anywhere;">${moneyCents(t.amount_cents/100)} → ${esc(t.payee_name||'artist')}</h4>
+        <p style="overflow-wrap:anywhere;">${ev ? `<a href="#" data-action="open-event" data-id="${esc(ev.id)}" style="color:var(--accent);">${esc((artistById(ev.artistId)||{}).name||'')} · ${esc(fmtDateShort(ev.date))} · ${esc(ev.clientName||'')}</a>` : esc(t.event_legacy_id)}${t.source==='stripe'?' · paid online':''}</p>
+        ${t.error ? `<p style="color:var(--warn-ink);overflow-wrap:anywhere;">${esc(t.error)}</p>` : ''}</div>
+      <div style="display:flex;gap:6px;"><button class="btn btn-sm btn-primary" data-action="mercury-approve" data-id="${esc(t.id)}" ${S.mercuryBusy?'disabled':''}>${t.status==='failed'?'Try again':'Approve'}</button>
+        <button class="btn btn-sm btn-ghost" data-action="mercury-cancel" data-id="${esc(t.id)}" ${S.mercuryBusy?'disabled':''}>Not this one</button></div>
+    </div>`; }).join('')}
+  </div>`;
+}
+function renderMercuryCard(){
+  const st = S.mercuryStatus;
+  const status = !st ? `<span class="pill pill-neutral">Checking…</span>`
+    : st.configured ? `<span class="pill ${st.canMoveMoney && !st.sandbox ? 'pill-good' : 'pill-warn'}">Connected${st.sandbox ? ' — sandbox' : st.canMoveMoney ? '' : ' — test mode (watching only)'}</span>`
+    : `<span class="pill pill-neutral">Not set up</span>`;
+  const payees = PAYEE_PROFILES.filter(p=>p.artistId);
+  const accounts = (st && st.accounts) || [];
+  const recent = ((st && st.transfers) || []).filter(t=>!MERCURY_WAITING.includes(t.status)).slice(0, 5);
+  return `<div class="card card-pad" style="margin-bottom:20px;" data-testid="mercury-card">
+    <h3 style="margin-bottom:12px;">Bank (Mercury) — singers' accounts</h3>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">${status}
+      ${st && st.configured ? `<button class="btn btn-sm" data-action="mercury-sync" ${S.mercuryBusy?'disabled':''}>${S.mercuryBusy?'Working…':'Check the bank now'}</button>` : ''}
+      ${st && st.lastRunAt ? `<span style="font-size:11.5px;color:var(--ink-3);">Last checked ${esc(new Date(st.lastRunAt).toLocaleString('en-US',{ month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }))}</span>` : ''}</div>
+    ${st && st.lastError ? `<p style="font-size:11.5px;color:var(--warn-ink);margin:0 0 6px;overflow-wrap:anywhere;">${esc(st.lastError)}</p>` : ''}
+    <p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">Money coming into Mercury shows in the Inbox and is matched to its gig. When a gig's balance lands in ASP's main account, each singer's share is moved into their own Mercury account after you approve it.${st && st.configured ? '' : ' Setup: <code>ops/MERCURY_SETUP.md</code>.'}</p>
+    <div class="field" style="max-width:420px;"><label>Balances paid online (Stripe) go to</label>
+      <select data-field="payoutVia" data-form="orgsettings">
+        <option value="" ${ORG_SETTINGS.payoutVia!=='mercury'?'selected':''}>Each artist's own Stripe account</option>
+        <option value="mercury" ${ORG_SETTINGS.payoutVia==='mercury'?'selected':''}>ASP, then split into singers' Mercury accounts</option>
+      </select></div>
+    ${accounts.length ? `<h4 style="margin:14px 0 6px;font-size:.95rem;">Accounts</h4>
+      ${accounts.map(a=>`<div class="settings-row" style="flex-wrap:wrap;gap:8px;"><div style="min-width:0;flex:1 1 180px;"><h4 style="overflow-wrap:anywhere;">${esc(a.name||'Account')}</h4><p>${esc([a.kind, a.status].filter(Boolean).join(' · '))}</p></div>
+        <select data-action="mercury-assign" data-id="${esc(a.account_id)}" style="max-width:100%;" ${S.mercuryBusy?'disabled':''}>
+          <option value="" ${!a.role?'selected':''}>Not used yet</option>
+          <option value="main" ${a.role==='main'?'selected':''}>ASP main account</option>
+          ${payees.map(p=>`<option value="payee:${esc(p.id)}" ${a.role==='payee'&&a.payee_profile_id===p.id?'selected':''}>${esc(p.entityName)}${p.artistId && artistById(p.artistId) ? ` (${esc(artistById(p.artistId).name)})` : ''}</option>`).join('')}
+          <option value="ignore" ${a.role==='ignore'?'selected':''}>Ignore (not gig money)</option>
+        </select></div>`).join('')}` : ''}
+    ${recent.length ? `<h4 style="margin:14px 0 6px;font-size:.95rem;">Recent transfers</h4>${recent.map(t=>`<p style="font-size:12px;margin:0 0 4px;overflow-wrap:anywhere;">${esc(t.status==='sent'?'Sent':t.status==='test'?'Test':'Cancelled')}: ${moneyCents(t.amount_cents/100)} to ${esc(t.payee_name||'')} for ${esc(t.event_legacy_id)}${t.note && t.status!=='cancelled' ? ` — ${esc(t.note)}` : ''}</p>`).join('')}` : ''}
+  </div>`;
+}
 function renderQuickBooksCard(){
   const st = S.qboStatus;
   const configured = !!QBO_CLIENT_ID;
@@ -10053,6 +10124,9 @@ function bindGlobal(){
       case 'overlay-close-bookingconfirmation': if(e.target===t){ S.showBookingConfirmation=false; render(); } break;
       case 'mark-balance': doMarkBalance(id); break;
       case 'inbox-money': { const it = (S.inboxItems||[]).find(x=>x.id===id); if(it) applyInboxMoney(it, false); break; }
+      case 'mercury-sync': doMercuryCall({ action:'sync' }, 'Checked the bank.'); break;
+      case 'mercury-approve': doMercuryCall({ action:'approve', id }, 'Moved.'); break;
+      case 'mercury-cancel': doMercuryCall({ action:'cancel', id }, 'Dropped -- nothing moved.'); break;
       case 'toggle-artist-paidout': doToggleArtistPaidOut(id); break;
       case 'gcal': window.open(gcalUrl(getEvent(id)), '_blank'); break;
       case 'ics': downloadIcs(getEvent(id)); break;
@@ -10132,6 +10206,10 @@ function bindGlobal(){
       case 'dismiss-install': localStorage.setItem('aspInstallDismissedAt', String(Date.now())); S.showInstallBanner=false; render(); break;
     }
   };
+  document.querySelectorAll('select[data-action="mercury-assign"]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ const v = sel.value;
+      doMercuryCall({ action:'assign', accountId: sel.getAttribute('data-id'), role: v.startsWith('payee:') ? 'payee' : (v || null), payeeProfileId: v.startsWith('payee:') ? v.slice(6) : null }, 'Saved.'); });
+  });
   document.querySelectorAll('[data-action="set-reminder-interval"]').forEach(sel=>{
     sel.addEventListener('change', ()=>{ const id=sel.getAttribute('data-id'); if(reportEventSave(updateEvent(id, { reminderIntervalDays:Number(sel.value) }), 'updating the reminder interval')) toast('Reminder interval updated.', 'system'); });
   });

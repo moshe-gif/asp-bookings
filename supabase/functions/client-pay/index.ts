@@ -17,13 +17,14 @@
 //
 // Three kinds of link: a contract's deposit and a custom invoice go to ASP; a gig's balance
 // (event_balance, 0063) goes straight to the artist's Stripe account (a destination charge: ASP is the
-// business the client pays, and any card fee stays with ASP to cover Stripe's fee).
+// business the client pays, and any card fee stays with ASP to cover Stripe's fee) -- or, with payouts
+// through Mercury (Settings, 0067), to ASP's own account like a deposit, split afterwards by mercury.
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { serviceClient } from "../_shared/auth.ts";
 import { brandFor } from "../_shared/config.ts";
 import { cardFeeCents, recordPaymentIntent, stripeApi, stripeConfigured, stripeMode } from "../_shared/stripe.ts";
 import { balanceZelle, depositZelle, officePhone } from "../_shared/payblock.ts";
-import { balancePayeeProfile, balanceSplit, gigCardFeeBps, splitAccounts } from "../_shared/connect.ts";
+import { balancePayeeProfile, balanceSplit, gigCardFeeBps, payoutViaMercury, splitAccounts } from "../_shared/connect.ts";
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 const CT_RE = /^ctoken_[A-Za-z0-9]{8,}$/;
@@ -92,7 +93,7 @@ async function blocker(sb: any, r: Row, tokenHash: string): Promise<string | nul
       // and every artist's payee must have a working Stripe account, or Pay would fail.
       const split = await balanceSplit(sb, r.event_legacy_id, ev);
       if (!split || split.totalCents !== r.amount_cents) return "revoked";
-      if (stripeConfigured() && split.parts.length && !(await splitAccounts(sb, split.parts, stripeMode() === "live"))) return "revoked";
+      if (stripeConfigured() && split.parts.length && !(await payoutViaMercury(sb)) && !(await splitAccounts(sb, split.parts, stripeMode() === "live"))) return "revoked";
       // Never more card fee than the office's setting allows for this gig (none in CT/MA).
       if (r.card_fee_bps > await gigCardFeeBps(sb, ev)) return "revoked";
       const payee = await balancePayeeProfile(sb, r.event_legacy_id, ev);
@@ -270,7 +271,10 @@ Deno.serve(async (req) => {
   let destination: string | null = null;
   let split: { account: string; cents: number }[] | null = null;
   let aspCents = 0, heldByAspCents = 0;
-  if (r.kind === "event_balance") {
+  // Payouts through Mercury (0067): the whole balance is ASP's charge, like a deposit; the mercury
+  // function moves each artist's share once it's recorded paid (payout_via on the row).
+  const viaMercury = r.kind === "event_balance" && !isTest(r) && await payoutViaMercury(sb);
+  if (r.kind === "event_balance" && !viaMercury) {
     let plan = null;
     if (isTest(r)) plan = { parts: [{ payeeProfileId: r.payee_profile_id, cents: r.amount_cents, name: "" }], aspCents: 0, heldByAspCents: 0, totalCents: r.amount_cents };
     else {
@@ -296,7 +300,7 @@ Deno.serve(async (req) => {
       payment_request_id: r.id, kind: r.kind, reference: ref, event: r.event_legacy_id || "",
       base_cents: String(r.amount_cents), fee_cents: String(quote.feeCents), pay_method: quote.method,
       card_brand: quote.method === "card" ? (quote.brand || "") : "", card_funding: quote.funding || "", last4: quote.last4 || "",
-      payee_profile_id: r.payee_profile_id || "", destination: destination || "",
+      payee_profile_id: r.payee_profile_id || "", destination: destination || "", ...(viaMercury ? { payout_via: "mercury" } : {}),
       ...(split ? { split: JSON.stringify(split.map((x) => [x.account, x.cents])) } : {}),
       ...(aspCents ? { asp_cents: String(aspCents) } : {}), ...(heldByAspCents ? { held_by_asp_cents: String(heldByAspCents) } : {}),
     },
@@ -313,6 +317,7 @@ Deno.serve(async (req) => {
 
   const intent = pi.ok ? pi.data : pi.data?.error?.payment_intent;
   await sb.from("payment_requests").update({
+    ...(r.kind === "event_balance" ? { payout_via: viaMercury ? "mercury" : "stripe_connect" } : {}),
     payment_intent_id: intent?.id || claim.payment_intent_id, pay_method: quote.method, card_brand: quote.method === "card" ? quote.brand : null,
     card_funding: quote.funding, pay_last4: quote.last4, fee_cents: quote.feeCents, total_cents: quote.totalCents,
   }).eq("id", r.id).is("paid_at", null);

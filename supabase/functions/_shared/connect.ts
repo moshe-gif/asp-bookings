@@ -76,10 +76,29 @@ export async function gigContracts(sb: Sb, eventLegacyId: string): Promise<Doc[]
 export type SplitPart = { payeeProfileId: string; cents: number; name: string };
 export type Split = { parts: SplitPart[]; aspCents: number; heldByAspCents: number; totalCents: number };
 export async function balanceSplit(sb: Sb, eventLegacyId: string, ev: Doc): Promise<Split | null> {
-  const main = await balancePayeeProfile(sb, eventLegacyId, ev);
-  if (!main?.id) return null;
+  const parts = await artistShares(sb, eventLegacyId, ev);
+  if (!parts) return null;
   const totalCents = clientOwedCentsOf(ev, await gigContracts(sb, eventLegacyId));
   if (!Number.isFinite(totalCents)) return null;
+  const shares = parts.reduce((t, p) => t + p.cents, 0);
+  let aspCents = 0, heldByAspCents = 0;
+  if (totalCents >= shares) aspCents = totalCents - shares;
+  else {
+    heldByAspCents = shares - totalCents;
+    let left = heldByAspCents;
+    for (const p of parts) { const take = Math.min(p.cents, left); p.cents -= take; left -= take; }
+    if (left > 0) return null;   // the deposit was more than the whole gig
+  }
+  return { parts: parts.filter((p) => p.cents > 0), aspCents, heldByAspCents, totalCents };
+}
+
+// Each artist's whole share of the gig, before any deposit adjustment: the main artist's (fee −
+// commission + charges) to the gig's balance payee, each additional artist's (fee − ASP's cut) to their
+// own payee profile. What a gig paid in full into ASP's own bank owes the artists (mercury-split).
+// null when a payee or a figure is missing.
+export async function artistShares(sb: Sb, eventLegacyId: string, ev: Doc): Promise<SplitPart[] | null> {
+  const main = await balancePayeeProfile(sb, eventLegacyId, ev);
+  if (!main?.id) return null;
   const parts: SplitPart[] = [{ payeeProfileId: main.id, cents: mainBalanceCentsOf(ev), name: main.entityName || "" }];
   const extras = extraArtists(ev);
   if (extras.length) {
@@ -92,17 +111,7 @@ export async function balanceSplit(sb: Sb, eventLegacyId: string, ev: Doc): Prom
       parts.push({ payeeProfileId: prof.id, cents, name: prof.entityName || "" });
     }
   }
-  if (parts.some((p) => p.cents < 0)) return null;
-  const shares = parts.reduce((t, p) => t + p.cents, 0);
-  let aspCents = 0, heldByAspCents = 0;
-  if (totalCents >= shares) aspCents = totalCents - shares;
-  else {
-    heldByAspCents = shares - totalCents;
-    let left = heldByAspCents;
-    for (const p of parts) { const take = Math.min(p.cents, left); p.cents -= take; left -= take; }
-    if (left > 0) return null;   // the deposit was more than the whole gig
-  }
-  return { parts: parts.filter((p) => p.cents > 0), aspCents, heldByAspCents, totalCents };
+  return parts.some((p) => p.cents < 0) ? null : parts;
 }
 
 // The gig's balance payee: zellePayeeProfileFor() in the app -- the payee on its latest sent/signed
@@ -136,6 +145,15 @@ export async function gigCardFeeBps(sb: Sb, ev: Doc): Promise<number> {
   const { data } = await sb.from("app_records").select("app_doc").eq("collection", "settings").eq("legacy_id", "org").maybeSingle();
   const pct = Number(data?.app_doc?.value?.cardFeePercent) || 0;
   return Math.round(Math.min(Math.max(pct, 0), 3) * 100);
+}
+
+// Where artists' balances go (Settings → Mercury, owner 2026-10-27): 'mercury' = every balance paid
+// online is ASP's (its own Stripe account, paid out to its main Mercury account) and the mercury
+// function splits each artist's share into their own Mercury account; otherwise each artist's own
+// Stripe account (Stripe Connect, above).
+export async function payoutViaMercury(sb: Sb): Promise<boolean> {
+  const { data } = await sb.from("app_records").select("app_doc").eq("collection", "settings").eq("legacy_id", "org").maybeSingle();
+  return data?.app_doc?.value?.payoutVia === "mercury";
 }
 
 // Stripe's view of a connected account -> the stripe_payees status columns.

@@ -179,3 +179,19 @@ def test_multi_artist_balance_is_the_whole_gig(page):
     assert out == {"multi": 11850, "main": 7600, "usual": 3825, "bigDeposit": 3375}, out
     # One Zelle can't split the balance: a multi-artist gig gets none.
     assert "if(gigExtraArtists(ev).length) return null;" in src
+
+
+def test_settings_shows_the_mercury_bank_card(live_server, page):
+    # Mercury (0067): the Bank card shows whether Mercury is connected and where online balances go.
+    # Read-only: the harness never assigns accounts or changes the payout setting.
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    errors = collect_console_errors(page)
+    goto_nav(page, "settings")
+    card = page.locator('[data-testid="mercury-card"]')
+    card.wait_for(state='visible', timeout=15000)
+    page.wait_for_function("() => window.S && S.mercuryStatus", timeout=20000)
+    text = card.inner_text().lower()
+    assert 'mercury' in text and ('not set up' in text or 'connected' in text)
+    assert card.locator('select[data-field="payoutVia"]').count() == 1
+    assert not errors, f"console errors in the app: {errors}"
