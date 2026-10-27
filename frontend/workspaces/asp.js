@@ -2443,8 +2443,11 @@ function gigExtraArtists(ev){ return (ev.additionalArtists||[]).filter(x=>x && x
 function gigAspCuts(ev){ return (Number(ev.commission)||0) + gigExtraArtists(ev).reduce((t,x)=>t + (Number(x.aspCut)||0), 0); }
 function clientOwed(ev, deposit){ return artistPayout(ev) + gigExtraArtists(ev).reduce((t,x)=>t + (Number(x.feeAmount)||0) - (Number(x.aspCut)||0), 0) + gigAspCuts(ev) - deposit; }
 // The deposit the gig's newest signed (else sent, else any live) contract asked for; without one, ASP's
-// cut from every artist (the usual deposit).
+// cut from every artist (the usual deposit). Money paid early on top of the deposit counts as deposit
+// (owner 2026-10-27): once received, ev.depositPaid (everything in so far) replaces it -- the server
+// twin is depositCentsOf() in _shared/connect.ts.
 function gigDepositDue(ev){
+  if(ev.depositReceived && Number(ev.depositPaid) > 0) return Number(ev.depositPaid);
   const live = contractsForLead(ev.id).filter(c=>c.status!=='void').sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
   const c = live.find(x=>x.status==='signed') || live.find(x=>x.status==='sent') || live[0];
   const d = c && c.fee && c.deposit ? contractPaymentFigures(c).deposit : 0;
@@ -3071,6 +3074,9 @@ function artistPortalEvent(g, m, artistId){
     groundTransportNeeded: !!g.ground_transport_needed, groundTransportBooked: !!(g.ground_transport_booked && g.ground_transport), groundTransport: g.ground_transport || null,
     travel: g.travel || null, gigInfoSheet: g.gig_sheet || null, // itinerary + gig sheet (0060)
     coPerformers: Array.isArray(g.co_performers) ? g.co_performers : [],
+    // What to collect at the event on a gig not paid the standard way, e.g. Mezumin (0066; main artist only).
+    collectMethod: g.collect_method || null, collectNote: g.collect_note || null,
+    collectAmount: g.collect_amount==null ? null : Number(g.collect_amount),
     moneyPending: pending,
     price: num(m && m.gross_amount), commission: num(m && m.asp_cut), netAmount: num(m && m.net_amount),
     aspCutPct: (pending || !m || m.asp_cut_pct===null) ? null : Number(m.asp_cut_pct),
@@ -4178,7 +4184,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.28'; // bump on every release so a phone can tell it has updated. v1.9.28: comedian agreement matches Dovi's contracts (deposit, client needs, cancellation and no-recording wording)
+const APP_VERSION = 'v1.9.29'; // bump on every release so a phone can tell it has updated. v1.9.29: "Received so far" counts as the deposit; artists see what to collect at the event (Mezumin)
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -6326,6 +6332,7 @@ function renderEventSheet(ev){
           ${isAdmin && !ev.unpaid?`<div class="kv-row" data-action="open-client-contact" data-id="${ev.id}" style="cursor:pointer;"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;color:var(--accent);">${ev.clientEmail||ev.clientPhone? `${esc(ev.clientEmail)}${ev.clientEmail&&ev.clientPhone?'<br/>':''}<span style="font-weight:500;">${esc(ev.clientPhone)}</span>` : '<span style="font-weight:500;">+ Add contact</span>'}</strong></div>`:''}
           ${!isAdmin && !ev.unpaid && (ev.clientPhone || ev.clientEmail) ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;">${ev.clientPhone?`<a href="tel:${esc(telHref(ev.clientPhone))}" style="color:var(--accent);text-decoration:none;">${esc(ev.clientPhone)}</a>`:''}${ev.clientPhone&&ev.clientEmail?'<br/>':''}${ev.clientEmail?`<a href="mailto:${esc(ev.clientEmail)}" style="color:var(--accent);text-decoration:none;font-weight:500;">${esc(ev.clientEmail)}</a>`:''}</strong></div>` : ''}
           ${!isAdmin && (ev.coPerformers||[]).length ? `<div class="kv-row"><span style="color:var(--ink-2);">Performing with</span><strong style="text-align:right;">${ev.coPerformers.map(c=>`${esc(c.name)}${c.role?` <span style="font-weight:500;color:var(--ink-2);">(${esc(c.role)})</span>`:''}`).join('<br/>')}</strong></div>` : ''}
+          ${!isAdmin && ev.collectMethod ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.money} Collect at the event</span><strong style="text-align:right;color:var(--warn-ink);">${ev.collectAmount!=null?`${money(ev.collectAmount)} `:''}${esc(ev.collectMethod==='cash'?'cash (mezumin)':ev.collectMethod==='check'?'by check':'balance')}${ev.collectNote?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.collectNote)}</span>`:''}</strong></div>` : ''}
           ${isAdmin && !ev.unpaid && !isStandardPayment(ev) ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.money} Payment Method</span><strong style="text-align:right;color:var(--warn-ink);">${esc(paymentMethodLabel(ev))}${ev.paymentMethodNote?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.paymentMethodNote)}</span>`:''}</strong></div>` : ''}
         </div>
 
@@ -6936,6 +6943,9 @@ function renderEditEventFormOverlay(){
           <div class="field"><label>Deposit / Booking Fee</label><input type="number" data-field="commission" value="${f.commission!==undefined?f.commission:ev.commission}"/></div>
           <div class="field"><label>Payment Method</label><select class="edit-event-payment-select">${PAYMENT_METHODS.map(([k,l])=>`<option value="${k}" ${paymentMethod===k?'selected':''}>${esc(l)}</option>`).join('')}</select></div>
         </div>
+        ${ev.depositReceived? `<div class="field"><label>Received So Far (optional)</label><input type="number" data-field="depositPaid" value="${f.depositPaid!==undefined?f.depositPaid:(ev.depositPaid||'')}" placeholder="Leave blank if only the deposit came in"/>
+          <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Everything the client has paid so far. It counts as the deposit, so balance reminders ask only for what's left.</p>
+        </div>` : ''}
         ${paymentMethod!=='standard'? `<div class="field"><label>Payment Note (optional)</label><input data-field="paymentMethodNote" value="${esc(f.paymentMethodNote!==undefined?f.paymentMethodNote:(ev.paymentMethodNote||''))}" placeholder="e.g. paying cash at the event"/>
           <p style="font-size:11px;color:var(--warn-ink);margin:4px 0 0;">Alternative payment method — no automated QuickBooks invoice or Zelle reminder for this booking. It'll show up under Payment Follow-Up until marked paid.</p>
         </div>` : ''}`;
@@ -8853,6 +8863,10 @@ function doSaveEditEvent(id){
     if(p.paymentMethod!==(ev.paymentMethod || 'standard')) notes.push(`payment method changed to ${paymentMethodLabel({ ...ev, ...p })}`);
   }
   if(!ev.unpaid && f.paymentMethodNote!==undefined) p.paymentMethodNote = f.paymentMethodNote.trim();
+  if(!ev.unpaid && f.depositPaid!==undefined){
+    p.depositPaid = Math.max(0, Number(f.depositPaid)||0) || null;
+    if(p.depositPaid!==(ev.depositPaid||null)) notes.push(p.depositPaid ? `received so far set to ${money(p.depositPaid)}` : 'received so far cleared');
+  }
   logEvent(ev, 'system', notes.length? `Details updated by office — ${notes.join('; ')}.` : 'Details updated by office.');
   S.showEditEvent=false; S.editEventForm={};
   if(reportEventSave(updateEvent(id, p), 'saving these changes')) toast('Changes saved.', 'success');

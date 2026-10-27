@@ -190,3 +190,33 @@ def test_artist_never_loads_other_artists_private_roster_fields(live_server, bro
     assert not any(k in row for row in seen["dir"] for k in ("email", "commission_pct", "user_id")), \
         "artist_directory exposes private columns"
     ctx.close()
+
+
+def test_artist_sees_what_to_collect_on_a_cash_gig(live_server, browser):
+    """0066: on a booked gig paid in cash (Mezumin) the main artist's gig info says what to collect at the
+    event, from artist_gig_view's collect_* columns. Live, read-only; skips when the artist has none."""
+    ctx = _live_artist_context(browser)
+    page = ctx.new_page()
+    errors = collect_console_errors(page)
+    _sign_in(page, live_server, "benny")
+    rows = _view_rows(page)
+    if rows["error"]:
+        ctx.close()
+        pytest.skip(f"artist views unavailable ({rows['error'].strip()})")
+    if rows["gigs"] and "collect_method" not in rows["gigs"][0]:
+        ctx.close()
+        pytest.skip("migration 0066 not applied yet (artist_gig_view has no collect_method)")
+    gig = next((g for g in rows["gigs"] if g.get("collect_method")), None)
+    if not gig:
+        ctx.close()
+        pytest.skip("benny has no cash gig with a balance to collect -- nothing to show")
+    goto_nav(page, "a_gigs", mobile=False)
+    page.locator(f'[data-action="open-event"][data-id="{gig["legacy_id"] or gig["event_id"]}"]').first.click()
+    sheet = " ".join(page.locator(".sheet").inner_text().split())
+    assert "Collect at the event" in sheet, "the artist's gig info doesn't say what to collect"
+    if gig["collect_amount"] is not None:
+        amount = f"${round(float(gig['collect_amount'])):,}"
+        assert amount in sheet, f"collect amount {amount} missing from the gig info"
+    assert not OWES.search(sheet), "owes wording on the event sheet"
+    assert not errors, f"console errors in the artist portal: {errors}"
+    ctx.close()

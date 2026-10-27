@@ -39,7 +39,10 @@ export function balanceCentsOf(ev: Doc): number {
 // The deposit the gig's contract asked for, in cents (contractPaymentFigures() in the app: a percent of
 // the contract's fee, else its $ amount) -- its newest signed contract, else sent, else any live one.
 // Without a contract (or one with no deposit), ASP's cut from every artist: the usual deposit.
+// Money a client paid early on top of the deposit counts as deposit (owner 2026-10-27): once the
+// deposit is received, ev.depositPaid (everything received so far) replaces the contract's figure.
 export function depositCentsOf(ev: Doc, contracts: Doc[]): number {
+  if (ev.depositReceived && Number(ev.depositPaid) > 0) return Math.round(Number(ev.depositPaid) * 100);
   const live = contracts.filter((c) => c && c.status !== "void").sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   const c = live.find((x) => x.status === "signed") || live.find((x) => x.status === "sent") || live[0];
   if (c && c.fee && c.deposit) {
