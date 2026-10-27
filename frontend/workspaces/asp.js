@@ -2573,7 +2573,10 @@ function gmailAuthorizeUrl(state, mailboxId){
   const scope = box && (box.mailbox_type||box.mailboxType)==='asp_sending'
     ? 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly'
     : 'https://www.googleapis.com/auth/gmail.readonly';
-  return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(GMAIL_CLIENT_ID)}&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(GMAIL_REDIRECT_URI)}&response_type=code&access_type=offline&prompt=consent&state=${encodeURIComponent(state)}`;
+  // login_hint: Google opens on the mailbox's own account instead of whoever is signed in to the browser
+  // (owner 2026-10-27 hit a block signing in with his personal account); select_account still lets them switch.
+  const hint = box && box.email ? `&login_hint=${encodeURIComponent(box.email)}` : '';
+  return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(GMAIL_CLIENT_ID)}&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(GMAIL_REDIRECT_URI)}&response_type=code&access_type=offline&prompt=${encodeURIComponent('consent select_account')}${hint}&state=${encodeURIComponent(state)}`;
 }
 
 /* ============ STATE ============ */
@@ -4184,7 +4187,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.29'; // bump on every release so a phone can tell it has updated. v1.9.29: "Received so far" counts as the deposit; artists see what to collect at the event (Mezumin)
+const APP_VERSION = 'v1.9.31'; // bump on every release so a phone can tell it has updated. v1.9.31: connecting a Gmail mailbox opens Google on that mailbox's own account
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
