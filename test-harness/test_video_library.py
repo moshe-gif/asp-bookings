@@ -1,17 +1,21 @@
 """
-The video library (migration 0068, owner 2026-10-28: "Think Splice, but for performance videos").
-Real end to end against production Supabase:
+The video library (migration 0068, owner 2026-10-28: "Think Splice, but for performance videos"),
+private since 0069 ("only visible to ilan tzvi and myself", plus Lilker). Real end to end against
+production Supabase:
 
-- the public page /videos/ (no login) lists the singers and opens a singer's page with its filters;
+- signed out, /videos/ shows only "Private library", and the database and storage give nothing away;
 - an admin adds a throwaway singer, uploads a real (browser-made, 2-second) video into it through the
   drop zone (resumable upload straight to storage, thumbnail and length taken in the browser), tags
-  it in the tagging table, and the public page shows it with its tags, filters it, plays it and serves
-  the original file for download -- then the test removes the singer, which deletes its video and files.
+  it in the tagging table, and the library page (same signed-in session) shows it with its tags,
+  filters it, plays it and serves the original file for download through a signed link -- then the
+  test removes the singer, which deletes its video and files.
 
 Writes only the "Harness Test Singer" rows and files, and removes them before it ends (also if a
 previous run left one behind).
 """
 import base64
+import json
+import urllib.error
 import urllib.request
 
 from helpers import login_as, goto_nav, collect_console_errors
@@ -49,18 +53,28 @@ def _remove_test_singer(page):
     }""", TEST_SINGER)
 
 
-def test_public_library_lists_singers(live_server, page):
-    errors = collect_console_errors(page)
+SUPABASE = "https://psgpxbkncuavlnpplykf.supabase.co"
+
+
+def _anon_get(path, key):
+    req = urllib.request.Request(SUPABASE + path, headers={"apikey": key, "Authorization": f"Bearer {key}"})
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def test_library_is_private(live_server, page):
     page.goto(live_server + "/videos/")
-    cards = page.locator('[data-testid="singer-card"]')
-    cards.first.wait_for(state="visible", timeout=15000)
-    assert cards.count() >= 1
-    name = cards.first.locator("strong").inner_text()
-    cards.first.click()
-    page.locator("h1", has_text=name).wait_for(state="visible", timeout=10000)
-    page.get_by_role("link", name="← All singers").click()
-    cards.first.wait_for(state="visible", timeout=10000)
-    assert not errors, f"console errors: {errors}"
+    page.get_by_text("Private library").wait_for(state="visible", timeout=15000)
+    assert page.locator('[data-testid="singer-card"]').count() == 0
+    key = page.evaluate("""() => fetch('../workspaces/asp.js').then(r => r.text()).then(t => t.match(/SUPABASE_PUBLISHABLE_KEY = '([^']+)'/)[1])""")
+    for table in ("library_singers", "library_videos", "library_tags"):
+        status, body = _anon_get(f"/rest/v1/{table}?select=*&limit=1", key)
+        assert status in (401, 403) or json.loads(body) == [], f"{table} is readable signed out: {status} {body[:200]}"
+    bucket = _anon_get("/storage/v1/bucket/library", key)
+    assert bucket[0] != 200 or json.loads(bucket[1]).get("public") is False
 
 
 def test_admin_uploads_tags_and_client_downloads(live_server, page, browser):
@@ -71,7 +85,7 @@ def test_admin_uploads_tags_and_client_downloads(live_server, page, browser):
     _remove_test_singer(page)
     try:
         goto_nav(page, "videos")
-        # The tab opens on the library itself (the client view); managing is on the other tabs.
+        # The tab opens on the library itself; managing is on the other tabs.
         page.frame_locator('[data-testid="lib-browse"]').locator('[data-testid="singer-card"]').first.wait_for(state="visible", timeout=20000)
         page.locator('[data-action="lib-tab"][data-id="videos"]').click()
         page.locator('[data-testid="lib-upload"]').wait_for(state="visible", timeout=20000)
@@ -103,8 +117,8 @@ def test_admin_uploads_tags_and_client_downloads(live_server, page, browser):
         # (A browser recording states no length, so duration_s may be empty here; camera files have one.)
         assert v["duration_s"] is None or 1 <= float(v["duration_s"]) <= 4
 
-        # A client (no login) finds it, filters it and downloads the original.
-        client = browser.new_page()
+        # The library page (same signed-in browser) finds it, filters it and downloads the original.
+        client = page.context.new_page()
         client.goto(live_server + "/videos/#/harness-test-singer")
         card = client.locator('[data-testid="video-card"]')
         card.first.wait_for(state="visible", timeout=15000)
@@ -117,6 +131,7 @@ def test_admin_uploads_tags_and_client_downloads(live_server, page, browser):
         with urllib.request.urlopen(urllib.request.Request(href, method="GET")) as r:
             assert r.status == 200 and r.read() == video, "the download is the original file"
             assert "attachment" in (r.headers.get("Content-Disposition") or "")
+        assert "/object/sign/" in href, "files open through signed links (the bucket is private)"
         client.locator('[data-play]').first.click()
         client.locator(".ov video").wait_for(state="visible", timeout=10000)
         client.close()

@@ -5,12 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#0E0E11" />
 <meta name="referrer" content="strict-origin-when-cross-origin" />
+<meta name="robots" content="noindex" />
 <link rel="icon" type="image/png" href="../icon-glass-192.png" />
 <!-- The video library (migration 0068, owner 2026-10-28: "Think Splice, but for performance videos").
-     Public, no sign-in: clients and bookers pick a singer, filter that singer's videos by Event, Tempo
-     and Crowd, watch and download the original file. Standalone like /sign/ and /pay/: no app code.
-     It reads only what the database lets anyone read (live singers, published videos, the tags) with
-     the app's public key. The office manages everything in the app (Videos). -->
+     PRIVATE since 0069 (owner 2026-10-28: "this should not be a public page ... only visible to ilan
+     tzvi and myself", and Lilker): it runs inside the app's Videos tab and uses the app's own sign-in
+     (same site, so the same saved session). The database decides who sees anything (can_view_library)
+     and files open through short-lived signed links -- this page holds no secret and opens nothing by
+     itself. Pick a singer, filter by Event, Tempo and Crowd, watch, download the original file. -->
 <style>
   :root{
     --page:#0E0E11; --surface:#17171B; --surface-2:#1F1F24; --ink:#F2F1EC; --ink-2:#B4B3AD; --ink-3:#7E7D78;
@@ -92,7 +94,13 @@
 (function(){
   const SUPABASE_URL = 'https://psgpxbkncuavlnpplykf.supabase.co';
   const KEY = 'sb_publishable_Orec7KI9Lwqd_ZfsKaEq9g__ewGiEiT';
-  const FILE = p => `${SUPABASE_URL}/storage/v1/object/public/library/${p.split('/').map(encodeURIComponent).join('/')}`;
+  // The app's saved session (supabase-js keeps it under this key; the app refreshes it).
+  const SESSION_KEY = 'sb-psgpxbkncuavlnpplykf-auth-token';
+  function token(){
+    try{ const s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); return s && s.access_token && (!s.expires_at || s.expires_at*1000 > Date.now()) ? s.access_token : null; }catch(e){ return null; }
+  }
+  const SIGNED = {};
+  const FILE = p => SIGNED[p] || '';
   const CATS = [['event','Event'],['tempo','Tempo'],['lifestyle','Crowd']];
   const root = document.getElementById('root');
   const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -104,12 +112,28 @@
   let D = null;                     // { singers, tags, videos }
   const F = { event:new Set(), tempo:new Set(), lifestyle:new Set(), singer:new Set(), q:'' };
 
+  const auth = () => ({ apikey:KEY, Authorization:`Bearer ${token()}` });
   async function get(path){
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers:{ apikey:KEY, Authorization:`Bearer ${KEY}` } });
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers:auth() });
     if(!r.ok) throw new Error('load ' + r.status);
     return r.json();
   }
+  async function sign(paths){
+    const todo = [...new Set(paths.filter(Boolean))];
+    for(let i=0; i<todo.length; i+=500){
+      const r = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/library`, { method:'POST', headers:{ ...auth(), 'Content-Type':'application/json' }, body:JSON.stringify({ expiresIn:6*3600, paths:todo.slice(i, i+500) }) });
+      if(!r.ok) throw new Error('sign ' + r.status);
+      (await r.json()).forEach(x=>{ if(x.signedURL) SIGNED[x.path] = `${SUPABASE_URL}/storage/v1${x.signedURL}`; });
+    }
+  }
+  function locked(msg){
+    root.innerHTML = `${header(false, true)}<div class="empty">${FILM}<strong>Private library</strong><span>${msg}</span>
+      <a class="btn btn-gold" href="../" target="_top" style="margin-top:6px;">Open the ASP app</a></div>`;
+  }
   async function load(){
+    if(!token()) return 'signin';
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/can_view_library`, { method:'POST', headers:{ ...auth(), 'Content-Type':'application/json' }, body:'{}' });
+    if(!r.ok || (await r.json()) !== true) return 'denied';
     const [singers, tags, videos] = await Promise.all([
       get('library_singers?select=id,slug,name,photo_path&active=eq.true&order=sort,name'),
       get('library_tags?select=id,category,name&order=category,sort,name'),
@@ -117,7 +141,9 @@
     ]);
     const tagById = new Map(tags.map(t=>[t.id,t]));
     videos.forEach(v=>{ v.tags = (v.library_video_tags||[]).map(x=>tagById.get(x.tag_id)).filter(Boolean); });
+    await sign([...videos.flatMap(v=>[v.video_path, v.thumb_path]), ...singers.map(s=>s.photo_path)]);
     D = { singers, tags, videos };
+    return 'ok';
   }
 
   function route(){
@@ -128,9 +154,9 @@
     const s = D.singers.find(x=>x.slug===h);
     return s ? library(s) : home();
   }
-  function header(back){
+  function header(back, bare){
     return `<div class="top"><img class="logo" src="../assets/brand/asp-horizontal-light.png" alt="ASP Management" width="170" height="22"/>
-      ${back ? `<a class="btn" href="#/">← All singers</a>` : `<a class="btn" href="#/all">Search all videos</a>`}</div>`;
+      ${bare ? '' : back ? `<a class="btn" href="#/">← All singers</a>` : `<a class="btn" href="#/all">Search all videos</a>`}</div>`;
   }
   function home(){
     document.title = 'ASP Video Library';
@@ -196,7 +222,7 @@
       }
     });
   }
-  const downloadUrl = v => `${FILE(v.video_path)}?download=${encodeURIComponent(v.file_name || (v.title + '.mp4'))}`;
+  const downloadUrl = v => `${FILE(v.video_path)}&download=${encodeURIComponent(v.file_name || (v.title + '.mp4'))}`;
   function preview(btn){
     const v = D.videos.find(x=>x.id===btn.dataset.play); if(!v) return;
     stopPreviews();
@@ -225,6 +251,10 @@
   // Shown inside the app (the Videos tab): the app has its own header, so no second logo.
   if(new URLSearchParams(location.search).has('embed')) document.body.classList.add('embed');
   window.addEventListener('hashchange', ()=>{ if(D) route(); });
-  load().then(route).catch(()=>{ root.innerHTML = `${header(false)}<div class="empty">The library couldn't load. Please refresh the page.</div>`; });
+  load().then(r=>{
+    if(r==='signin') return locked('Sign in to the ASP app to watch the library.');
+    if(r==='denied') return locked("Your account doesn't have access to the video library. Ask the office if you need it.");
+    route();
+  }).catch(()=>{ root.innerHTML = `${header(false, true)}<div class="empty">${FILM}<strong>The library couldn't load</strong><span>Please refresh the page.</span></div>`; });
 })();
 </script>

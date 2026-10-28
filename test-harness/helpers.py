@@ -25,6 +25,9 @@ ROLE_EMAILS = {
     "yaakov": "test-yaakov@aspmgmt.com",
     "eli": "test-eli@aspmgmt.com",
     "dovie": "test-dovie@aspmgmt.com",
+    # Crew (migration 0069): only exist as crew while test_crew.py runs (it adds and removes the rows).
+    "crew_social": "test-social@aspmgmt.com",
+    "crew_videographer": "test-videographer@aspmgmt.com",
 }
 
 

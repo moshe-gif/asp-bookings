@@ -106,6 +106,7 @@ let ARTISTS = [
   {id:'shmili', name:'Shmili Landau', slot:5, initials:'SL', email:'shmili@aspmanagement.com', role:'DJ'},
 ];
 const artistById = (id)=>ARTISTS.find(a=>a.id===id);
+const NO_ARTIST = { id:'', name:'Gig', initials:'?', slot:0 }; // a crew-calendar gig with no singer set yet
 // Supabase tables reference artists by their row uuid (artists.id), while the app's id is the
 // legacy_id ('baruch') when there is one -- convert at that boundary (2026-10-26: adding Baruch's
 // mailbox failed with "invalid input syntax for type uuid").
@@ -2488,6 +2489,7 @@ function artistMoney(ev){
 function fmtPct(p){ return `${Number(Number(p).toFixed(2))}%`; }
 // Artist-facing status: about the artist's money, never what a client still owes.
 function artistGigStatus(ev){
+  if(ev.fromCrewPortal) return ev.crewStatus==='pending' ? { label:'Pending contract', cls:'pill-neutral' } : { label: isPast(ev.date) ? 'Completed' : 'Booked', cls: isPast(ev.date) ? 'pill-neutral' : 'pill-accent' };
   if(ev.unpaid) return { label: isPast(ev.date) ? 'Completed' : 'Office day', cls:'pill-neutral' };
   if(ev.artistPaidOut) return { label: ev.artistPaidOutDate ? `Paid to you ${fmtDateShort(ev.artistPaidOutDate)}` : 'Paid to you', cls:'pill-good' };
   if(ev.balanceReceived) return { label:'Client balance received', cls:'pill-good' };
@@ -3026,6 +3028,9 @@ S.artistPortal = { on:false, loading:false, error:null, loadedAt:null };
 let artistPortalTimer = null;
 const ARTIST_PORTAL_REFRESH_MS = 5*60*1000;
 function artistReadOnly(){ return !!(S.realSession && S.user && !isAdminUser(S.user)); }
+// Crew (0069): Tzvi (social: every gig, assigns the videographer) and Lilker (videographer: his gigs).
+// Read-only like an artist (artistReadOnly() is true), with their own pages and no money anywhere.
+function crewUser(){ return (S.crew && S.user===S.crew.id) ? S.crew : null; }
 function startArtistPortal(){
   if(!supabaseClient || !artistReadOnly() || window.ASP_DISABLE_EVENT_SYNC) return;
   S.artistPortal.on = true; S.artistPortal.error = null; S.artistPortal.loadedAt = null;
@@ -3045,6 +3050,18 @@ async function loadArtistPortalData(){
   S.artistPortal.loading = true;
   const user = S.user;
   try{
+    if(crewUser()){
+      const [g, c] = await Promise.all([
+        supabaseClient.from('crew_gig_view').select('*').order('date'),
+        supabaseClient.from('crew_directory').select('id, name, initials, kind, active').eq('active', true).order('name'), // 0070: no emails / phones
+      ]);
+      if(g.error || c.error) throw new Error((g.error || c.error).message);
+      if(!S.artistPortal.on || S.user!==user) return;
+      S.events = (g.data||[]).map(crewPortalEvent);
+      S.crewRoster = c.data || [];
+      S.artistPortal.error = null; S.artistPortal.loadedAt = Date.now();
+      return;
+    }
     const [g, f] = await Promise.all([
       supabaseClient.from('artist_gig_view').select('*'),
       supabaseClient.from('artist_finance_view').select('*'),
@@ -3090,6 +3107,19 @@ function artistPortalEvent(g, m, artistId){
     charges: [], log: [],
   };
 }
+// Crew (0069): one crew_gig_view row -> the event shape the calendar uses. No money fields at all.
+function crewPortalEvent(g){
+  const singers = Array.isArray(g.singers) ? g.singers : [];
+  return {
+    id: g.legacy_id || g.event_id, eventUuid: g.event_id, fromCrewPortal: true,
+    artistId: singers[0] ? singers[0].id : '', singers, additionalArtists: singers.slice(1).map(x=>({ artistId:x.id })),
+    type: g.type || 'Other', title: g.title || '', crewStatus: g.status, status: g.status==='pending' ? 'contract_sent' : 'booked',
+    date: g.date ? String(g.date).slice(0,10) : null, time: g.time || '', endTime: g.end_time || null,
+    clientName: g.client_name || '', venue: g.venue || '', address: g.address || '', city: g.city || '', state: g.state || '', mapQuery: g.map_query || '',
+    dressCode: g.dress_code || '', band: g.band || null, gigInfoSheet: g.gig_sheet || null,
+    crew: Array.isArray(g.crew) ? g.crew : [], myStatus: g.my_status || null, charges: [], log: [],
+  };
+}
 window.addEventListener('focus', ()=>{ if(S.artistPortal.on) loadArtistPortalData(); });
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && S.artistPortal.on) loadArtistPortalData(); });
 S.events = loadEvents();
@@ -3108,7 +3138,7 @@ async function linkRealSessionToRosterNow(session){
   S.realSession = { supabaseUserId: session.user.id, email: session.user.email };
   // A failed lookup (network, outage) is NOT "your account isn't set up" -- show a retry instead
   // of sending staff to the office about a problem that isn't theirs (2026-10-09 audit 4.3).
-  let adminRow = null, artistRow = null;
+  let adminRow = null, artistRow = null, crewRow = null;
   try{
     const [a, r] = await Promise.all([
       supabaseClient.from('admin_users').select('*').eq('user_id', session.user.id).maybeSingle(),
@@ -3116,6 +3146,14 @@ async function linkRealSessionToRosterNow(session){
     ]);
     if(a.error || r.error) throw new Error((a.error||r.error).message);
     adminRow = a.data; artistRow = r.data;
+    if(!adminRow && !artistRow){
+      // Crew (0069): link a crew row added after this account already existed, then read it.
+      const claim = await supabaseClient.rpc('claim_crew_account');
+      if(claim.error) throw new Error(claim.error.message);
+      const c = await supabaseClient.from('crew_members').select('*').eq('user_id', session.user.id).eq('active', true).maybeSingle();
+      if(c.error) throw new Error(c.error.message);
+      crewRow = c.data;
+    }
   }catch(err){
     S.realSignInError = String(err && err.message || err);
     S.realSignInNotFound = false; S.showRealSignIn = false;
@@ -3123,7 +3161,7 @@ async function linkRealSessionToRosterNow(session){
     return;
   }
   S.realSignInError = null;
-  const row = adminRow || artistRow;
+  const row = adminRow || artistRow || crewRow;
   if(!row){
     S.realSignInNotFound = true;
     S.showRealSignIn = false; S.realSignInSent = false;
@@ -3137,11 +3175,14 @@ async function linkRealSessionToRosterNow(session){
     const { data: allAdmins } = await supabaseClient.from('admin_users').select('*').order('created_at');
     (allAdmins||[adminRow]).forEach(row=>{
       const existing = ADMIN_USERS.find(u=>u.id===row.id);
-      const fields = {name:row.name, email:row.email, initials:row.initials, role:row.role, dbId:row.id};
+      const fields = {name:row.name, email:row.email, initials:row.initials, role:row.role, dbId:row.id, libraryAccess:!!row.library_access};
       if(existing) Object.assign(existing, fields);
       else ADMIN_USERS.push({id:row.id, ...fields});
     });
     S.user = adminRow.id;
+  } else if(crewRow){
+    S.crew = { id:crewRow.id, name:crewRow.name, kind:crewRow.kind, initials:crewRow.initials || crewRow.name.split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase() };
+    S.user = crewRow.id;
   } else {
     // Mirrors the admin branch's own trick above: artists.id is a real uuid, but every seeded/
     // imported gig (event.artistId, S.events) keys to the ORIGINAL short string id ('baruch'
@@ -3172,7 +3213,7 @@ async function linkRealSessionToRosterNow(session){
   // sign-in showed QuickBooks/Calendar as "not connected" until a reload, and an artist's reload
   // called the admin-only status functions.
   loadBrandConfig();
-  if(adminRow){ refreshQboStatus(); refreshGcalStatus(); refreshStripeStatus(); loadInbox(); refreshMercuryStatus(); }
+  if(adminRow){ refreshQboStatus(); refreshGcalStatus(); refreshStripeStatus(); loadInbox(); refreshMercuryStatus(); loadCrewRoster(); }
   await syncArtistRoster();
   startSharedSync().then(startClientSignatureWatch); // after contracts load, so signatures land on them
 }
@@ -3269,7 +3310,7 @@ function resetAfterSignOut(){
   stopClientSignatureWatch();
   stopArtistPortal();
   closeAllOverlays();
-  S.user = null; S.realSession = null; S.realPasskeys = null; S.realRoster = null;
+  S.user = null; S.crew = null; S.crewRoster = null; S.gigCrew = null; S.lib = null; S.libUrls = null; S.libTab = null; S.realSession = null; S.realPasskeys = null; S.realRoster = null;
   S.realSignInNotFound = false; S.realSignInError = null; S.showRealSignIn = false;
   S.eventId = null; S.showNewLead = false; S.showMobileMenu = false;
   history.pushState(null, '', location.pathname + location.search);
@@ -4037,7 +4078,7 @@ function renderNow(){
             <h1 style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${pageTitle()}</h1>
           </div>
           <div style="display:flex;align-items:center;gap:10px;flex:none;">
-            <button class="btn askai-btn" data-action="open-ask-ai" title="Ask AI" style="background:var(--accent-wash);color:var(--accent-ink);border-color:transparent;">${ICO.sparkle}<span class="btn-label">Ask AI</span></button>
+            ${crewUser() ? '' : `<button class="btn askai-btn" data-action="open-ask-ai" title="Ask AI" style="background:var(--accent-wash);color:var(--accent-ink);border-color:transparent;">${ICO.sparkle}<span class="btn-label">Ask AI</span></button>`}
             ${isAdmin ? `<button class="btn btn-primary newlead-btn" data-action="open-new-lead">${ICO.leads}<span class="btn-label">New Lead</span></button>` : ''}
             ${renderUserChip()}
           </div>
@@ -4061,7 +4102,7 @@ function renderNow(){
     ${S.showPayeeProfileForm ? renderPayeeProfileFormModal() : ''}
     ${S.dayListDate ? renderDayList() : ''}
     ${S.showNewProject ? renderNewProjectModal() : ''}
-    ${S.eventId ? renderEventSheet(getEvent(S.eventId)) : ''}
+    ${S.eventId ? (crewUser() ? renderCrewGigSheet(getEvent(S.eventId)) : renderEventSheet(getEvent(S.eventId))) : ''}
     ${S.showTravelRequestDetail ? renderTravelRequestDetailSheet() : ''}
     ${S.showReminderPreview ? renderReminderPreview() : ''}
     ${S.showBookingConfirmation ? renderBookingConfirmationPreview() : ''}
@@ -4083,7 +4124,7 @@ function renderNow(){
 }
 
 function renderDayEventRow(e, isAdmin, action, opts={}){
-  const a = artistById(e.artistId); const sm = isAdminUser(S.user) ? statusMeta(e) : artistGigStatus(e);
+  const a = artistById(e.artistId) || NO_ARTIST; const sm = isAdminUser(S.user) ? statusMeta(e) : artistGigStatus(e);
   const timeLabel = !e.time ? 'Time TBD' : e.time==='00:00'?'All day':fmtTime(e.time);
   let primary, secondary;
   if(opts.showDate){
@@ -4110,7 +4151,7 @@ function renderDayEventRow(e, isAdmin, action, opts={}){
 function renderDayList(){
   const iso = S.dayListDate;
   const isAdmin = isAdminUser(S.user);
-  const evs = S.events.filter(e=>e.date===iso && (isAdmin || e.artistId===S.user)).sort((a,b)=>a.time.localeCompare(b.time));
+  const evs = S.events.filter(e=>e.date===iso && (isAdmin || crewUser() || e.artistId===S.user)).sort((a,b)=>a.time.localeCompare(b.time)); // crew: S.events is already their own list
   return `<div class="overlay center" data-action="dayoverlay-close">
     <div class="modal" data-stop style="width:400px;">
       <div class="sheet-head"><h2 style="font-size:1.1rem;">${fmtDate(iso)}</h2><button class="icon-btn" data-action="close-daylist" aria-label="Close">${ICO.x}</button></div>
@@ -4135,8 +4176,8 @@ function renderUserChip(){
     return `<div class="user-chip"><span class="avatar" data-slot="0" style="background:var(--ink);color:var(--page);width:22px;height:22px;font-size:10px;">${esc(u.initials)}</span> <span class="chip-name">${esc(u.name)}</span>
       <button class="icon-btn" data-action="logout" title="Switch user" aria-label="Switch user">${ICO.logout}</button></div>`;
   }
-  const a = artistById(S.user);
-  return `<div class="user-chip"><span class="avatar" data-slot="${a.slot}" style="width:22px;height:22px;font-size:10px;">${esc(a.initials)}</span> <span class="chip-name">${esc(a.name)}</span>
+  const a = crewUser() || artistById(S.user);
+  return `<div class="user-chip"><span class="avatar" data-slot="${a.slot||0}" style="width:22px;height:22px;font-size:10px;">${esc(a.initials)}</span> <span class="chip-name">${esc(a.name)}</span>
     <button class="icon-btn" data-action="logout" title="Switch user" aria-label="Switch user">${ICO.logout}</button></div>`;
 }
 
@@ -4154,7 +4195,7 @@ const MGMT_NAV_ITEMS = [
 // simplified view — hidden for that login only.
 const CEO_HIDDEN_NAV_VIEWS = ['contract_builder'];
 function mgmtNavItemsFor(userId){
-  return MGMT_NAV_ITEMS.filter(([v])=> !(CEO_HIDDEN_NAV_VIEWS.includes(v) && adminRoleOf(userId)==='admin_ceo'));
+  return MGMT_NAV_ITEMS.filter(([v])=> !(CEO_HIDDEN_NAV_VIEWS.includes(v) && adminRoleOf(userId)==='admin_ceo') && (v!=='videos' || canSeeLibrary()));
 }
 /* ============ "NEW SINCE YOU LAST LOOKED" BADGES ============ */
 // Per-section last-visited date (YYYY-MM-DD), persisted so the badge survives a reload.
@@ -4186,12 +4227,15 @@ function navBadge(v){
   const n = navBadgeCount(v);
   return n>0 ? `<span class="nav-badge">${n>9?'9+':n}</span>` : '';
 }
+const CREW_NAV_ITEMS = [['c_home','Today',ICO.dash], ['c_calendar','Calendar',ICO.cal], ['videos','Videos',ICO.film]];
+// The non-office menu: crew or artist.
+function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS; }
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.35'; // bump on every release so a phone can tell it has updated. v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.36'; // bump on every release so a phone can tell it has updated. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
-  const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
+  const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
 }
 function isNavActive(v){ return S.view===v || (v==='artists' && S.view==='artist_detail') || ((v==='projects'||v==='a_projects') && S.view==='project_detail'); }
@@ -4217,7 +4261,7 @@ function renderArtistTopTabs(){
   </div>
   <div style="padding:0 28px;">
     <div class="tabbar">
-      ${ARTIST_NAV_ITEMS.map(([v,l])=>`<a href="#" class="tab ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}">${l}</a>`).join('')}
+      ${portalNavItems().map(([v,l])=>`<a href="#" class="tab ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}">${l}</a>`).join('')}
     </div>
   </div>
   </div>`;
@@ -4225,13 +4269,13 @@ function renderArtistTopTabs(){
 function renderBottomNav(isAdmin){
   // Same role filter as the sidebar/hamburger menu (it used the raw list, so a CEO-hidden page was
   // only kept off the phone bar by a CSS hide-list).
-  const items = isAdmin ? mgmtNavItemsFor(S.user) : ARTIST_NAV_ITEMS;
-  return `<div class="bottom-nav">
+  const items = isAdmin ? mgmtNavItemsFor(S.user) : portalNavItems();
+  return `<div class="bottom-nav${crewUser()?' crew':''}">
     ${items.map(([v,l,ic])=>`<a href="#" class="bn-item ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span><span>${l}</span></a>`).join('')}
   </div>`;
 }
 function renderMobileMenu(isAdmin){
-  const who = isAdmin ? adminById(S.user) : artistById(S.user);
+  const who = isAdmin ? adminById(S.user) : (crewUser() || artistById(S.user));
   return `<div class="overlay left" data-action="mobilemenu-close">
     <div class="mobile-menu-panel" data-stop>
       <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -4239,12 +4283,12 @@ function renderMobileMenu(isAdmin){
         <button class="icon-btn" data-action="close-mobile-menu" aria-label="Close">${ICO.x}</button>
       </div>
       <div class="rail-nav">
-        ${(isAdmin ? mgmtNavItemsFor(S.user) : ARTIST_NAV_ITEMS).map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span>${l}</a>`).join('')}
+        ${(isAdmin ? mgmtNavItemsFor(S.user) : portalNavItems()).map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span>${l}</a>`).join('')}
         <a href="#" class="rail-link ${isNavActive('settings')?'active':''}" data-action="nav" data-view="settings">${ICO.settings}Settings</a>
       </div>
       <div class="rail-foot">
         <div style="display:flex;align-items:center;gap:10px;padding:4px 10px 12px;">
-          <span class="avatar" data-slot="${isAdmin?'0':who.slot}" style="width:32px;height:32px;font-size:11px;${isAdmin?'background:var(--ink);color:var(--page);':''}">${esc(who.initials)}</span>
+          <span class="avatar" data-slot="${isAdmin?'0':(who.slot||0)}" style="width:32px;height:32px;font-size:11px;${isAdmin?'background:var(--ink);color:var(--page);':''}">${esc(who.initials)}</span>
           <span style="font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(who.name)}</span>
         </div>
         <a href="#" class="rail-link" data-action="logout" style="color:var(--crit);">${ICO.logout} Log Out</a>
@@ -4274,7 +4318,7 @@ const VIEWS = {
   contracts:        { who:'admin',  title:'Contracts',                  render:()=>renderContractsPage() },
   contract_builder: { who:'admin',  title:'Contract Builder',           render:()=>renderContractsBuilderListPage() },
   messages:         { who:'admin',  title:'Inbox',                      render:()=>renderMessagesPage() },
-  videos:           { who:'admin',  title:'Video Library',              render:()=>renderVideoLibraryPage() },
+  videos:           { who:'library', title:'Video Library',             render:()=>renderVideoLibraryPage() },
   projects:         { who:'admin',  title:'Projects',                   render:()=>renderProjectsBoard() },
   pricing:          { who:'admin',  title:'Pricing',                    render:()=>renderPricingPage() },
   international:    { who:'admin',  title:'International Opportunities', render:()=>renderInternationalPage() },
@@ -4286,9 +4330,17 @@ const VIEWS = {
   a_financials:     { who:'artist', title:'Financials',                 render:()=>renderArtistFinancials(S.user) },
   a_travel:         { who:'artist', title:'Travel',                     render:()=>renderTravelPage(eventsFor(S.user), {singleArtist:true}) },
   a_projects:       { who:'artist', title:'My Projects',                render:()=>renderArtistProjects(S.user) },
+  c_home:           { who:'crew',   title:'Today',                      render:()=>renderCrewHome() },
+  c_calendar:       { who:'crew',   title:'Calendar',                   render:()=>renderCalendarPage(S.events, crewUser() && crewUser().kind==='social' ? {showFilter:true} : {noLegend:true}) },
 };
-function homeViewFor(isAdmin){ return isAdmin ? 'dashboard' : 'a_dashboard'; }
-function viewAllowed(view, isAdmin){ const v = VIEWS[view]; return !!v && (v.who==='all' || v.who===(isAdmin?'admin':'artist')); }
+function homeViewFor(isAdmin){ return crewUser() ? 'c_home' : isAdmin ? 'dashboard' : 'a_dashboard'; }
+// 'library' = the Video Library's people (0069): admins given library access, and crew.
+function viewAllowed(view, isAdmin){
+  const v = VIEWS[view]; if(!v) return false;
+  if(v.who==='library') return canSeeLibrary();
+  if(crewUser()) return v.who==='crew' || view==='settings';
+  return v.who==='all' || v.who===(isAdmin?'admin':'artist');
+}
 function renderView(){
   if(S.user && !viewAllowed(S.view, isAdminUser(S.user))){ S.view = homeViewFor(isAdminUser(S.user)); syncURL(); }
   const v = VIEWS[S.view];
@@ -4406,7 +4458,7 @@ function renderEditRealUserModal(){
 }
 function renderSettingsPage(){
   const isAdmin = isAdminUser(S.user);
-  const who = isAdmin ? adminById(S.user) : artistById(S.user);
+  const who = isAdmin ? adminById(S.user) : (crewUser() || artistById(S.user));
   const st = getUserSettings(S.user);
   const themeIdx = THEME_OPTIONS.findIndex(([k])=>k===THEME_PREF);
   const isReal = !!S.realSession;
@@ -4447,7 +4499,7 @@ function renderSettingsPage(){
   ${isAdmin ? renderTravelSettingsCard() : ''}
 
 
-  <div class="card card-pad" style="margin-bottom:20px;">
+  ${crewUser() ? '' : `<div class="card card-pad" style="margin-bottom:20px;">
     <h3 style="margin-bottom:8px;">Notifications</h3>
     ${NOTIFY_ITEMS.filter(([,,,,artistOnly])=>!artistOnly||!isAdmin).map(([key,label,adminSub,artistSub])=>`
     <div class="settings-row">
@@ -4465,7 +4517,7 @@ function renderSettingsPage(){
             </div>
           </div>`}
     </div>`).join('')}
-  </div>
+  </div>`}
 
   <div class="card card-pad" style="margin-bottom:20px;">
     <h3 style="margin-bottom:8px;">Appearance</h3>
@@ -4805,7 +4857,7 @@ function renderCalendarPage(events, opts={}){
         return `<div class="cal-cell ${c.iso===todayIso?'today':''}" data-action="open-day-view" data-date="${c.iso}" style="cursor:pointer;">
           ${isAdmin? `<button class="cal-add-btn" data-action="quick-add-event" data-date="${c.iso}" title="Add event">${ICO.plus}</button>`:''}
           <span class="cal-date">${c.d}</span>
-          ${evs.slice(0,max).map(e=>{const a=artistById(e.artistId); const label = opts.singleArtist? (e.clientName||e.type).split(' ')[0] : a.name.split(' ')[0]; const timePrefix = (!e.time || e.time==='00:00') ? '' : fmtTime(e.time).replace(':00','')+' '; return `<div class="cal-evt" data-action="open-event" data-id="${e.id}"><span class="dot" data-slot="${a.slot}"></span><span>${timePrefix}${esc(label)}</span></div>`;}).join('')}
+          ${evs.slice(0,max).map(e=>{const a=artistById(e.artistId)||NO_ARTIST; const label = opts.singleArtist? (e.clientName||e.type).split(' ')[0] : a.name.split(' ')[0]; const timePrefix = (!e.time || e.time==='00:00') ? '' : fmtTime(e.time).replace(':00','')+' '; return `<div class="cal-evt" data-action="open-event" data-id="${e.id}"><span class="dot" data-slot="${a.slot}"></span><span>${timePrefix}${esc(label)}</span></div>`;}).join('')}
           ${evs.length>max? `<span class="cal-more" data-action="open-day" data-date="${c.iso}">+${evs.length-max} more</span>`:''}
         </div>`;
       }).join('')}
@@ -5124,7 +5176,21 @@ function renderMessagesPage(){
    'library'); nothing is kept in this browser. */
 const LIB_CATS = [['event','Event'],['tempo','Tempo'],['lifestyle','Crowd']];
 const LIB_BUCKET = 'library';
-const LIB_PUBLIC_URL = p => `${SUPABASE_URL}/storage/v1/object/public/${LIB_BUCKET}/${String(p).split('/').map(encodeURIComponent).join('/')}`;
+// The bucket is private (0069): files open through signed links, made in batches and kept 6 hours.
+const LIB_URL = p => (S.libUrls && S.libUrls[p]) || '';
+async function libSignPaths(paths){
+  S.libUrls = S.libUrls || {};
+  const todo = [...new Set(paths.filter(p=>p && !S.libUrls[p]))];
+  for(let i=0; i<todo.length; i+=500){
+    const { data, error } = await supabaseClient.storage.from(LIB_BUCKET).createSignedUrls(todo.slice(i, i+500), 6*3600);
+    if(error){ console.error('library links failed', error); return; }
+    (data||[]).forEach(d=>{ if(d.signedUrl) S.libUrls[d.path] = d.signedUrl; });
+  }
+}
+// Who may open the library (0069): admins given library access (the owner, Ilan), and crew. Managing
+// it (upload, tag, singers): the same admins and social crew. The database enforces both.
+function canSeeLibrary(){ return !!crewUser() || !!(adminById(S.user) && adminById(S.user).libraryAccess); }
+function canManageLibrary(){ const c = crewUser(); return c ? c.kind==='social' : !!(adminById(S.user) && adminById(S.user).libraryAccess); }
 const LIB_VIDEO_TYPES = { mp4:'video/mp4', m4v:'video/x-m4v', mov:'video/quicktime', webm:'video/webm', avi:'video/x-msvideo', mpg:'video/mpeg', mpeg:'video/mpeg' };
 const TUS_SRC = 'https://cdn.jsdelivr.net/npm/tus-js-client@4.2.3/dist/tus.min.js';
 const TUS_SRI = 'sha384-VRMVp3dn5fs5skaKWWUXMrg1rovVl5rGo6H7a1AFrZCdgXtOdQ8TnhsOLTvqRuus';
@@ -5141,6 +5207,8 @@ async function loadLibrary(){
     const err = s.error || t.error || v.error;
     if(err){ toast('Could not load the video library: ' + err.message, 'system'); return; }
     S.lib = { singers:s.data||[], tags:t.data||[], videos:(v.data||[]).map(x=>({ ...x, tagIds:(x.library_video_tags||[]).map(y=>y.tag_id) })) };
+    S.libUrls = {};
+    await libSignPaths([...S.lib.videos.flatMap(x=>[x.video_path, x.thumb_path]), ...S.lib.singers.map(x=>x.photo_path)]);
   } finally { S.libBusy = false; render(); }
 }
 function libTagsOf(cat){ return ((S.lib && S.lib.tags) || []).filter(t=>t.category===cat); }
@@ -5262,6 +5330,7 @@ async function libUploadFiles(files){
           video_path:path, thumb_path:thumb, file_name:it.name.slice(0, 200), size_bytes:it.file.size, mime:it.type }).select('*').single();
         if(error) throw new Error(error.message);
         S.lib.videos.unshift({ ...data, tagIds:[] });
+        await libSignPaths([data.video_path, data.thumb_path]);
         it.status = 'done'; it.pct = 1;
       }catch(err){ it.status = 'failed'; it.error = String(err && err.message || err).slice(0, 200); }
       render();
@@ -5305,7 +5374,7 @@ async function libSingerPhoto(id, file){
   const { error } = await supabaseClient.storage.from(LIB_BUCKET).upload(path, file, { contentType:file.type, cacheControl:'31536000' });
   if(error){ toast('Could not upload the photo: ' + error.message, 'system'); return; }
   const old = s.photo_path;
-  if(await libSaveSinger(id, { photo_path:path }) && old) supabaseClient.storage.from(LIB_BUCKET).remove([old]);
+  if(await libSaveSinger(id, { photo_path:path })){ await libSignPaths([path]); render(); if(old) supabaseClient.storage.from(LIB_BUCKET).remove([old]); }
 }
 async function libAddTag(cat){
   const name = String((S.libNewTag||{})[cat]||'').trim(); if(!name) return;
@@ -5331,19 +5400,142 @@ async function libDeleteTag(id){
 function libTagSelect(cat, value, attrs){
   return `<select ${attrs} aria-label="${esc(LIB_CATS.find(([c])=>c===cat)[1])}" style="max-width:100%;"><option value="">—</option>${libTagsOf(cat).map(t=>`<option value="${esc(t.id)}" ${t.id===value?'selected':''}>${esc(t.name)}</option>`).join('')}</select>`;
 }
+
+/* ============ CREW: videographer + social media (0069) ============
+   Owner 2026-10-28: Tzvi (social) sees the calendar and every gig -- no money -- and assigns Lilker;
+   Lilker (videographer) sees only the gigs he's asked to film, confirms them, and gets the directions.
+   Gigs come from crew_gig_view (no money columns); assignments go through the `crew` Edge Function,
+   which checks who may do what and sends Lilker the WhatsApp. Nobody here creates or cancels a gig. */
+const CREW_STATUS = { requested:['Asked','pill-warn'], confirmed:['Confirmed','pill-good'], declined:["Can't make it",'pill-neutral'] };
+// Office: the crew list and every assignment, keyed by the gig's app id.
+async function loadCrewRoster(){
+  if(!supabaseClient || !S.realSession) return;
+  const [c, g] = await Promise.all([
+    supabaseClient.from('crew_members').select('id, name, initials, kind, phone, email, active').order('name'),
+    supabaseClient.from('gig_crew').select('crew_id, status, notify_result, events(legacy_id)'),
+  ]);
+  if(c.error || g.error){ console.error('crew load failed', c.error || g.error); return; }
+  S.crewRoster = c.data || [];
+  const name = id => (S.crewRoster.find(x=>x.id===id)||{}).name || '';
+  S.gigCrew = {};
+  (g.data||[]).forEach(r=>{ const id = r.events && r.events.legacy_id; if(id) (S.gigCrew[id] = S.gigCrew[id] || []).push({ crewId:r.crew_id, name:name(r.crew_id), status:r.status, notify:r.notify_result }); });
+  render();
+}
+function crewCanAssign(){ return isAdminUser(S.user) || (crewUser() && crewUser().kind==='social'); }
+// The videographer card: who is asked / confirmed, and (office, Tzvi) ask or take it back.
+function renderGigCrewCard(evId, entries){
+  const vids = (S.crewRoster||[]).filter(c=>c.kind==='videographer' && c.active!==false);
+  const assigned = new Map(entries.map(e=>[e.crewId, e]));
+  const canAssign = crewCanAssign();
+  if(!entries.length && !(canAssign && vids.length)) return '';
+  return `<div class="card card-pad" data-testid="gig-crew">
+    <div class="u-label" style="margin-bottom:8px;">Videographer</div>
+    ${entries.map(e=>{ const [label, cls] = CREW_STATUS[e.status] || [e.status, 'pill-neutral'];
+      return `<div class="kv-row" style="align-items:center;"><span style="min-width:0;"><strong>${esc(e.name)}</strong>${e.notify && e.status==='requested' ? `<br/><span style="font-size:11px;color:var(--ink-3);">${esc(e.notify.startsWith('not sent') ? 'WhatsApp ' + e.notify : 'WhatsApp sent' + (e.notify.includes('test') ? ' (test mode)' : ''))}</span>` : ''}</span>
+        <span style="display:flex;align-items:center;gap:6px;flex:none;"><span class="pill ${cls}">${esc(label)}</span>
+        ${canAssign ? `<button class="icon-btn" data-action="crew-unassign" data-id="${esc(evId)}" data-crew="${esc(e.crewId)}" title="Take back" aria-label="Take back">${ICO.x}</button>` : ''}</span></div>`; }).join('')}
+    ${canAssign ? vids.filter(v=>!assigned.has(v.id) || assigned.get(v.id).status==='declined').map(v=>`<button class="btn btn-sm" style="margin-top:8px;" data-action="crew-assign" data-id="${esc(evId)}" data-crew="${esc(v.id)}" ${S.crewBusy?'disabled':''}>${ICO.plus} ${assigned.has(v.id)?'Ask again':'Ask'} ${esc(v.name.split(/\s+/)[0])} to film</button>`).join(' ') : ''}
+  </div>`;
+}
+async function doCrewCall(body, okMsg){
+  if(S.crewBusy) return;
+  S.crewBusy = true; render();
+  try{
+    const res = await callEdgeFunction('crew', body);
+    if(!res.ok){ toast(res.error || 'That did not go through.', 'system'); return; }
+    const wa = res.whatsapp;
+    toast(okMsg + (wa ? (wa.ok ? (wa.testRedirect ? ' WhatsApp sent (test mode: to your phone).' : ' WhatsApp sent.') : ` WhatsApp not sent: ${wa.error}`) : ''), wa && !wa.ok ? 'system' : 'success');
+  } finally {
+    S.crewBusy = false;
+    if(crewUser()) await loadArtistPortalData(); else await loadCrewRoster();
+  }
+}
+const crewSingers = ev => (ev.singers||[]).map(x=>x.name).join(' & ') || 'Gig';
+function crewGigRow(ev, opts={}){
+  const d = new Date(ev.date+'T00:00:00');
+  const me = crewUser();
+  const confirmed = (ev.crew||[]).filter(c=>c.status==='confirmed');
+  const where = [ev.venue, ev.city].filter(Boolean).join(', ');
+  return `<div class="card card-pad crew-gig" data-testid="crew-gig">
+    <div style="display:flex;gap:14px;align-items:flex-start;min-width:0;cursor:pointer;" data-action="open-event" data-id="${esc(ev.id)}">
+      <div class="crew-date"><span>${d.toLocaleDateString('en-US',{month:'short'})}</span><strong>${d.getDate()}</strong></div>
+      <div style="min-width:0;flex:1;">
+        <strong style="display:block;font-size:14.5px;overflow-wrap:anywhere;">${esc(crewSingers(ev))}</strong>
+        <span style="font-size:12.5px;color:var(--ink-2);overflow-wrap:anywhere;">${esc(d.toLocaleDateString('en-US',{weekday:'short'}))}${ev.time && ev.time!=='00:00' ? ' · ' + esc(fmtTimeRange(ev.time, ev.endTime)) : ''} · ${esc(ev.type)}${where ? ' · ' + esc(where) : ''}</span>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+          ${ev.crewStatus==='pending' ? `<span class="pill pill-neutral">Pending contract</span>` : ''}
+          ${me && me.kind==='videographer' && ev.myStatus ? `<span class="pill ${(CREW_STATUS[ev.myStatus]||[])[1]||''}">${esc(ev.myStatus==='requested' ? 'Waiting for your answer' : (CREW_STATUS[ev.myStatus]||[ev.myStatus])[0])}</span>` : ''}
+          ${me && me.kind==='social' ? (confirmed.length ? `<span class="pill pill-good">${ICO.check} ${esc(confirmed.map(c=>c.name.split(/\s+/)[0]).join(', '))} filming</span>` : (ev.crew||[]).some(c=>c.status==='requested') ? `<span class="pill pill-warn">Videographer asked</span>` : `<span class="pill pill-neutral">No videographer</span>`) : ''}
+        </div>
+      </div>
+    </div>
+    ${opts.directions ? renderMapLinks(ev) : ''}
+    ${me && me.kind==='videographer' && ev.myStatus==='requested' ? `<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+      <button class="btn btn-sm btn-primary" data-action="crew-respond" data-id="${esc(ev.id)}" data-accept="1" ${S.crewBusy?'disabled':''}>${ICO.check} Confirm</button>
+      <button class="btn btn-sm" data-action="crew-respond" data-id="${esc(ev.id)}" data-accept="0" ${S.crewBusy?'disabled':''}>Can't make it</button></div>` : ''}
+  </div>`;
+}
+function renderCrewHome(){
+  const me = crewUser(); if(!me) return '';
+  const p = S.artistPortal;
+  if(!p.loadedAt) return `<div class="card card-pad" style="font-size:13px;color:var(--ink-2);">${p.error ? 'Could not load the gigs: ' + esc(p.error) : 'Loading…'}</div>`;
+  const today = todayISO();
+  const byDate = (a,b)=>(a.date+(a.time||'')).localeCompare(b.date+(b.time||''));
+  const evs = S.events.filter(e=>e.date).slice().sort(byDate);
+  const todays = evs.filter(e=>e.date===today);
+  const waiting = me.kind==='videographer' ? evs.filter(e=>e.date>today && e.myStatus==='requested') : []; // today's ask shows under Today
+  const upcoming = evs.filter(e=>e.date>today && !waiting.includes(e)).slice(0, me.kind==='social' ? 30 : 50);
+  const sec = (title, list, empty, opts)=>`<div class="section-head" style="margin-top:22px;"><h2>${title}</h2></div>
+    ${list.length ? `<div style="display:flex;flex-direction:column;gap:10px;">${list.map(e=>crewGigRow(e, opts)).join('')}</div>` : `<div class="card card-pad" style="font-size:13px;color:var(--ink-3);">${empty}</div>`}`;
+  return `<p style="margin:0;color:var(--ink-2);font-size:13.5px;">${esc(new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}))} · Hi ${esc(me.name.split(/\s+/)[0])}</p>
+    ${waiting.length ? sec('Waiting for your answer', waiting, '', {directions:false}) : ''}
+    ${sec('Today', todays, me.kind==='videographer' ? 'Nothing to film today.' : 'No gigs today.', {directions:true})}
+    ${sec('Coming up', upcoming, me.kind==='videographer' ? 'No gigs booked for you yet. When we ask you to film one, it shows up here and on WhatsApp.' : 'No upcoming gigs.', {directions:false})}`;
+}
+function renderCrewGigSheet(ev){
+  if(!ev) return '';
+  const me = crewUser();
+  const d = ev.date ? fmtDate(ev.date) : 'Date TBD';
+  return `<div class="overlay overlay-window" data-action="overlay-close">
+    <div class="sheet sheet-window" data-stop>
+      <div class="sheet-head">
+        <div style="min-width:0;"><strong style="font-family:var(--font-display);font-size:1.2rem;display:block;overflow-wrap:anywhere;">${esc(crewSingers(ev))}</strong>
+          <span class="pill ${ev.crewStatus==='pending'?'pill-neutral':'pill-accent'}">${ev.crewStatus==='pending'?'Pending contract':'Booked'}</span></div>
+        <button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button>
+      </div>
+      <div class="sheet-body">
+        ${me.kind==='videographer' && ev.myStatus==='requested' ? `<div class="card card-pad" style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;">
+          <strong>Can you film this one?</strong><span style="display:flex;gap:8px;">
+          <button class="btn btn-sm btn-primary" data-action="crew-respond" data-id="${esc(ev.id)}" data-accept="1" ${S.crewBusy?'disabled':''}>${ICO.check} Confirm</button>
+          <button class="btn btn-sm" data-action="crew-respond" data-id="${esc(ev.id)}" data-accept="0" ${S.crewBusy?'disabled':''}>Can't make it</button></span></div>` : ''}
+        <div class="card card-pad" style="display:flex;flex-direction:column;gap:9px;">
+          <div class="kv-row"><span style="color:var(--ink-2);">${ICO.clock} Date &amp; Time</span><strong class="u-mono" style="text-align:right;">${esc(d)}${ev.time && ev.time!=='00:00' ? ' · ' + esc(fmtTimeRange(ev.time, ev.endTime)) : ''}</strong></div>
+          <div class="kv-row"><span style="color:var(--ink-2);">Event</span><strong style="text-align:right;">${esc(ev.type)}${ev.clientName ? `<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.clientName)}</span>` : ''}</strong></div>
+          <div class="kv-row"><span style="color:var(--ink-2);">${ICO.pin} Venue</span><span style="text-align:right;"><strong>${ev.venue ? esc(ev.venue) : '<span style="color:var(--ink-3);font-weight:500;">TBD</span>'}${ev.address ? `<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.address)}</span>` : ''}${ev.city||ev.state ? `<br/><span style="font-weight:500;color:var(--ink-2);">${esc([ev.city, ev.state].filter(Boolean).join(', '))}</span>` : ''}</strong>
+            <span style="display:flex;justify-content:flex-end;">${renderMapLinks(ev)}</span></span></div>
+          ${ev.dressCode ? `<div class="kv-row"><span style="color:var(--ink-2);">Dress Code</span><strong style="text-align:right;">${esc(ev.dressCode)}</strong></div>` : ''}
+        </div>
+        ${me.kind==='social' ? renderGigCrewCard(ev.id, ev.crew||[]) : ''}
+        ${renderPrepAndGigInfoCard(ev, false)}
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderVideoLibraryPage(){
+  const libraryPage = new URL('videos/', location.href.split('#')[0]).href;
+  const frame = `<iframe src="${esc(libraryPage)}?embed=1" title="Video Library" data-testid="lib-browse" class="lib-frame"></iframe>`;
+  if(!canManageLibrary()) return `<div class="lib">${frame}</div>`;
   if(!S.lib && !S.libBusy) setTimeout(loadLibrary, 0);
   if(!S.lib) return `<div class="card card-pad" style="font-size:13px;color:var(--ink-2);">Loading…</div>`;
   const tab = S.libTab || 'browse';
-  const publicUrl = new URL('videos/', location.href.split('#')[0]).href;
   return `<div class="lib">
   <div class="lib-head">
     <div class="lib-tabs" role="tablist">${[['browse','Library'],['videos','Upload & tag'],['singers','Singers'],['tags','Tags']].map(([k,l])=>`<button type="button" role="tab" aria-selected="${tab===k}" class="${tab===k?'active':''}" data-action="lib-tab" data-id="${k}">${l}</button>`).join('')}</div>
-    <div class="lib-share"><span title="Clients and bookers open this link, no login">${esc(publicUrl.replace(/^https?:\/\//,''))}</span>
-      <button class="btn btn-sm" data-action="copy-text" data-value="${esc(publicUrl)}">Copy link</button>
-      <a class="btn btn-sm" href="${esc(publicUrl)}" target="_blank" rel="noopener" data-action="external-link">Open ↗</a></div>
+    <div class="lib-share"><span>Private: only people with access, signed in</span>
+      <a class="btn btn-sm" href="${esc(libraryPage)}" target="_blank" rel="noopener" data-action="external-link">Full screen ↗</a></div>
   </div>
-  ${tab==='browse' ? `<iframe src="${esc(publicUrl)}?embed=1" title="Video Library" data-testid="lib-browse" class="lib-frame"></iframe>`
+  ${tab==='browse' ? frame
     : tab==='singers' ? renderLibSingers() : tab==='tags' ? renderLibTags() : renderLibVideos()}</div>`;
 }
 function renderLibVideos(){
@@ -5388,7 +5580,7 @@ function renderLibVideos(){
     <thead><tr><th><input type="checkbox" data-lib-select-all ${selCount && selCount===list.length?'checked':''} aria-label="Select all"/></th><th>Video</th><th>Title &amp; songs</th>${LIB_CATS.map(([,l])=>`<th>${l}</th>`).join('')}<th>Shown</th><th></th></tr></thead>
     <tbody>${list.map(v=>`<tr data-testid="lib-row">
       <td data-label="Select"><input type="checkbox" data-lib-select="${esc(v.id)}" ${sel.has(v.id)?'checked':''} aria-label="Select"/></td>
-      <td data-label="Video"><a href="${esc(LIB_PUBLIC_URL(v.video_path))}" target="_blank" rel="noopener" data-action="external-link" style="display:block;width:120px;max-width:100%;aspect-ratio:16/9;border-radius:6px;overflow:hidden;background:#000;position:relative;">${v.thumb_path?`<img src="${esc(LIB_PUBLIC_URL(v.thumb_path))}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;"/>`:''}${fmtLen(v.duration_s)?`<span style="position:absolute;right:4px;bottom:4px;background:rgba(0,0,0,.7);color:#fff;font-size:10px;padding:0 4px;border-radius:3px;">${fmtLen(v.duration_s)}</span>`:''}</a>
+      <td data-label="Video"><a href="${esc(LIB_URL(v.video_path))}" target="_blank" rel="noopener" data-action="external-link" style="display:block;width:120px;max-width:100%;aspect-ratio:16/9;border-radius:6px;overflow:hidden;background:#000;position:relative;">${v.thumb_path?`<img src="${esc(LIB_URL(v.thumb_path))}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;"/>`:''}${fmtLen(v.duration_s)?`<span style="position:absolute;right:4px;bottom:4px;background:rgba(0,0,0,.7);color:#fff;font-size:10px;padding:0 4px;border-radius:3px;">${fmtLen(v.duration_s)}</span>`:''}</a>
         ${!S.libFilterSinger?`<div style="font-size:11px;color:var(--ink-3);margin-top:3px;">${esc(singerName(v.singer_id))}</div>`:''}</td>
       <td data-label="Title"><input value="${esc(v.title)}" data-lib-title="${esc(v.id)}" aria-label="Title" style="width:100%;min-width:0;"/>
         <input value="${esc(v.songs||'')}" data-lib-songs="${esc(v.id)}" placeholder="Song name(s)" aria-label="Songs" style="width:100%;min-width:0;margin-top:4px;font-size:12px;"/>
@@ -5404,7 +5596,7 @@ function renderLibSingers(){
   return `<div class="card card-pad" style="margin-bottom:14px;">
     ${L.singers.map((s,i)=>`<div class="settings-row" style="flex-wrap:wrap;gap:10px;" data-testid="lib-singer">
       <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 240px;">
-        <label class="lib-photo" title="${s.photo_path?'Change':'Add'} photo"><span class="lib-photo-av">${s.photo_path?`<img src="${esc(LIB_PUBLIC_URL(s.photo_path))}" alt=""/>`:esc(String(s.name||'?').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase())}</span><span class="lib-photo-cam">${ICO.image}</span>
+        <label class="lib-photo" title="${s.photo_path?'Change':'Add'} photo"><span class="lib-photo-av">${s.photo_path?`<img src="${esc(LIB_URL(s.photo_path))}" alt=""/>`:esc(String(s.name||'?').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase())}</span><span class="lib-photo-cam">${ICO.image}</span>
           <input type="file" accept="image/jpeg,image/png,image/webp" data-lib-photo="${esc(s.id)}" style="display:none;"/></label>
         <div style="min-width:0;flex:1;"><input class="lib-inline" value="${esc(s.name)}" data-lib-singer-name="${esc(s.id)}" aria-label="Name" style="width:100%;font-weight:600;font-size:14.5px;"/>
           <p style="margin:2px 0 0 9px;font-size:11.5px;color:var(--ink-3);">${count(s.id)} video${count(s.id)===1?'':'s'}${s.photo_path?'':' · no photo yet: tap the circle'}</p></div>
@@ -6714,6 +6906,7 @@ function renderEventSheet(ev){
         ${hasItinerary(ev) ? `<div style="display:flex;gap:8px;">
           <button class="btn" style="flex:1;justify-content:flex-start;" data-action="view-itinerary" data-id="${ev.id}">${ICO.suitcase} View Itinerary</button>
         </div>` : ''}
+        ${isAdmin && !ev.unpaid && ['contract_sent','booked','paid'].includes(ev.status) ? renderGigCrewCard(ev.id, (S.gigCrew||{})[ev.id] || []) : ''}
         ${renderPrepAndGigInfoCard(ev, isAdmin)}
         ${!isAdmin ? `<div>
             <div style="display:flex;gap:8px;">
@@ -10483,6 +10676,9 @@ function bindGlobal(){
       case 'mark-balance': doMarkBalance(id); break;
       case 'inbox-money': { const it = (S.inboxItems||[]).find(x=>x.id===id); if(it) applyInboxMoney(it, false); break; }
       case 'lib-tab': S.libTab = id; render(); break;
+      case 'crew-assign': doCrewCall({ action:'assign', eventId:id, crewId:t.getAttribute('data-crew') }, 'Asked.'); break;
+      case 'crew-unassign': doCrewCall({ action:'unassign', eventId:id, crewId:t.getAttribute('data-crew') }, 'Taken back.'); break;
+      case 'crew-respond': { const yes = t.getAttribute('data-accept')==='1'; doCrewCall({ action:'respond', eventId:id, accept:yes }, yes ? 'Confirmed. Thank you!' : "Got it, we'll find someone else."); break; }
       case 'lib-delete-video': libDeleteVideos([id]); break;
       case 'lib-bulk-delete': libDeleteVideos([...(S.libSelected||[])]); break;
       case 'lib-select-none': S.libSelected = new Set(); render(); break;
