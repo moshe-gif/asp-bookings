@@ -290,9 +290,14 @@ Deno.serve(async (req) => {
   const aspFee = quote.feeCents + aspCents;
   const params = {
     amount: quote.totalCents, currency: "usd", confirm: true, confirmation_token: body.confirmationTokenId,
-    payment_method_types: [quote.method],
+    // allowed_payment_method_types, the replacement for payment_method_types (Stripe removed that from
+    // newer API versions; 2026-10-28 a new account refused it), matching the page's Payment Element
+    // (allowedPaymentMethodTypes: Stripe requires the same list on both). quoteFor already checked this
+    // payment's method is one of them.
+    allowed_payment_method_types: ["card", "us_bank_account"],
     // Instant bank verification only: micro-deposits would leave the client stuck on this page.
-    ...(quote.method === "us_bank_account" ? { payment_method_options: { us_bank_account: { verification_method: "instant" } } } : {}),
+    // (Always sent, card or bank: Stripe requires the same options as the page's Payment Element.)
+    payment_method_options: { us_bank_account: { verification_method: "instant" } },
     description: `${r.description}${quote.feeCents ? " (incl. credit card fee)" : ""}`.slice(0, 300),
     // The artist gets their share; ASP keeps the card fee (if any) and its own part (aspCents).
     ...(destination ? { transfer_data: { destination }, ...(aspFee ? { application_fee_amount: aspFee } : {}) } : {}),

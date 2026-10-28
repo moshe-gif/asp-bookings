@@ -29,6 +29,9 @@ def _make_deposit_link(page, client_name, date, fee_percent="3"):
     pick_template(page, "standard")
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
+    # The standard template now asks a percentage deposit: clear it so the $ amount counts.
+    pct = builder.locator('input[data-contract-field="deposit.percent"]')
+    pct.fill("0"); pct.blur()
     dep = builder.locator('input[data-contract-field="deposit.amount"]')
     dep.fill("500"); dep.blur()
     builder.locator('[data-action="approve-contract-for-sending"]').first.click()

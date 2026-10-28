@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8" />
+<title>ASP Video Library</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0E0E11" />
+<meta name="referrer" content="strict-origin-when-cross-origin" />
+<link rel="icon" type="image/png" href="../icon-glass-192.png" />
+<!-- The video library (migration 0068, owner 2026-10-28: "Think Splice, but for performance videos").
+     Public, no sign-in: clients and bookers pick a singer, filter that singer's videos by Event, Tempo
+     and Crowd, watch and download the original file. Standalone like /sign/ and /pay/: no app code.
+     It reads only what the database lets anyone read (live singers, published videos, the tags) with
+     the app's public key. The office manages everything in the app (Videos). -->
+<style>
+  :root{
+    --page:#0E0E11; --surface:#17171B; --surface-2:#1F1F24; --ink:#F2F1EC; --ink-2:#B4B3AD; --ink-3:#7E7D78;
+    --border:#2A2A30; --border-strong:#3A3A42; --accent:#C9A86A; --accent-ink:#0E0E11; --chip:#24242A;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; background:var(--page); color:var(--ink); }
+  body{ font:15px/1.5 Inter,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+  a{ color:inherit; }
+  .wrap{ max-width:1180px; margin:0 auto; padding:20px 16px calc(40px + env(safe-area-inset-bottom)); }
+  .top{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:22px; flex-wrap:wrap; }
+  .logo{ display:block; width:170px; max-width:60vw; height:auto; }
+  .label{ font-size:11px; text-transform:uppercase; letter-spacing:.09em; color:var(--ink-3); font-weight:700; }
+  .btn{ display:inline-flex; align-items:center; gap:6px; justify-content:center; padding:9px 14px; border-radius:999px; border:1px solid var(--border-strong); background:var(--surface); color:var(--ink); font:inherit; font-size:13.5px; font-weight:600; cursor:pointer; text-decoration:none; transition:background .15s,border-color .15s; white-space:nowrap; }
+  .btn:hover{ background:var(--surface-2); }
+  .btn-gold{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+  .btn-gold:hover{ background:#D8BA80; }
+  h1{ font-size:1.6rem; margin:0; letter-spacing:-.01em; }
+  .muted{ color:var(--ink-2); font-size:13.5px; }
+  /* home */
+  .singers{ display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr)); gap:16px; }
+  .singer{ display:block; text-decoration:none; border-radius:14px; overflow:hidden; background:var(--surface); border:1px solid var(--border); transition:transform .18s,border-color .18s; }
+  .singer:hover{ transform:translateY(-2px); border-color:var(--border-strong); }
+  .singer .ph{ aspect-ratio:1/1; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:2.6rem; font-weight:700; color:var(--ink-3); }
+  .singer .ph img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .singer .nm{ padding:12px 14px; display:flex; flex-direction:column; gap:1px; min-width:0; }
+  .singer .nm strong{ font-size:1rem; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* singer page */
+  .hero{ display:flex; align-items:center; gap:16px; margin-bottom:18px; min-width:0; }
+  .hero .av{ width:72px; height:72px; border-radius:50%; overflow:hidden; background:var(--surface-2); flex:none; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1.5rem; color:var(--ink-3); }
+  .hero .av img{ width:100%; height:100%; object-fit:cover; }
+  .filters{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:12px 14px; margin-bottom:16px; display:flex; flex-direction:column; gap:10px; }
+  .frow{ display:flex; align-items:flex-start; gap:10px; min-width:0; }
+  .frow .label{ width:64px; flex:none; padding-top:7px; }
+  .chips{ display:flex; flex-wrap:wrap; gap:6px; min-width:0; }
+  .chip{ padding:6px 12px; border-radius:999px; border:1px solid var(--border-strong); background:var(--chip); color:var(--ink-2); font:inherit; font-size:13px; font-weight:600; cursor:pointer; transition:background .15s,color .15s,border-color .15s; }
+  .chip[aria-pressed="true"]{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+  .bar{ display:flex; justify-content:space-between; align-items:center; gap:10px; margin:4px 0 12px; flex-wrap:wrap; }
+  .search{ flex:1 1 220px; max-width:360px; padding:9px 14px; border-radius:999px; border:1px solid var(--border-strong); background:var(--surface); color:var(--ink); font:inherit; font-size:14px; }
+  .search::placeholder{ color:var(--ink-3); }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr)); gap:16px; }
+  .vid{ background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; display:flex; flex-direction:column; min-width:0; }
+  .thumb{ position:relative; aspect-ratio:16/9; background:#000; cursor:pointer; overflow:hidden; border:0; padding:0; width:100%; display:block; }
+  .thumb img,.thumb video{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+  .thumb .dur{ position:absolute; right:8px; bottom:8px; background:rgba(0,0,0,.72); color:#fff; font-size:11.5px; font-weight:700; padding:2px 7px; border-radius:6px; }
+  .thumb .play{ position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:52px; height:52px; border-radius:50%; background:rgba(14,14,17,.62); display:flex; align-items:center; justify-content:center; transition:opacity .15s; }
+  .thumb:hover .play{ opacity:0; }
+  .vb{ padding:11px 13px 13px; display:flex; flex-direction:column; gap:8px; flex:1; }
+  .vt{ font-weight:650; font-size:14.5px; overflow-wrap:anywhere; }
+  .vs{ font-size:12.5px; color:var(--ink-3); overflow-wrap:anywhere; margin-top:-5px; }
+  .badges{ display:flex; flex-wrap:wrap; gap:5px; }
+  .badge{ font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; background:var(--chip); color:var(--ink-2); border:1px solid var(--border); }
+  .vf{ display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:auto; }
+  .empty{ text-align:center; padding:56px 16px; color:var(--ink-2); background:var(--surface); border:1px dashed var(--border-strong); border-radius:14px; }
+  /* player */
+  .ov{ position:fixed; inset:0; background:rgba(0,0,0,.86); display:flex; align-items:center; justify-content:center; padding:16px; z-index:10; }
+  .player{ width:min(1000px,100%); display:flex; flex-direction:column; gap:10px; }
+  .player video{ width:100%; max-height:76vh; background:#000; border-radius:12px; display:block; }
+  .ph-bar{ display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+  @media (max-width:560px){ .frow{ flex-direction:column; gap:4px; } .frow .label{ padding-top:0; width:auto; } h1{ font-size:1.3rem; } .hero .av{ width:56px; height:56px; } }
+</style>
+
+<div class="wrap" id="root"><p class="muted">Loading…</p></div>
+
+<script>
+(function(){
+  const SUPABASE_URL = 'https://psgpxbkncuavlnpplykf.supabase.co';
+  const KEY = 'sb_publishable_Orec7KI9Lwqd_ZfsKaEq9g__ewGiEiT';
+  const FILE = p => `${SUPABASE_URL}/storage/v1/object/public/library/${p.split('/').map(encodeURIComponent).join('/')}`;
+  const CATS = [['event','Event'],['tempo','Tempo'],['lifestyle','Crowd']];
+  const root = document.getElementById('root');
+  const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const initials = n => String(n||'?').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase();
+  const dur = s => { s = Math.round(Number(s)||0); if(!s) return ''; const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0'); };
+  const PLAY = '<svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"/></svg>';
+  const DL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>';
+  let D = null;                     // { singers, tags, videos }
+  const F = { event:new Set(), tempo:new Set(), lifestyle:new Set(), singer:new Set(), q:'' };
+
+  async function get(path){
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers:{ apikey:KEY, Authorization:`Bearer ${KEY}` } });
+    if(!r.ok) throw new Error('load ' + r.status);
+    return r.json();
+  }
+  async function load(){
+    const [singers, tags, videos] = await Promise.all([
+      get('library_singers?select=id,slug,name,photo_path&active=eq.true&order=sort,name'),
+      get('library_tags?select=id,category,name&order=category,sort,name'),
+      get('library_videos?select=id,singer_id,title,songs,recorded_on,duration_s,video_path,thumb_path,file_name,library_video_tags(tag_id)&published=eq.true&order=recorded_on.desc.nullslast,created_at.desc'),
+    ]);
+    const tagById = new Map(tags.map(t=>[t.id,t]));
+    videos.forEach(v=>{ v.tags = (v.library_video_tags||[]).map(x=>tagById.get(x.tag_id)).filter(Boolean); });
+    D = { singers, tags, videos };
+  }
+
+  function route(){
+    stopPreviews();
+    const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
+    if(!h) return home();
+    if(h==='all') return library(null);
+    const s = D.singers.find(x=>x.slug===h);
+    return s ? library(s) : home();
+  }
+  function header(back){
+    return `<div class="top"><img class="logo" src="../assets/brand/asp-horizontal-light.png" alt="ASP Management" width="170" height="22"/>
+      ${back ? `<a class="btn" href="#/">← All singers</a>` : `<a class="btn" href="#/all">Search all videos</a>`}</div>`;
+  }
+  function home(){
+    document.title = 'ASP Video Library';
+    const count = id => D.videos.filter(v=>v.singer_id===id).length;
+    root.innerHTML = `${header(false)}
+      <div class="label" style="margin-bottom:4px;">Video library</div>
+      <h1 style="margin-bottom:18px;">Choose a singer</h1>
+      ${D.singers.length ? `<div class="singers">${D.singers.map(s=>`<a class="singer" href="#/${encodeURIComponent(s.slug)}" data-testid="singer-card">
+        <div class="ph">${s.photo_path ? `<img src="${esc(FILE(s.photo_path))}" alt="" loading="lazy"/>` : esc(initials(s.name))}</div>
+        <div class="nm"><strong>${esc(s.name)}</strong><span class="muted">${count(s.id)} video${count(s.id)===1?'':'s'}</span></div></a>`).join('')}</div>`
+        : `<div class="empty">No singers yet.</div>`}`;
+    window.scrollTo(0,0);
+  }
+
+  let current = null;
+  function library(singer){
+    if(current !== (singer ? singer.id : 'all')){ ['event','tempo','lifestyle','singer'].forEach(k=>F[k].clear()); F.q=''; current = singer ? singer.id : 'all'; }
+    document.title = singer ? `${singer.name} — ASP Video Library` : 'All videos — ASP Video Library';
+    const pool = singer ? D.videos.filter(v=>v.singer_id===singer.id) : D.videos;
+    // Only the options this library actually uses (an empty chip would only ever show nothing).
+    const used = new Set(pool.flatMap(v=>v.tags.map(t=>t.id)));
+    const rows = CATS.map(([c,label])=>{ const opts = D.tags.filter(t=>t.category===c && used.has(t.id)); return opts.length ? `<div class="frow"><span class="label">${label}</span><div class="chips">${opts.map(t=>`<button class="chip" data-f="${c}" data-v="${esc(t.id)}" aria-pressed="${F[c].has(t.id)}">${esc(t.name)}</button>`).join('')}</div></div>` : ''; });
+    if(!singer && D.singers.length > 1) rows.unshift(`<div class="frow"><span class="label">Singer</span><div class="chips">${D.singers.map(s=>`<button class="chip" data-f="singer" data-v="${esc(s.id)}" aria-pressed="${F.singer.has(s.id)}">${esc(s.name)}</button>`).join('')}</div></div>`);
+    root.innerHTML = `${header(true)}
+      <div class="hero">${singer ? `<div class="av">${singer.photo_path ? `<img src="${esc(FILE(singer.photo_path))}" alt=""/>` : esc(initials(singer.name))}</div>` : ''}
+        <div style="min-width:0;"><div class="label">Video library</div><h1>${esc(singer ? singer.name : 'All singers')}</h1></div></div>
+      ${rows.join('') ? `<div class="filters">${rows.join('')}</div>` : ''}
+      <div class="bar"><input class="search" type="search" placeholder="Search titles and songs" value="${esc(F.q)}" data-q/>
+        <span style="display:flex;align-items:center;gap:10px;"><span class="muted" id="count"></span><button class="btn" data-clear>Clear all</button></span></div>
+      <div id="results"></div>`;
+    root.querySelectorAll('.chip').forEach(b=>b.addEventListener('click', ()=>{ const set = F[b.dataset.f]; set.has(b.dataset.v) ? set.delete(b.dataset.v) : set.add(b.dataset.v); b.setAttribute('aria-pressed', set.has(b.dataset.v)); results(pool); }));
+    root.querySelector('[data-q]').addEventListener('input', e=>{ F.q = e.target.value; results(pool); });
+    root.querySelector('[data-clear]').addEventListener('click', ()=>{ ['event','tempo','lifestyle','singer'].forEach(k=>F[k].clear()); F.q=''; library(singer); });
+    results(pool);
+  }
+  // Within a filter any chosen option matches; across filters all must.
+  function matches(v){
+    for(const [c] of CATS){ if(F[c].size && !v.tags.some(t=>t.category===c && F[c].has(t.id))) return false; }
+    if(F.singer.size && !F.singer.has(v.singer_id)) return false;
+    const q = F.q.trim().toLowerCase();
+    return !q || `${v.title} ${v.songs||''}`.toLowerCase().includes(q);
+  }
+  function results(pool){
+    stopPreviews();
+    const list = pool.filter(matches);
+    const any = ['event','tempo','lifestyle','singer'].some(k=>F[k].size) || F.q.trim();
+    document.getElementById('count').textContent = `${list.length} video${list.length===1?'':'s'}`;
+    const singerName = id => (D.singers.find(s=>s.id===id)||{}).name || '';
+    document.getElementById('results').innerHTML = list.length ? `<div class="grid">${list.map(v=>`<div class="vid" data-testid="video-card">
+      <button class="thumb" data-play="${esc(v.id)}" aria-label="Play ${esc(v.title)}">${v.thumb_path ? `<img src="${esc(FILE(v.thumb_path))}" alt="" loading="lazy"/>` : ''}<span class="play">${PLAY}</span>${dur(v.duration_s) ? `<span class="dur">${dur(v.duration_s)}</span>` : ''}</button>
+      <div class="vb"><div class="vt">${esc(v.title)}</div>${v.songs || current==='all' ? `<div class="vs">${esc([current==='all' ? singerName(v.singer_id) : '', v.songs].filter(Boolean).join(' · '))}</div>` : ''}
+        ${v.tags.length ? `<div class="badges">${CATS.flatMap(([c])=>v.tags.filter(t=>t.category===c)).map(t=>`<span class="badge">${esc(t.name)}</span>`).join('')}</div>` : ''}
+        <div class="vf"><span class="muted">${v.recorded_on ? esc(new Date(v.recorded_on+'T00:00:00').toLocaleDateString('en-US',{ month:'short', year:'numeric' })) : ''}</span>
+          <a class="btn btn-gold" href="${esc(downloadUrl(v))}" data-testid="download">${DL} Download</a></div></div></div>`).join('')}</div>`
+      : `<div class="empty">${any ? 'No videos match — try removing a filter.' : 'No videos here yet.'}</div>`;
+    document.querySelectorAll('[data-play]').forEach(b=>{
+      b.addEventListener('click', ()=>openPlayer(D.videos.find(v=>v.id===b.dataset.play)));
+      // A preview on hover (mouse only; on a phone a tap opens the player).
+      if(window.matchMedia('(hover:hover) and (pointer:fine)').matches){
+        let t = null;
+        b.addEventListener('mouseenter', ()=>{ t = setTimeout(()=>preview(b), 350); });
+        b.addEventListener('mouseleave', ()=>{ clearTimeout(t); stopPreviews(); });
+      }
+    });
+  }
+  const downloadUrl = v => `${FILE(v.video_path)}?download=${encodeURIComponent(v.file_name || (v.title + '.mp4'))}`;
+  function preview(btn){
+    const v = D.videos.find(x=>x.id===btn.dataset.play); if(!v) return;
+    stopPreviews();
+    const el = document.createElement('video');
+    el.muted = true; el.playsInline = true; el.preload = 'metadata'; el.setAttribute('data-preview','');
+    el.src = FILE(v.video_path) + '#t=' + Math.max(0, Math.round((Number(v.duration_s)||0) * 0.2));
+    el.addEventListener('loadeddata', ()=>{ el.play().catch(()=>{}); });
+    btn.appendChild(el);
+  }
+  function stopPreviews(){ document.querySelectorAll('video[data-preview]').forEach(el=>{ el.pause(); el.removeAttribute('src'); el.load(); el.remove(); }); }
+  function openPlayer(v){
+    if(!v) return;
+    stopPreviews();
+    const ov = document.createElement('div');
+    ov.className = 'ov';
+    ov.innerHTML = `<div class="player" role="dialog" aria-label="${esc(v.title)}"><div class="ph-bar"><strong style="overflow-wrap:anywhere;min-width:0;">${esc(v.title)}</strong>
+        <span style="display:flex;gap:8px;"><a class="btn btn-gold" href="${esc(downloadUrl(v))}">${DL} Download</a><button class="btn" data-close>Close</button></span></div>
+      <video controls autoplay playsinline src="${esc(FILE(v.video_path))}"${v.thumb_path ? ` poster="${esc(FILE(v.thumb_path))}"` : ''}></video></div>`;
+    const close = ()=>{ const el = ov.querySelector('video'); el.pause(); el.removeAttribute('src'); el.load(); ov.remove(); document.removeEventListener('keydown', onKey); };
+    const onKey = e=>{ if(e.key==='Escape') close(); };
+    ov.addEventListener('click', e=>{ if(e.target===ov || e.target.closest('[data-close]')) close(); });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(ov);
+  }
+
+  window.addEventListener('hashchange', ()=>{ if(D) route(); });
+  load().then(route).catch(()=>{ root.innerHTML = `${header(false)}<div class="empty">The library couldn't load. Please refresh the page.</div>`; });
+})();
+</script>

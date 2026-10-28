@@ -29,6 +29,7 @@ const ICO = {
   plus:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
   kebab:'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
   trash:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/><path d="M10 11v6M14 11v6"/></svg>',
+  film:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 9l5 3-5 3z"/></svg>',
   kanban:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="9.5" y="4" width="5" height="10" rx="1.5"/><rect x="16" y="4" width="5" height="13" rx="1.5"/></svg>',
   sparkle:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/></svg>',
   tag:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12.5 3H5a2 2 0 0 0-2 2v7.5a2 2 0 0 0 .586 1.414l9 9a2 2 0 0 0 2.828 0l7.5-7.5a2 2 0 0 0 0-2.828l-9-9A2 2 0 0 0 12.5 3Z"/><circle cx="8.5" cy="8.5" r="1.5"/></svg>',
@@ -4145,6 +4146,7 @@ const MGMT_NAV_ITEMS = [
   ['contracts','Contracts',ICO.leads],
   ['contract_builder','Contract Builder',ICO.edit],
   ['messages','Inbox',ICO.sms],
+  ['videos','Videos',ICO.film],
 ];
 // External Events (outside_bookings) and Documents were removed from the menu for everyone
 // (2026-10-09, Moshe's call) -- their pages still exist and open by URL (#/outside_bookings,
@@ -4187,7 +4189,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.32'; // bump on every release so a phone can tell it has updated. v1.9.32: Mercury -- bank money in, singers' shares moved into their own accounts on approval
+const APP_VERSION = 'v1.9.33'; // bump on every release so a phone can tell it has updated. v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -4272,6 +4274,7 @@ const VIEWS = {
   contracts:        { who:'admin',  title:'Contracts',                  render:()=>renderContractsPage() },
   contract_builder: { who:'admin',  title:'Contract Builder',           render:()=>renderContractsBuilderListPage() },
   messages:         { who:'admin',  title:'Inbox',                      render:()=>renderMessagesPage() },
+  videos:           { who:'admin',  title:'Video Library',              render:()=>renderVideoLibraryPage() },
   projects:         { who:'admin',  title:'Projects',                   render:()=>renderProjectsBoard() },
   pricing:          { who:'admin',  title:'Pricing',                    render:()=>renderPricingPage() },
   international:    { who:'admin',  title:'International Opportunities', render:()=>renderInternationalPage() },
@@ -5111,6 +5114,357 @@ function renderMessagesPage(){
         </div>
       </div>`; }).join('')}
   `;
+}
+/* ---- Video library (0068, owner 2026-10-28: "a searchable video library for a music agency's singers. Think
+   Splice, but for performance videos") ----
+   Clients browse it at /videos/ (public, frontend/videos/index.html). Here the office manages it: bulk upload
+   into a singer (straight to storage, resumable, so big files survive a shaky connection; the thumbnail and
+   length are taken in this browser first), a tagging table (one Event / Tempo / Crowd per video, or several
+   rows at once), and the singers and tag lists. Everything is in Supabase (library_* tables, bucket
+   'library'); nothing is kept in this browser. */
+const LIB_CATS = [['event','Event'],['tempo','Tempo'],['lifestyle','Crowd']];
+const LIB_BUCKET = 'library';
+const LIB_PUBLIC_URL = p => `${SUPABASE_URL}/storage/v1/object/public/${LIB_BUCKET}/${String(p).split('/').map(encodeURIComponent).join('/')}`;
+const LIB_VIDEO_TYPES = { mp4:'video/mp4', m4v:'video/x-m4v', mov:'video/quicktime', webm:'video/webm', avi:'video/x-msvideo', mpg:'video/mpeg', mpeg:'video/mpeg' };
+const TUS_SRC = 'https://cdn.jsdelivr.net/npm/tus-js-client@4.2.3/dist/tus.min.js';
+const TUS_SRI = 'sha384-VRMVp3dn5fs5skaKWWUXMrg1rovVl5rGo6H7a1AFrZCdgXtOdQ8TnhsOLTvqRuus';
+function libSlug(name){ return String(name||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,60) || 'singer'; }
+async function loadLibrary(){
+  if(!supabaseClient || !S.realSession || S.libBusy) return;
+  S.libBusy = true;
+  try{
+    const [s, t, v] = await Promise.all([
+      supabaseClient.from('library_singers').select('*').order('sort').order('name'),
+      supabaseClient.from('library_tags').select('*').order('category').order('sort').order('name'),
+      supabaseClient.from('library_videos').select('*, library_video_tags(tag_id)').order('created_at', { ascending:false }).limit(2000),
+    ]);
+    const err = s.error || t.error || v.error;
+    if(err){ toast('Could not load the video library: ' + err.message, 'system'); return; }
+    S.lib = { singers:s.data||[], tags:t.data||[], videos:(v.data||[]).map(x=>({ ...x, tagIds:(x.library_video_tags||[]).map(y=>y.tag_id) })) };
+  } finally { S.libBusy = false; render(); }
+}
+function libTagsOf(cat){ return ((S.lib && S.lib.tags) || []).filter(t=>t.category===cat); }
+function libVideoTag(v, cat){ const ids = new Set(libTagsOf(cat).map(t=>t.id)); return v.tagIds.find(id=>ids.has(id)) || ''; }
+function libUntagged(v){ return LIB_CATS.some(([c])=>!libVideoTag(v, c)); }
+// Sets one filter's tag on these videos (replacing what they had for it; '' clears it).
+async function libSetTag(videoIds, cat, tagId){
+  const catIds = libTagsOf(cat).map(t=>t.id);
+  const del = await supabaseClient.from('library_video_tags').delete().in('video_id', videoIds).in('tag_id', catIds);
+  if(del.error){ toast('Could not save the tag: ' + del.error.message, 'system'); return false; }
+  if(tagId){
+    const ins = await supabaseClient.from('library_video_tags').insert(videoIds.map(id=>({ video_id:id, tag_id:tagId })));
+    if(ins.error){ toast('Could not save the tag: ' + ins.error.message, 'system'); return false; }
+  }
+  S.lib.videos.forEach(v=>{ if(videoIds.includes(v.id)) v.tagIds = [...v.tagIds.filter(id=>!catIds.includes(id)), ...(tagId?[tagId]:[])]; });
+  return true;
+}
+async function libUpdateVideo(id, patch){
+  const { error } = await supabaseClient.from('library_videos').update({ ...patch, updated_at:new Date().toISOString() }).eq('id', id);
+  if(error){ toast('Could not save: ' + error.message, 'system'); return false; }
+  const v = S.lib.videos.find(x=>x.id===id); if(v) Object.assign(v, patch);
+  return true;
+}
+async function libDeleteVideos(ids){
+  const vids = S.lib.videos.filter(v=>ids.includes(v.id));
+  if(!vids.length || !confirm(`Delete ${vids.length===1 ? `"${vids[0].title}"` : `${vids.length} videos`}? The file${vids.length===1?' is':'s are'} removed from the library for good.`)) return;
+  const { error } = await supabaseClient.from('library_videos').delete().in('id', ids);
+  if(error){ toast('Could not delete: ' + error.message, 'system'); return; }
+  await supabaseClient.storage.from(LIB_BUCKET).remove(vids.flatMap(v=>[v.video_path, v.thumb_path].filter(Boolean)));
+  S.lib.videos = S.lib.videos.filter(v=>!ids.includes(v.id));
+  S.libSelected = new Set([...(S.libSelected||[])].filter(id=>!ids.includes(id)));
+  toast(`Deleted ${vids.length} video${vids.length===1?'':'s'}.`, 'success'); render();
+}
+// The first frame worth showing (a fifth of the way in, at most 30s) and the length, read in this browser.
+function libThumbOf(file){
+  return new Promise(resolve=>{
+    const url = URL.createObjectURL(file), el = document.createElement('video');
+    let done = false;
+    const finish = (blob, duration)=>{ if(done) return; done = true; URL.revokeObjectURL(url); el.removeAttribute('src'); el.load(); resolve({ blob, duration }); };
+    setTimeout(()=>finish(null, Number.isFinite(el.duration) ? el.duration : null), 20000);
+    el.muted = true; el.playsInline = true; el.preload = 'auto';
+    el.addEventListener('error', ()=>finish(null, null));
+    // (A file with no stated length -- some browser recordings -- gets its picture from second 1.)
+    el.addEventListener('loadedmetadata', ()=>{ el.currentTime = Number.isFinite(el.duration) ? Math.min(el.duration * 0.2, 30) : 1; });
+    el.addEventListener('seeked', ()=>{
+      try{
+        const w = 640, h = Math.round(w * (el.videoHeight||9) / (el.videoWidth||16));
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d').drawImage(el, 0, 0, w, h);
+        const len = Number.isFinite(el.duration) ? el.duration : null;
+        c.toBlob(b=>finish(b, len), 'image/jpeg', 0.82);
+      }catch(e){ finish(null, Number.isFinite(el.duration) ? el.duration : null); }
+    });
+    el.src = url;
+  });
+}
+let tusLoading = null;
+function loadTus(){
+  if(window.tus) return Promise.resolve(window.tus);
+  return tusLoading = tusLoading || new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = TUS_SRC; s.integrity = TUS_SRI; s.crossOrigin = 'anonymous';
+    s.onload = ()=>resolve(window.tus); s.onerror = ()=>{ tusLoading = null; reject(new Error('Could not load the uploader.')); };
+    document.head.appendChild(s);
+  });
+}
+// Resumable upload straight to storage (Supabase's TUS endpoint; 6 MB chunks, as it requires).
+async function libUploadFile(file, path, contentType, onProgress){
+  const tus = await loadTus();
+  return new Promise((resolve, reject)=>{
+    const up = new tus.Upload(file, {
+      endpoint: SUPABASE_URL.replace('.supabase.co', '.storage.supabase.co') + '/storage/v1/upload/resumable',
+      retryDelays: [0, 3000, 5000, 10000, 20000],
+      uploadDataDuringCreation: true, removeFingerprintOnSuccess: true, chunkSize: 6*1024*1024,
+      metadata: { bucketName:LIB_BUCKET, objectName:path, contentType, cacheControl:'31536000' },
+      headers: { 'x-upsert':'false' },
+      // A long upload can outlast the sign-in token: each request takes the current one.
+      onBeforeRequest: async req=>{ const { data:{ session } } = await supabaseClient.auth.getSession(); req.setHeader('authorization', `Bearer ${session ? session.access_token : ''}`); req.setHeader('apikey', SUPABASE_PUBLISHABLE_KEY); },
+      onError: err=>reject(err),
+      onProgress: (sent, total)=>onProgress(total ? sent/total : 0),
+      onSuccess: ()=>resolve(),
+    });
+    up.findPreviousUploads().then(prev=>{ if(prev.length) up.resumeFromPreviousUpload(prev[0]); up.start(); });
+  });
+}
+// Upload progress is drawn in place, not by render(): a full redraw every few seconds would close the
+// dropdown or steal the field someone is tagging in meanwhile.
+function libShowProgress(it){
+  const row = document.querySelector(`[data-lib-up="${it.key}"]`); if(!row) return;
+  row.querySelector('[data-pct]').textContent = `${Math.round(it.pct*100)}%`;
+  row.querySelector('[data-bar]').style.width = `${Math.round(it.pct*100)}%`;
+}
+async function libUploadFiles(files){
+  const singer = (S.lib.singers||[]).find(s=>s.id===S.libUploadSinger);
+  if(!singer){ toast('Pick the singer first.', 'system'); return; }
+  const items = [...files].map(file=>{
+    const ext = (file.name.split('.').pop()||'').toLowerCase();
+    return { key:crypto.randomUUID(), file, ext, type: file.type || LIB_VIDEO_TYPES[ext] || '', name:file.name, pct:0, status:'waiting', error:'' };
+  });
+  const bad = items.filter(x=>!x.type.startsWith('video/') || !Object.values(LIB_VIDEO_TYPES).includes(x.type));
+  if(bad.length) toast(`Skipped ${bad.length} file${bad.length===1?'':'s'} that ${bad.length===1?"isn't a video":"aren't videos"} (mp4, mov, m4v, webm).`, 'system');
+  const todo = items.filter(x=>!bad.includes(x));
+  S.libUploads = [...(S.libUploads||[]).filter(x=>x.status!=='done'), ...todo]; render();
+  let next = 0;
+  const worker = async ()=>{
+    while(next < todo.length){
+      const it = todo[next++];
+      try{
+        it.status = 'preparing'; render();
+        const { blob, duration } = await libThumbOf(it.file);
+        const id = crypto.randomUUID(), path = `videos/${singer.id}/${id}.${it.ext || 'mp4'}`;
+        it.status = 'uploading'; render();
+        let shown = 0;
+        await libUploadFile(it.file, path, it.type, p=>{ it.pct = p; if(p - shown > 0.01 || p===1){ shown = p; libShowProgress(it); } });
+        let thumb = null;
+        if(blob){ const tp = `thumbs/${id}.jpg`; const r = await supabaseClient.storage.from(LIB_BUCKET).upload(tp, blob, { contentType:'image/jpeg', cacheControl:'31536000' }); if(!r.error) thumb = tp; }
+        const title = it.name.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) || 'Untitled';
+        const { data, error } = await supabaseClient.from('library_videos').insert({ id, singer_id:singer.id, title, duration_s: duration ? Math.round(duration) : null,
+          video_path:path, thumb_path:thumb, file_name:it.name.slice(0, 200), size_bytes:it.file.size, mime:it.type }).select('*').single();
+        if(error) throw new Error(error.message);
+        S.lib.videos.unshift({ ...data, tagIds:[] });
+        it.status = 'done'; it.pct = 1;
+      }catch(err){ it.status = 'failed'; it.error = String(err && err.message || err).slice(0, 200); }
+      render();
+    }
+  };
+  await Promise.all([worker(), worker()]);
+  const ok = todo.filter(x=>x.status==='done').length;
+  if(ok){ S.libFilterSinger = singer.id; S.libUntaggedOnly = true; toast(`${ok} video${ok===1?'':'s'} uploaded — tag them below.`, 'success'); }
+  render();
+}
+async function libSaveSinger(id, patch){
+  const { error } = await supabaseClient.from('library_singers').update(patch).eq('id', id);
+  if(error){ toast('Could not save: ' + error.message, 'system'); return false; }
+  Object.assign(S.lib.singers.find(s=>s.id===id)||{}, patch); render(); return true;
+}
+async function libAddSinger(){
+  const name = String((S.libNewSinger||'')).trim();
+  if(!name){ toast('Type the singer\'s name.', 'system'); return; }
+  let slug = libSlug(name);
+  if(S.lib.singers.some(s=>s.slug===slug)) slug = `${slug}-${S.lib.singers.length+1}`;
+  const sort = Math.max(0, ...S.lib.singers.map(s=>s.sort||0)) + 1;
+  const { data, error } = await supabaseClient.from('library_singers').insert({ name, slug, sort }).select('*').single();
+  if(error){ toast('Could not add: ' + error.message, 'system'); return; }
+  S.lib.singers.push(data); S.libNewSinger = ''; toast(`${name} added.`, 'success'); render();
+}
+async function libDeleteSinger(id){
+  const s = S.lib.singers.find(x=>x.id===id); if(!s) return;
+  const vids = S.lib.videos.filter(v=>v.singer_id===id);
+  if(!confirm(`Remove ${s.name} from the library${vids.length ? ` and delete their ${vids.length} video${vids.length===1?'':'s'}` : ''}? This can't be undone.`)) return;
+  const { error } = await supabaseClient.from('library_singers').delete().eq('id', id);
+  if(error){ toast('Could not remove: ' + error.message, 'system'); return; }
+  const files = [...vids.flatMap(v=>[v.video_path, v.thumb_path]), s.photo_path].filter(Boolean);
+  for(let i=0; i<files.length; i+=100) await supabaseClient.storage.from(LIB_BUCKET).remove(files.slice(i, i+100));
+  S.lib.singers = S.lib.singers.filter(x=>x.id!==id); S.lib.videos = S.lib.videos.filter(v=>v.singer_id!==id);
+  toast(`${s.name} removed.`, 'success'); render();
+}
+async function libSingerPhoto(id, file){
+  if(!file || !/^image\/(jpeg|png|webp)$/.test(file.type)){ toast('Pick a JPG, PNG or WebP photo.', 'system'); return; }
+  const s = S.lib.singers.find(x=>x.id===id); if(!s) return;
+  const path = `singers/${id}-${Date.now()}.${file.type.split('/')[1].replace('jpeg','jpg')}`;
+  const { error } = await supabaseClient.storage.from(LIB_BUCKET).upload(path, file, { contentType:file.type, cacheControl:'31536000' });
+  if(error){ toast('Could not upload the photo: ' + error.message, 'system'); return; }
+  const old = s.photo_path;
+  if(await libSaveSinger(id, { photo_path:path }) && old) supabaseClient.storage.from(LIB_BUCKET).remove([old]);
+}
+async function libAddTag(cat){
+  const name = String((S.libNewTag||{})[cat]||'').trim(); if(!name) return;
+  const sort = Math.max(0, ...libTagsOf(cat).map(t=>t.sort||0)) + 1;
+  const { data, error } = await supabaseClient.from('library_tags').insert({ category:cat, name, sort }).select('*').single();
+  if(error){ toast(/duplicate|unique/i.test(error.message) ? `“${name}” is already there.` : 'Could not add: ' + error.message, 'system'); return; }
+  S.lib.tags.push(data); S.libNewTag[cat] = ''; render();
+}
+async function libRenameTag(id, name){
+  name = String(name||'').trim(); const t = S.lib.tags.find(x=>x.id===id); if(!t || !name || name===t.name) return;
+  const { error } = await supabaseClient.from('library_tags').update({ name }).eq('id', id);
+  if(error){ toast('Could not rename: ' + error.message, 'system'); render(); return; }
+  t.name = name; toast('Renamed.', 'success'); render();
+}
+async function libDeleteTag(id){
+  const t = S.lib.tags.find(x=>x.id===id); if(!t) return;
+  const n = S.lib.videos.filter(v=>v.tagIds.includes(id)).length;
+  if(!confirm(`Delete the “${t.name}” option?${n ? ` It comes off ${n} video${n===1?'':'s'}.` : ''}`)) return;
+  const { error } = await supabaseClient.from('library_tags').delete().eq('id', id);
+  if(error){ toast('Could not delete: ' + error.message, 'system'); return; }
+  S.lib.tags = S.lib.tags.filter(x=>x.id!==id); S.lib.videos.forEach(v=>{ v.tagIds = v.tagIds.filter(x=>x!==id); }); render();
+}
+function libTagSelect(cat, value, attrs){
+  return `<select ${attrs} aria-label="${esc(LIB_CATS.find(([c])=>c===cat)[1])}" style="max-width:100%;"><option value="">—</option>${libTagsOf(cat).map(t=>`<option value="${esc(t.id)}" ${t.id===value?'selected':''}>${esc(t.name)}</option>`).join('')}</select>`;
+}
+function renderVideoLibraryPage(){
+  if(!S.lib && !S.libBusy) setTimeout(loadLibrary, 0);
+  if(!S.lib) return `<div class="card card-pad" style="font-size:13px;color:var(--ink-2);">Loading…</div>`;
+  const tab = S.libTab || 'videos';
+  const publicUrl = new URL('videos/', location.href.split('#')[0]).href;
+  return `
+  <div class="section-head"><h2>Video Library</h2>
+    <a class="btn btn-sm" href="${esc(publicUrl)}" target="_blank" rel="noopener" data-action="external-link">Open the library</a></div>
+  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;overflow-wrap:anywhere;">Clients and bookers browse it at <strong>${esc(publicUrl)}</strong> — no login. Every published video there can be watched and downloaded.</p>
+  <div class="tabbar" style="margin-bottom:14px;">${[['videos','Videos'],['singers','Singers'],['tags','Tags']].map(([k,l])=>`<a href="#" class="tab ${tab===k?'active':''}" data-action="lib-tab" data-id="${k}">${l}</a>`).join('')}</div>
+  ${tab==='singers' ? renderLibSingers() : tab==='tags' ? renderLibTags() : renderLibVideos()}`;
+}
+function renderLibVideos(){
+  const L = S.lib, sel = S.libSelected || (S.libSelected = new Set());
+  const singerName = id => (L.singers.find(s=>s.id===id)||{}).name || '';
+  const q = String(S.libSearch||'').trim().toLowerCase();
+  const list = L.videos.filter(v=>(!S.libFilterSinger || v.singer_id===S.libFilterSinger) && (!S.libUntaggedOnly || libUntagged(v)) && (!q || `${v.title} ${v.songs||''}`.toLowerCase().includes(q)));
+  const ups = S.libUploads || [];
+  const fmtLen = s=>{ s = Math.round(Number(s)||0); return s ? `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}` : ''; };
+  const selCount = [...sel].filter(id=>list.some(v=>v.id===id)).length;
+  return `
+  <div class="card card-pad" style="margin-bottom:14px;" data-testid="lib-upload">
+    <h3 style="margin:0 0 10px;">Upload videos</h3>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+      <select data-lib-upload-singer style="max-width:100%;"><option value="">Choose the singer…</option>${L.singers.map(s=>`<option value="${esc(s.id)}" ${s.id===S.libUploadSinger?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+    </div>
+    <label class="lib-drop" data-lib-drop style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:26px 14px;border:1.5px dashed var(--border-strong);border-radius:10px;cursor:pointer;text-align:center;${S.libUploadSinger?'':'opacity:.55;'}">
+      <strong style="font-size:14px;">Drop videos here, or click to choose</strong>
+      <span style="font-size:12px;color:var(--ink-3);">As many as you like at once · mp4, mov, m4v, webm · up to 5 GB each</span>
+      <input type="file" accept="video/*,.mov,.m4v" multiple data-lib-files style="display:none;" ${S.libUploadSinger?'':'disabled'}/>
+    </label>
+    ${ups.length ? `<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">${ups.map(u=>`<div style="font-size:12.5px;min-width:0;" data-lib-up="${esc(u.key)}">
+      <div style="display:flex;justify-content:space-between;gap:8px;"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${esc(u.name)}</span>
+        <span data-pct style="flex:none;color:${u.status==='failed'?'var(--warn-ink)':'var(--ink-3)'};">${u.status==='uploading'?`${Math.round(u.pct*100)}%`:u.status==='done'?'Done':u.status==='failed'?'Failed':u.status==='preparing'?'Reading…':'Waiting'}</span></div>
+      <div style="height:4px;border-radius:2px;background:var(--border);overflow:hidden;"><div data-bar style="height:100%;width:${Math.round(u.pct*100)}%;background:${u.status==='failed'?'var(--warn-ink)':'var(--accent)'};"></div></div>
+      ${u.error?`<div style="color:var(--warn-ink);overflow-wrap:anywhere;">${esc(u.error)}</div>`:''}</div>`).join('')}</div>` : ''}
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+    <select data-lib-filter-singer style="max-width:100%;"><option value="">All singers</option>${L.singers.map(s=>`<option value="${esc(s.id)}" ${s.id===S.libFilterSinger?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" data-lib-untagged ${S.libUntaggedOnly?'checked':''}/> Needs tags only</label>
+    <input type="search" placeholder="Search" data-lib-search value="${esc(S.libSearch||'')}" style="flex:1 1 160px;max-width:260px;"/>
+    <span style="font-size:12px;color:var(--ink-3);">${list.length} video${list.length===1?'':'s'}</span>
+  </div>
+  ${selCount ? `<div class="card card-pad" style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;" data-testid="lib-bulk">
+    <strong style="font-size:13px;">${selCount} selected:</strong>
+    ${LIB_CATS.map(([c,l])=>`<label style="display:flex;align-items:center;gap:4px;font-size:12.5px;">${l} ${libTagSelect(c, '', `data-lib-bulk="${c}"`)}</label>`).join('')}
+    <button class="btn btn-sm btn-ghost" data-action="lib-bulk-delete">Delete</button>
+    <button class="btn btn-sm btn-ghost" data-action="lib-select-none">Clear selection</button>
+  </div>` : ''}
+  ${list.length ? `<div class="card table-cards"><table>
+    <thead><tr><th><input type="checkbox" data-lib-select-all ${selCount && selCount===list.length?'checked':''} aria-label="Select all"/></th><th>Video</th><th>Title &amp; songs</th>${LIB_CATS.map(([,l])=>`<th>${l}</th>`).join('')}<th>Shown</th><th></th></tr></thead>
+    <tbody>${list.map(v=>`<tr data-testid="lib-row">
+      <td data-label="Select"><input type="checkbox" data-lib-select="${esc(v.id)}" ${sel.has(v.id)?'checked':''} aria-label="Select"/></td>
+      <td data-label="Video"><a href="${esc(LIB_PUBLIC_URL(v.video_path))}" target="_blank" rel="noopener" data-action="external-link" style="display:block;width:120px;max-width:100%;aspect-ratio:16/9;border-radius:6px;overflow:hidden;background:#000;position:relative;">${v.thumb_path?`<img src="${esc(LIB_PUBLIC_URL(v.thumb_path))}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;"/>`:''}${fmtLen(v.duration_s)?`<span style="position:absolute;right:4px;bottom:4px;background:rgba(0,0,0,.7);color:#fff;font-size:10px;padding:0 4px;border-radius:3px;">${fmtLen(v.duration_s)}</span>`:''}</a>
+        ${!S.libFilterSinger?`<div style="font-size:11px;color:var(--ink-3);margin-top:3px;">${esc(singerName(v.singer_id))}</div>`:''}</td>
+      <td data-label="Title"><input value="${esc(v.title)}" data-lib-title="${esc(v.id)}" aria-label="Title" style="width:100%;min-width:0;"/>
+        <input value="${esc(v.songs||'')}" data-lib-songs="${esc(v.id)}" placeholder="Song name(s)" aria-label="Songs" style="width:100%;min-width:0;margin-top:4px;font-size:12px;"/>
+        <input type="date" value="${esc(v.recorded_on||'')}" data-lib-date="${esc(v.id)}" aria-label="Date" style="margin-top:4px;font-size:12px;"/></td>
+      ${LIB_CATS.map(([c,l])=>`<td data-label="${l}">${libTagSelect(c, libVideoTag(v,c), `data-lib-tag="${c}" data-id="${esc(v.id)}"`)}</td>`).join('')}
+      <td data-label="Shown"><input type="checkbox" data-lib-published="${esc(v.id)}" ${v.published?'checked':''} aria-label="Shown in the library"/></td>
+      <td><button class="icon-btn" data-action="lib-delete-video" data-id="${esc(v.id)}" title="Delete" aria-label="Delete">${ICO.trash}</button></td>
+    </tr>`).join('')}</tbody></table></div>`
+  : `<div class="card empty">${L.videos.length ? 'No videos match.' : 'No videos yet — choose a singer and drop some in above.'}</div>`}`;
+}
+function renderLibSingers(){
+  const L = S.lib, count = id => L.videos.filter(v=>v.singer_id===id).length;
+  return `<div class="card card-pad" style="margin-bottom:14px;">
+    ${L.singers.map((s,i)=>`<div class="settings-row" style="flex-wrap:wrap;gap:10px;" data-testid="lib-singer">
+      <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 240px;">
+        <label style="cursor:pointer;flex:none;" title="Change photo"><span class="avatar" style="width:44px;height:44px;font-size:14px;overflow:hidden;">${s.photo_path?`<img src="${esc(LIB_PUBLIC_URL(s.photo_path))}" alt="" style="width:100%;height:100%;object-fit:cover;"/>`:esc((s.name||'?').slice(0,1))}</span>
+          <input type="file" accept="image/jpeg,image/png,image/webp" data-lib-photo="${esc(s.id)}" style="display:none;"/></label>
+        <div style="min-width:0;flex:1;"><input value="${esc(s.name)}" data-lib-singer-name="${esc(s.id)}" aria-label="Name" style="width:100%;font-weight:600;"/>
+          <p style="margin:2px 0 0;font-size:11.5px;color:var(--ink-3);">${count(s.id)} video${count(s.id)===1?'':'s'} · tap the circle to ${s.photo_path?'change':'add'} the photo</p></div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;"><input type="checkbox" data-lib-singer-active="${esc(s.id)}" ${s.active?'checked':''}/> Shown</label>
+        <button class="icon-btn" data-action="lib-singer-up" data-id="${esc(s.id)}" ${i===0?'disabled':''} title="Move up" aria-label="Move up">${ICO.up}</button>
+        <button class="icon-btn" data-action="lib-singer-down" data-id="${esc(s.id)}" ${i===L.singers.length-1?'disabled':''} title="Move down" aria-label="Move down">${ICO.down}</button>
+        <button class="icon-btn" data-action="lib-delete-singer" data-id="${esc(s.id)}" title="Remove" aria-label="Remove">${ICO.trash}</button>
+      </div></div>`).join('')}
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><input placeholder="New singer's name" data-lib-new-singer value="${esc(S.libNewSinger||'')}" style="flex:1 1 200px;max-width:320px;"/>
+      <button class="btn btn-sm btn-primary" data-action="lib-add-singer">${ICO.plus} Add singer</button></div>
+  </div>`;
+}
+function renderLibTags(){
+  S.libNewTag = S.libNewTag || {};
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:14px;">${LIB_CATS.map(([c,l])=>`<div class="card card-pad">
+    <h3 style="margin:0 0 10px;">${l}</h3>
+    ${libTagsOf(c).map(t=>`<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;"><input value="${esc(t.name)}" data-lib-tag-name="${esc(t.id)}" aria-label="Name" style="flex:1;min-width:0;"/>
+      <button class="icon-btn" data-action="lib-delete-tag" data-id="${esc(t.id)}" title="Delete" aria-label="Delete">${ICO.trash}</button></div>`).join('')}
+    <div style="display:flex;gap:6px;margin-top:10px;"><input placeholder="Add an option" data-lib-new-tag="${c}" value="${esc(S.libNewTag[c]||'')}" style="flex:1;min-width:0;"/>
+      <button class="btn btn-sm" data-action="lib-add-tag" data-id="${c}">${ICO.plus} Add</button></div>
+  </div>`).join('')}</div>`;
+}
+async function libMoveSinger(id, dir){
+  const list = S.lib.singers, i = list.findIndex(s=>s.id===id), j = i + dir;
+  if(i<0 || j<0 || j>=list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  const res = await Promise.all(list.map((s, k)=>s.sort===k ? null : supabaseClient.from('library_singers').update({ sort:k }).eq('id', s.id).then(r=>{ if(!r.error) s.sort = k; return r; })));
+  if(res.some(r=>r && r.error)) toast('Could not save the order.', 'system');
+  render();
+}
+function bindVideoLibrary(){
+  if(S.view!=='videos' || !S.lib) return;
+  const q = sel => document.querySelectorAll(sel);
+  q('[data-lib-upload-singer]').forEach(el=>el.addEventListener('change', ()=>{ S.libUploadSinger = el.value; render(); }));
+  q('[data-lib-files]').forEach(el=>el.addEventListener('change', ()=>{ const f = [...(el.files||[])]; el.value = ''; if(f.length) libUploadFiles(f); }));
+  q('[data-lib-drop]').forEach(el=>{
+    el.addEventListener('dragover', e=>{ e.preventDefault(); el.style.borderColor = 'var(--accent)'; });
+    el.addEventListener('dragleave', ()=>{ el.style.borderColor = ''; });
+    el.addEventListener('drop', e=>{ e.preventDefault(); el.style.borderColor = ''; if(!S.libUploadSinger){ toast('Pick the singer first.', 'system'); return; } const f = [...(e.dataTransfer.files||[])]; if(f.length) libUploadFiles(f); });
+  });
+  q('[data-lib-filter-singer]').forEach(el=>el.addEventListener('change', ()=>{ S.libFilterSinger = el.value; render(); }));
+  q('[data-lib-untagged]').forEach(el=>el.addEventListener('change', ()=>{ S.libUntaggedOnly = el.checked; render(); }));
+  q('[data-lib-search]').forEach(el=>el.addEventListener('change', ()=>{ S.libSearch = el.value; render(); }));
+  q('[data-lib-select]').forEach(el=>el.addEventListener('change', ()=>{ el.checked ? S.libSelected.add(el.dataset.libSelect) : S.libSelected.delete(el.dataset.libSelect); render(); }));
+  q('[data-lib-select-all]').forEach(el=>el.addEventListener('change', ()=>{ document.querySelectorAll('[data-lib-select]').forEach(x=>{ el.checked ? S.libSelected.add(x.dataset.libSelect) : S.libSelected.delete(x.dataset.libSelect); }); render(); }));
+  q('[data-lib-tag]').forEach(el=>el.addEventListener('change', async ()=>{ await libSetTag([el.dataset.id], el.dataset.libTag, el.value); render(); }));
+  q('[data-lib-bulk]').forEach(el=>el.addEventListener('change', async ()=>{
+    const ids = [...S.libSelected].filter(id=>S.lib.videos.some(v=>v.id===id)); if(!ids.length || !el.value) return;
+    const name = (S.lib.tags.find(t=>t.id===el.value)||{}).name;
+    if(await libSetTag(ids, el.dataset.libBulk, el.value)) toast(`${name} set on ${ids.length} video${ids.length===1?'':'s'}.`, 'success');
+    render();
+  }));
+  q('[data-lib-title]').forEach(el=>el.addEventListener('change', ()=>{ const t = el.value.trim().slice(0,200); if(t) libUpdateVideo(el.dataset.libTitle, { title:t }); }));
+  q('[data-lib-songs]').forEach(el=>el.addEventListener('change', ()=>libUpdateVideo(el.dataset.libSongs, { songs:el.value.trim().slice(0,300) || null })));
+  q('[data-lib-date]').forEach(el=>el.addEventListener('change', ()=>libUpdateVideo(el.dataset.libDate, { recorded_on:el.value || null })));
+  q('[data-lib-published]').forEach(el=>el.addEventListener('change', ()=>libUpdateVideo(el.dataset.libPublished, { published:el.checked })));
+  q('[data-lib-photo]').forEach(el=>el.addEventListener('change', ()=>{ const f = el.files && el.files[0]; el.value = ''; libSingerPhoto(el.dataset.libPhoto, f); }));
+  q('[data-lib-singer-name]').forEach(el=>el.addEventListener('change', ()=>{ const n = el.value.trim().slice(0,120); if(n) libSaveSinger(el.dataset.libSingerName, { name:n }); }));
+  q('[data-lib-singer-active]').forEach(el=>el.addEventListener('change', ()=>libSaveSinger(el.dataset.libSingerActive, { active:el.checked })));
+  q('[data-lib-new-singer]').forEach(el=>el.addEventListener('input', ()=>{ S.libNewSinger = el.value; }));
+  q('[data-lib-new-tag]').forEach(el=>el.addEventListener('input', ()=>{ S.libNewTag[el.dataset.libNewTag] = el.value; }));
+  q('[data-lib-tag-name]').forEach(el=>el.addEventListener('change', ()=>libRenameTag(el.dataset.libTagName, el.value)));
 }
 function renderPricingPage(){
   const artistId = S.pricingArtist || ARTISTS[0].id;
@@ -10124,6 +10478,16 @@ function bindGlobal(){
       case 'overlay-close-bookingconfirmation': if(e.target===t){ S.showBookingConfirmation=false; render(); } break;
       case 'mark-balance': doMarkBalance(id); break;
       case 'inbox-money': { const it = (S.inboxItems||[]).find(x=>x.id===id); if(it) applyInboxMoney(it, false); break; }
+      case 'lib-tab': S.libTab = id; render(); break;
+      case 'lib-delete-video': libDeleteVideos([id]); break;
+      case 'lib-bulk-delete': libDeleteVideos([...(S.libSelected||[])]); break;
+      case 'lib-select-none': S.libSelected = new Set(); render(); break;
+      case 'lib-add-singer': libAddSinger(); break;
+      case 'lib-delete-singer': libDeleteSinger(id); break;
+      case 'lib-singer-up': libMoveSinger(id, -1); break;
+      case 'lib-singer-down': libMoveSinger(id, 1); break;
+      case 'lib-add-tag': libAddTag(id); break;
+      case 'lib-delete-tag': libDeleteTag(id); break;
       case 'mercury-sync': doMercuryCall({ action:'sync' }, 'Checked the bank.'); break;
       case 'mercury-approve': doMercuryCall({ action:'approve', id }, 'Moved.'); break;
       case 'mercury-cancel': doMercuryCall({ action:'cancel', id }, 'Dropped -- nothing moved.'); break;
@@ -10206,6 +10570,7 @@ function bindGlobal(){
       case 'dismiss-install': localStorage.setItem('aspInstallDismissedAt', String(Date.now())); S.showInstallBanner=false; render(); break;
     }
   };
+  bindVideoLibrary();
   document.querySelectorAll('select[data-action="mercury-assign"]').forEach(sel=>{
     sel.addEventListener('change', ()=>{ const v = sel.value;
       doMercuryCall({ action:'assign', accountId: sel.getAttribute('data-id'), role: v.startsWith('payee:') ? 'payee' : (v || null), payeeProfileId: v.startsWith('payee:') ? v.slice(6) : null }, 'Saved.'); });
