@@ -20,39 +20,50 @@
   html,body{ margin:0; background:var(--page); color:var(--ink); }
   body{ font:15px/1.5 Inter,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
   a{ color:inherit; }
-  .wrap{ max-width:1180px; margin:0 auto; padding:20px 16px calc(40px + env(safe-area-inset-bottom)); }
-  .top{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:22px; flex-wrap:wrap; }
+  body{ background:radial-gradient(1200px 520px at 50% -180px, rgba(201,168,106,.10), transparent 70%) no-repeat, var(--page); min-height:100vh; }
+  .wrap{ max-width:1180px; margin:0 auto; padding:20px 16px calc(48px + env(safe-area-inset-bottom)); }
+  .top{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:34px; flex-wrap:wrap; }
+  body.embed .top .logo{ display:none; }
+  body.embed .top{ margin-bottom:18px; justify-content:flex-end; }
   .logo{ display:block; width:170px; max-width:60vw; height:auto; }
   .label{ font-size:11px; text-transform:uppercase; letter-spacing:.09em; color:var(--ink-3); font-weight:700; }
   .btn{ display:inline-flex; align-items:center; gap:6px; justify-content:center; padding:9px 14px; border-radius:999px; border:1px solid var(--border-strong); background:var(--surface); color:var(--ink); font:inherit; font-size:13.5px; font-weight:600; cursor:pointer; text-decoration:none; transition:background .15s,border-color .15s; white-space:nowrap; }
   .btn:hover{ background:var(--surface-2); }
   .btn-gold{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
   .btn-gold:hover{ background:#D8BA80; }
-  h1{ font-size:1.6rem; margin:0; letter-spacing:-.01em; }
+  h1{ font-size:clamp(1.6rem,3.4vw,2.3rem); margin:0; letter-spacing:-.02em; font-weight:700; line-height:1.15; }
+  .intro{ margin-bottom:26px; }
+  .intro p{ margin:8px 0 0; color:var(--ink-2); font-size:15px; max-width:520px; }
+  .label{ color:var(--accent); }
   .muted{ color:var(--ink-2); font-size:13.5px; }
   /* home */
-  .singers{ display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr)); gap:16px; }
-  .singer{ display:block; text-decoration:none; border-radius:14px; overflow:hidden; background:var(--surface); border:1px solid var(--border); transition:transform .18s,border-color .18s; }
-  .singer:hover{ transform:translateY(-2px); border-color:var(--border-strong); }
-  .singer .ph{ aspect-ratio:1/1; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:2.6rem; font-weight:700; color:var(--ink-3); }
-  .singer .ph img{ width:100%; height:100%; object-fit:cover; display:block; }
-  .singer .nm{ padding:12px 14px; display:flex; flex-direction:column; gap:1px; min-width:0; }
-  .singer .nm strong{ font-size:1rem; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .singers{ display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr)); gap:18px; }
+  .singer{ position:relative; display:block; text-decoration:none; border-radius:18px; overflow:hidden; aspect-ratio:4/5; background:var(--surface); box-shadow:0 0 0 1px var(--border) inset; transition:transform .25s cubic-bezier(.2,.7,.3,1),box-shadow .25s; }
+  .singer:hover{ transform:translateY(-4px); box-shadow:0 0 0 1px rgba(201,168,106,.55) inset, 0 18px 40px rgba(0,0,0,.45); }
+  .singer .ph{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at 30% 20%, #2B2A2F, #141417 70%); font-size:3.4rem; font-weight:300; letter-spacing:.06em; color:rgba(201,168,106,.75); }
+  .singer .ph img{ width:100%; height:100%; object-fit:cover; display:block; transition:transform .5s cubic-bezier(.2,.7,.3,1); }
+  .singer:hover .ph img{ transform:scale(1.04); }
+  .singer .nm{ position:absolute; left:0; right:0; bottom:0; padding:44px 16px 15px; display:flex; flex-direction:column; gap:2px; min-width:0; background:linear-gradient(transparent, rgba(8,8,10,.92)); }
+  .singer .nm strong{ font-size:1.08rem; font-weight:650; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .singer .nm .muted{ font-size:12.5px; }
   /* singer page */
   .hero{ display:flex; align-items:center; gap:16px; margin-bottom:18px; min-width:0; }
-  .hero .av{ width:72px; height:72px; border-radius:50%; overflow:hidden; background:var(--surface-2); flex:none; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1.5rem; color:var(--ink-3); }
+  .hero{ margin-bottom:24px; }
+  .hero .av{ width:76px; height:76px; border-radius:50%; overflow:hidden; background:radial-gradient(circle at 30% 20%, #2B2A2F, #141417 70%); box-shadow:0 0 0 1px rgba(201,168,106,.45); flex:none; display:flex; align-items:center; justify-content:center; font-weight:300; letter-spacing:.05em; font-size:1.6rem; color:rgba(201,168,106,.85); }
   .hero .av img{ width:100%; height:100%; object-fit:cover; }
-  .filters{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:12px 14px; margin-bottom:16px; display:flex; flex-direction:column; gap:10px; }
+  .filters{ background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:12px 14px; margin-bottom:16px; display:flex; flex-direction:column; gap:10px; }
   .frow{ display:flex; align-items:flex-start; gap:10px; min-width:0; }
   .frow .label{ width:64px; flex:none; padding-top:7px; }
   .chips{ display:flex; flex-wrap:wrap; gap:6px; min-width:0; }
   .chip{ padding:6px 12px; border-radius:999px; border:1px solid var(--border-strong); background:var(--chip); color:var(--ink-2); font:inherit; font-size:13px; font-weight:600; cursor:pointer; transition:background .15s,color .15s,border-color .15s; }
+  .chip:hover{ color:var(--ink); border-color:#4A4A54; }
   .chip[aria-pressed="true"]{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
   .bar{ display:flex; justify-content:space-between; align-items:center; gap:10px; margin:4px 0 12px; flex-wrap:wrap; }
   .search{ flex:1 1 220px; max-width:360px; padding:9px 14px; border-radius:999px; border:1px solid var(--border-strong); background:var(--surface); color:var(--ink); font:inherit; font-size:14px; }
   .search::placeholder{ color:var(--ink-3); }
   .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr)); gap:16px; }
-  .vid{ background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; display:flex; flex-direction:column; min-width:0; }
+  .vid{ background:var(--surface); border:1px solid var(--border); border-radius:16px; transition:border-color .2s,transform .2s; overflow:hidden; display:flex; flex-direction:column; min-width:0; }
+  .vid:hover{ border-color:var(--border-strong); }
   .thumb{ position:relative; aspect-ratio:16/9; background:#000; cursor:pointer; overflow:hidden; border:0; padding:0; width:100%; display:block; }
   .thumb img,.thumb video{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
   .thumb .dur{ position:absolute; right:8px; bottom:8px; background:rgba(0,0,0,.72); color:#fff; font-size:11.5px; font-weight:700; padding:2px 7px; border-radius:6px; }
@@ -64,7 +75,9 @@
   .badges{ display:flex; flex-wrap:wrap; gap:5px; }
   .badge{ font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; background:var(--chip); color:var(--ink-2); border:1px solid var(--border); }
   .vf{ display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:auto; }
-  .empty{ text-align:center; padding:56px 16px; color:var(--ink-2); background:var(--surface); border:1px dashed var(--border-strong); border-radius:14px; }
+  .empty{ text-align:center; padding:64px 16px; color:var(--ink-2); background:linear-gradient(var(--surface),rgba(23,23,27,.4)); border:1px solid var(--border); border-radius:18px; display:flex; flex-direction:column; align-items:center; gap:10px; }
+  .empty svg{ color:var(--accent); opacity:.8; }
+  .empty strong{ color:var(--ink); font-size:16px; }
   /* player */
   .ov{ position:fixed; inset:0; background:rgba(0,0,0,.86); display:flex; align-items:center; justify-content:center; padding:16px; z-index:10; }
   .player{ width:min(1000px,100%); display:flex; flex-direction:column; gap:10px; }
@@ -86,6 +99,7 @@
   const initials = n => String(n||'?').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase();
   const dur = s => { s = Math.round(Number(s)||0); if(!s) return ''; const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0'); };
   const PLAY = '<svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"/></svg>';
+  const FILM = '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M10 9.5v5l4.5-2.5z" fill="currentColor"/></svg>';
   const DL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>';
   let D = null;                     // { singers, tags, videos }
   const F = { event:new Set(), tempo:new Set(), lifestyle:new Set(), singer:new Set(), q:'' };
@@ -122,12 +136,12 @@
     document.title = 'ASP Video Library';
     const count = id => D.videos.filter(v=>v.singer_id===id).length;
     root.innerHTML = `${header(false)}
-      <div class="label" style="margin-bottom:4px;">Video library</div>
-      <h1 style="margin-bottom:18px;">Choose a singer</h1>
+      <div class="intro"><div class="label" style="margin-bottom:8px;">Performance videos</div>
+        <h1>Choose a singer</h1><p>Watch live performances, filter by event, tempo and crowd, and download the original files.</p></div>
       ${D.singers.length ? `<div class="singers">${D.singers.map(s=>`<a class="singer" href="#/${encodeURIComponent(s.slug)}" data-testid="singer-card">
         <div class="ph">${s.photo_path ? `<img src="${esc(FILE(s.photo_path))}" alt="" loading="lazy"/>` : esc(initials(s.name))}</div>
         <div class="nm"><strong>${esc(s.name)}</strong><span class="muted">${count(s.id)} video${count(s.id)===1?'':'s'}</span></div></a>`).join('')}</div>`
-        : `<div class="empty">No singers yet.</div>`}`;
+        : `<div class="empty">${FILM}<strong>No singers yet</strong></div>`}`;
     window.scrollTo(0,0);
   }
 
@@ -142,7 +156,7 @@
     if(!singer && D.singers.length > 1) rows.unshift(`<div class="frow"><span class="label">Singer</span><div class="chips">${D.singers.map(s=>`<button class="chip" data-f="singer" data-v="${esc(s.id)}" aria-pressed="${F.singer.has(s.id)}">${esc(s.name)}</button>`).join('')}</div></div>`);
     root.innerHTML = `${header(true)}
       <div class="hero">${singer ? `<div class="av">${singer.photo_path ? `<img src="${esc(FILE(singer.photo_path))}" alt=""/>` : esc(initials(singer.name))}</div>` : ''}
-        <div style="min-width:0;"><div class="label">Video library</div><h1>${esc(singer ? singer.name : 'All singers')}</h1></div></div>
+        <div style="min-width:0;"><div class="label" style="margin-bottom:4px;">Performance videos</div><h1>${esc(singer ? singer.name : 'All singers')}</h1></div></div>
       ${rows.join('') ? `<div class="filters">${rows.join('')}</div>` : ''}
       <div class="bar"><input class="search" type="search" placeholder="Search titles and songs" value="${esc(F.q)}" data-q/>
         <span style="display:flex;align-items:center;gap:10px;"><span class="muted" id="count"></span><button class="btn" data-clear>Clear all</button></span></div>
@@ -171,7 +185,7 @@
         ${v.tags.length ? `<div class="badges">${CATS.flatMap(([c])=>v.tags.filter(t=>t.category===c)).map(t=>`<span class="badge">${esc(t.name)}</span>`).join('')}</div>` : ''}
         <div class="vf"><span class="muted">${v.recorded_on ? esc(new Date(v.recorded_on+'T00:00:00').toLocaleDateString('en-US',{ month:'short', year:'numeric' })) : ''}</span>
           <a class="btn btn-gold" href="${esc(downloadUrl(v))}" data-testid="download">${DL} Download</a></div></div></div>`).join('')}</div>`
-      : `<div class="empty">${any ? 'No videos match — try removing a filter.' : 'No videos here yet.'}</div>`;
+      : `<div class="empty">${FILM}${any ? '<strong>No videos match</strong><span>Try removing a filter.</span>' : '<strong>No videos here yet</strong><span>New performances will appear here soon.</span>'}</div>`;
     document.querySelectorAll('[data-play]').forEach(b=>{
       b.addEventListener('click', ()=>openPlayer(D.videos.find(v=>v.id===b.dataset.play)));
       // A preview on hover (mouse only; on a phone a tap opens the player).
@@ -208,6 +222,8 @@
     document.body.appendChild(ov);
   }
 
+  // Shown inside the app (the Videos tab): the app has its own header, so no second logo.
+  if(new URLSearchParams(location.search).has('embed')) document.body.classList.add('embed');
   window.addEventListener('hashchange', ()=>{ if(D) route(); });
   load().then(route).catch(()=>{ root.innerHTML = `${header(false)}<div class="empty">The library couldn't load. Please refresh the page.</div>`; });
 })();

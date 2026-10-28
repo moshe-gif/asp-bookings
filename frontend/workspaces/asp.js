@@ -4189,7 +4189,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.34'; // bump on every release so a phone can tell it has updated. v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.35'; // bump on every release so a phone can tell it has updated. v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -5336,13 +5336,15 @@ function renderVideoLibraryPage(){
   if(!S.lib) return `<div class="card card-pad" style="font-size:13px;color:var(--ink-2);">Loading…</div>`;
   const tab = S.libTab || 'browse';
   const publicUrl = new URL('videos/', location.href.split('#')[0]).href;
-  return `
-  <div class="section-head"><h2>Video Library</h2>
-    <a class="btn btn-sm" href="${esc(publicUrl)}" target="_blank" rel="noopener" data-action="external-link">Open the library</a></div>
-  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;overflow-wrap:anywhere;">Clients and bookers browse it at <strong>${esc(publicUrl)}</strong> — no login. Every published video there can be watched and downloaded.</p>
-  <div class="tabbar" style="margin-bottom:14px;">${[['browse','Library'],['videos','Upload & tag'],['singers','Singers'],['tags','Tags']].map(([k,l])=>`<a href="#" class="tab ${tab===k?'active':''}" data-action="lib-tab" data-id="${k}">${l}</a>`).join('')}</div>
-  ${tab==='browse' ? `<iframe src="${esc(publicUrl)}" title="Video Library" data-testid="lib-browse" style="display:block;width:100%;height:calc(100vh - 230px);min-height:520px;border:0;border-radius:12px;background:#0b0b0d;"></iframe>`
-    : tab==='singers' ? renderLibSingers() : tab==='tags' ? renderLibTags() : renderLibVideos()}`;
+  return `<div class="lib">
+  <div class="lib-head">
+    <div class="lib-tabs" role="tablist">${[['browse','Library'],['videos','Upload & tag'],['singers','Singers'],['tags','Tags']].map(([k,l])=>`<button type="button" role="tab" aria-selected="${tab===k}" class="${tab===k?'active':''}" data-action="lib-tab" data-id="${k}">${l}</button>`).join('')}</div>
+    <div class="lib-share"><span title="Clients and bookers open this link, no login">${esc(publicUrl.replace(/^https?:\/\//,''))}</span>
+      <button class="btn btn-sm" data-action="copy-text" data-value="${esc(publicUrl)}">Copy link</button>
+      <a class="btn btn-sm" href="${esc(publicUrl)}" target="_blank" rel="noopener" data-action="external-link">Open ↗</a></div>
+  </div>
+  ${tab==='browse' ? `<iframe src="${esc(publicUrl)}?embed=1" title="Video Library" data-testid="lib-browse" class="lib-frame"></iframe>`
+    : tab==='singers' ? renderLibSingers() : tab==='tags' ? renderLibTags() : renderLibVideos()}</div>`;
 }
 function renderLibVideos(){
   const L = S.lib, sel = S.libSelected || (S.libSelected = new Set());
@@ -5354,12 +5356,13 @@ function renderLibVideos(){
   const selCount = [...sel].filter(id=>list.some(v=>v.id===id)).length;
   return `
   <div class="card card-pad" style="margin-bottom:14px;" data-testid="lib-upload">
-    <h3 style="margin:0 0 10px;">Upload videos</h3>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-      <select data-lib-upload-singer style="max-width:100%;"><option value="">Choose the singer…</option>${L.singers.map(s=>`<option value="${esc(s.id)}" ${s.id===S.libUploadSinger?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+    <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:12px;">
+      <h3 style="margin:0;">Upload videos</h3>
+      <select data-lib-upload-singer style="max-width:100%;min-width:200px;"><option value="">Choose the singer…</option>${L.singers.map(s=>`<option value="${esc(s.id)}" ${s.id===S.libUploadSinger?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
     </div>
-    <label class="lib-drop" data-lib-drop style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:26px 14px;border:1.5px dashed var(--border-strong);border-radius:10px;cursor:pointer;text-align:center;${S.libUploadSinger?'':'opacity:.55;'}">
-      <strong style="font-size:14px;">Drop videos here, or click to choose</strong>
+    <label class="lib-drop ${S.libUploadSinger?'':'off'}" data-lib-drop>
+      <span class="lib-drop-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg></span>
+      <strong style="font-size:14px;">${S.libUploadSinger ? 'Drop videos here, or click to choose' : 'Choose the singer first, then drop videos here'}</strong>
       <span style="font-size:12px;color:var(--ink-3);">As many as you like at once · mp4, mov, m4v, webm · up to 5 GB each</span>
       <input type="file" accept="video/*,.mov,.m4v" multiple data-lib-files style="display:none;" ${S.libUploadSinger?'':'disabled'}/>
     </label>
@@ -5369,11 +5372,11 @@ function renderLibVideos(){
       <div style="height:4px;border-radius:2px;background:var(--border);overflow:hidden;"><div data-bar style="height:100%;width:${Math.round(u.pct*100)}%;background:${u.status==='failed'?'var(--warn-ink)':'var(--accent)'};"></div></div>
       ${u.error?`<div style="color:var(--warn-ink);overflow-wrap:anywhere;">${esc(u.error)}</div>`:''}</div>`).join('')}</div>` : ''}
   </div>
-  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+  <div class="lib-toolbar">
     <select data-lib-filter-singer style="max-width:100%;"><option value="">All singers</option>${L.singers.map(s=>`<option value="${esc(s.id)}" ${s.id===S.libFilterSinger?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
-    <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" data-lib-untagged ${S.libUntaggedOnly?'checked':''}/> Needs tags only</label>
-    <input type="search" placeholder="Search" data-lib-search value="${esc(S.libSearch||'')}" style="flex:1 1 160px;max-width:260px;"/>
-    <span style="font-size:12px;color:var(--ink-3);">${list.length} video${list.length===1?'':'s'}</span>
+    <input type="search" placeholder="Search titles and songs" data-lib-search value="${esc(S.libSearch||'')}" style="flex:1 1 180px;max-width:300px;"/>
+    <label class="lib-check"><input type="checkbox" data-lib-untagged ${S.libUntaggedOnly?'checked':''}/> Needs tags only</label>
+    <span style="font-size:12px;color:var(--ink-3);margin-left:auto;">${list.length} video${list.length===1?'':'s'}</span>
   </div>
   ${selCount ? `<div class="card card-pad" style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;" data-testid="lib-bulk">
     <strong style="font-size:13px;">${selCount} selected:</strong>
@@ -5394,25 +5397,25 @@ function renderLibVideos(){
       <td data-label="Shown"><input type="checkbox" data-lib-published="${esc(v.id)}" ${v.published?'checked':''} aria-label="Shown in the library"/></td>
       <td><button class="icon-btn" data-action="lib-delete-video" data-id="${esc(v.id)}" title="Delete" aria-label="Delete">${ICO.trash}</button></td>
     </tr>`).join('')}</tbody></table></div>`
-  : `<div class="card empty">${L.videos.length ? 'No videos match.' : 'No videos yet — choose a singer and drop some in above.'}</div>`}`;
+  : `<div class="card lib-empty">${L.videos.length ? 'No videos match.' : 'No videos yet — choose a singer and drop some in above.'}</div>`}`;
 }
 function renderLibSingers(){
   const L = S.lib, count = id => L.videos.filter(v=>v.singer_id===id).length;
   return `<div class="card card-pad" style="margin-bottom:14px;">
     ${L.singers.map((s,i)=>`<div class="settings-row" style="flex-wrap:wrap;gap:10px;" data-testid="lib-singer">
       <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 240px;">
-        <label style="cursor:pointer;flex:none;" title="Change photo"><span class="avatar" style="width:44px;height:44px;font-size:14px;overflow:hidden;">${s.photo_path?`<img src="${esc(LIB_PUBLIC_URL(s.photo_path))}" alt="" style="width:100%;height:100%;object-fit:cover;"/>`:esc((s.name||'?').slice(0,1))}</span>
+        <label class="lib-photo" title="${s.photo_path?'Change':'Add'} photo"><span class="lib-photo-av">${s.photo_path?`<img src="${esc(LIB_PUBLIC_URL(s.photo_path))}" alt=""/>`:esc(String(s.name||'?').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase())}</span><span class="lib-photo-cam">${ICO.image}</span>
           <input type="file" accept="image/jpeg,image/png,image/webp" data-lib-photo="${esc(s.id)}" style="display:none;"/></label>
-        <div style="min-width:0;flex:1;"><input value="${esc(s.name)}" data-lib-singer-name="${esc(s.id)}" aria-label="Name" style="width:100%;font-weight:600;"/>
-          <p style="margin:2px 0 0;font-size:11.5px;color:var(--ink-3);">${count(s.id)} video${count(s.id)===1?'':'s'} · tap the circle to ${s.photo_path?'change':'add'} the photo</p></div>
+        <div style="min-width:0;flex:1;"><input class="lib-inline" value="${esc(s.name)}" data-lib-singer-name="${esc(s.id)}" aria-label="Name" style="width:100%;font-weight:600;font-size:14.5px;"/>
+          <p style="margin:2px 0 0 9px;font-size:11.5px;color:var(--ink-3);">${count(s.id)} video${count(s.id)===1?'':'s'}${s.photo_path?'':' · no photo yet: tap the circle'}</p></div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;">
-        <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;"><input type="checkbox" data-lib-singer-active="${esc(s.id)}" ${s.active?'checked':''}/> Shown</label>
+        <label class="lib-check"><input type="checkbox" data-lib-singer-active="${esc(s.id)}" ${s.active?'checked':''}/> Shown</label>
         <button class="icon-btn" data-action="lib-singer-up" data-id="${esc(s.id)}" ${i===0?'disabled':''} title="Move up" aria-label="Move up">${ICO.up}</button>
         <button class="icon-btn" data-action="lib-singer-down" data-id="${esc(s.id)}" ${i===L.singers.length-1?'disabled':''} title="Move down" aria-label="Move down">${ICO.down}</button>
         <button class="icon-btn" data-action="lib-delete-singer" data-id="${esc(s.id)}" title="Remove" aria-label="Remove">${ICO.trash}</button>
       </div></div>`).join('')}
-    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><input placeholder="New singer's name" data-lib-new-singer value="${esc(S.libNewSinger||'')}" style="flex:1 1 200px;max-width:320px;"/>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;"><input placeholder="New singer's name" data-lib-new-singer value="${esc(S.libNewSinger||'')}" style="flex:1 1 200px;max-width:320px;"/>
       <button class="btn btn-sm btn-primary" data-action="lib-add-singer">${ICO.plus} Add singer</button></div>
   </div>`;
 }
@@ -5420,7 +5423,7 @@ function renderLibTags(){
   S.libNewTag = S.libNewTag || {};
   return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:14px;">${LIB_CATS.map(([c,l])=>`<div class="card card-pad">
     <h3 style="margin:0 0 10px;">${l}</h3>
-    ${libTagsOf(c).map(t=>`<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;"><input value="${esc(t.name)}" data-lib-tag-name="${esc(t.id)}" aria-label="Name" style="flex:1;min-width:0;"/>
+    ${libTagsOf(c).map(t=>`<div class="lib-tagrow"><input class="lib-inline" value="${esc(t.name)}" data-lib-tag-name="${esc(t.id)}" aria-label="Name" style="flex:1;min-width:0;"/>
       <button class="icon-btn" data-action="lib-delete-tag" data-id="${esc(t.id)}" title="Delete" aria-label="Delete">${ICO.trash}</button></div>`).join('')}
     <div style="display:flex;gap:6px;margin-top:10px;"><input placeholder="Add an option" data-lib-new-tag="${c}" value="${esc(S.libNewTag[c]||'')}" style="flex:1;min-width:0;"/>
       <button class="btn btn-sm" data-action="lib-add-tag" data-id="${c}">${ICO.plus} Add</button></div>
