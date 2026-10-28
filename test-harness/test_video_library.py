@@ -71,6 +71,9 @@ def test_admin_uploads_tags_and_client_downloads(live_server, page, browser):
     _remove_test_singer(page)
     try:
         goto_nav(page, "videos")
+        # The tab opens on the library itself (the client view); managing is on the other tabs.
+        page.frame_locator('[data-testid="lib-browse"]').locator('[data-testid="singer-card"]').first.wait_for(state="visible", timeout=20000)
+        page.locator('[data-action="lib-tab"][data-id="videos"]').click()
         page.locator('[data-testid="lib-upload"]').wait_for(state="visible", timeout=20000)
 
         # Add the singer.

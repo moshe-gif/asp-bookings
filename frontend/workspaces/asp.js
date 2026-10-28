@@ -4189,7 +4189,7 @@ function navBadge(v){
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.33'; // bump on every release so a phone can tell it has updated. v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.34'; // bump on every release so a phone can tell it has updated. v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = (MGMT_NAV_ITEMS.some(([x])=>x===v) ? MGMT_NAV_ITEMS : ARTIST_NAV_ITEMS);
   return list.findIndex(([x])=>x===v);
@@ -5334,14 +5334,15 @@ function libTagSelect(cat, value, attrs){
 function renderVideoLibraryPage(){
   if(!S.lib && !S.libBusy) setTimeout(loadLibrary, 0);
   if(!S.lib) return `<div class="card card-pad" style="font-size:13px;color:var(--ink-2);">Loading…</div>`;
-  const tab = S.libTab || 'videos';
+  const tab = S.libTab || 'browse';
   const publicUrl = new URL('videos/', location.href.split('#')[0]).href;
   return `
   <div class="section-head"><h2>Video Library</h2>
     <a class="btn btn-sm" href="${esc(publicUrl)}" target="_blank" rel="noopener" data-action="external-link">Open the library</a></div>
   <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;overflow-wrap:anywhere;">Clients and bookers browse it at <strong>${esc(publicUrl)}</strong> — no login. Every published video there can be watched and downloaded.</p>
-  <div class="tabbar" style="margin-bottom:14px;">${[['videos','Videos'],['singers','Singers'],['tags','Tags']].map(([k,l])=>`<a href="#" class="tab ${tab===k?'active':''}" data-action="lib-tab" data-id="${k}">${l}</a>`).join('')}</div>
-  ${tab==='singers' ? renderLibSingers() : tab==='tags' ? renderLibTags() : renderLibVideos()}`;
+  <div class="tabbar" style="margin-bottom:14px;">${[['browse','Library'],['videos','Upload & tag'],['singers','Singers'],['tags','Tags']].map(([k,l])=>`<a href="#" class="tab ${tab===k?'active':''}" data-action="lib-tab" data-id="${k}">${l}</a>`).join('')}</div>
+  ${tab==='browse' ? `<iframe src="${esc(publicUrl)}" title="Video Library" data-testid="lib-browse" style="display:block;width:100%;height:calc(100vh - 230px);min-height:520px;border:0;border-radius:12px;background:#0b0b0d;"></iframe>`
+    : tab==='singers' ? renderLibSingers() : tab==='tags' ? renderLibTags() : renderLibVideos()}`;
 }
 function renderLibVideos(){
   const L = S.lib, sel = S.libSelected || (S.libSelected = new Set());
