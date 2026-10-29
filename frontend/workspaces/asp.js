@@ -1999,6 +1999,37 @@ function rememberVenue(f){
   VENUES.push({ name, address:String(f.address).trim(), city:String(f.city).trim(), state:String(f.state||'').trim(), zip:'' });
   VENUES.sort((a,b)=>a.name.localeCompare(b.name)); saveVenues();
 }
+// A venue the list doesn't know: look its address up on the web (venue-lookup, owner 2026-10-29: "why does it
+// not auto fill address"). Fills only empty fields, fixes the name's spelling, and remembers the venue.
+async function doVenueLookup(el){
+  const formName = (el.closest('[data-form]')||{dataset:{}}).dataset.form;
+  const target = formName==='lead' ? S.newLeadForm : formName==='editevent' ? S.editEventForm : null;
+  // (The page may redraw while the lookup runs, so the fields are found again afterwards.)
+  const q = k => document.querySelector(`[data-form="${formName}"] [data-field="${k}"]`);
+  const name = el.value.trim();
+  if(!target || name.length < 3 || findVenue(name) || String(target.address||'').trim() || S.venueLookupFor===name) return;
+  S.venueLookupFor = name;
+  if(q('address')) q('address').placeholder = 'Looking up the address…';
+  const res = await callEdgeFunction('venue-lookup', { venue:name, city:target.city||'' });
+  if(q('address')) q('address').placeholder = 'Street address';
+  const live = formName==='lead' ? S.newLeadForm : S.editEventForm;
+  if(live!==target || String(target.venue||'').trim()!==name || String(target.address||'').trim()) return;
+  if(!res.ok){ toast('Address lookup failed: ' + (res.error||'unknown'), 'system'); return; }
+  if(!res.found){ toast(`Couldn't find an address for "${name}" — type it in.`, 'system'); return; }
+  const v = res.venue;
+  const fill = { venue:v.name || name, address:[v.address, v.zip && !v.state ? v.zip : ''].filter(Boolean).join(' '), city:v.city, state:v.state };
+  Object.entries(fill).forEach(([k,val])=>{
+    if(!val || (k!=='venue' && String(target[k]||'').trim())) return;
+    target[k] = val; const inp = q(k); if(inp) inp.value = val;
+  });
+  rememberVenue(target);
+  toast(`Found ${fill.venue}: ${[v.address, v.city, v.state].filter(Boolean).join(', ')}. Check it before saving.`, 'success');
+}
+function bindVenueLookup(){
+  document.querySelectorAll('[data-form="lead"] [data-field="venue"], [data-form="editevent"] [data-field="venue"]').forEach(el=>{
+    el.addEventListener('change', ()=>doVenueLookup(el));
+  });
+}
 function venueDatalistHtml(){ return `<datalist id="venueList">${VENUES.map(v=>`<option value="${esc(v.name)}">${esc([v.address, v.city].filter(Boolean).join(', '))}</option>`).join('')}</datalist>`; }
 function loadOrgSettings(){ try{ const raw = localStorage.getItem(ORG_SETTINGS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
 function saveOrgSettings(){ const r = persist(ORG_SETTINGS_LS_KEY, ORG_SETTINGS, 'office settings'); if(SHARED) SHARED.settings.schedule(); return r; }
@@ -3488,6 +3519,9 @@ async function doParseLeadPaste(){
   } finally {
     S.parseLeadBusy = false; render();
   }
+  // A venue it isn't known yet: look its address up.
+  const venueEl = document.querySelector('[data-form="lead"] [data-field="venue"]');
+  if(venueEl && String(f.venue||'').trim() && !String(f.address||'').trim()) doVenueLookup(venueEl);
 }
 // Shared by the paste box and the Inbox's "Create lead": copy the reader's fields into the New Lead form.
 function fillLeadFormFrom(f, x){
@@ -3499,6 +3533,9 @@ function fillLeadFormFrom(f, x){
     if(x.time){ f.time = x.time; f.timeTbd = false; }
     if(x.endTime){ f.endTime = x.endTime; f.endTimeManual = true; } else if(!f.endTimeManual) delete f.endTime;
     if(x.notes) f.pasteNotes = x.notes;
+    // A venue the list knows brings its address (the same as typing it in).
+    const known = findVenue(f.venue);
+    if(known && !String(f.address||'').trim()){ f.address = known.address; f.city = f.city || known.city; f.state = f.state || known.state; }
 }
 async function refreshQboStatus(){
   if(!supabaseClient) return;
@@ -4258,7 +4295,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.44'; // bump on every release so a phone can tell it has updated. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.45'; // bump on every release so a phone can tell it has updated. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -11183,6 +11220,7 @@ function bindGlobal(){
     }
   };
   bindVideoLibrary();
+  bindVenueLookup();
   bindWhatsApp();
   document.querySelectorAll('select[data-action="mercury-assign"]').forEach(sel=>{
     sel.addEventListener('change', ()=>{ const v = sel.value;
