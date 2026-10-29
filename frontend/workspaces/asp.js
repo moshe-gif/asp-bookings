@@ -45,6 +45,7 @@ const ICO = {
   checkSquare:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/></svg>',
   edit:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
   image:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>',
+  download:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>',
   up:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m5 15 7-7 7 7"/></svg>',
   down:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m5 9 7 7 7-7"/></svg>',
 };
@@ -3315,7 +3316,7 @@ function resetAfterSignOut(){
   stopArtistPortal();
   closeAllOverlays();
   stopWhatsAppLive(); S.wa = null; S.waContact = null;
-  S.user = null; S.previewFrom = null; S.crew = null; S.crewRoster = null; S.gigCrew = null; S.lib = null; S.libUrls = null; S.libTab = null; S.realSession = null; S.realPasskeys = null; S.realRoster = null;
+  S.user = null; S.previewFrom = null; S.crew = null; S.crewRoster = null; S.gigCrew = null; S.lib = null; S.libUrls = null; S.libTab = null; S.libAt = null; S.libF = null; S.libQ = null; S.realSession = null; S.realPasskeys = null; S.realRoster = null;
   S.realSignInNotFound = false; S.realSignInError = null; S.showRealSignIn = false;
   S.eventId = null; S.showNewLead = false; S.showMobileMenu = false;
   history.pushState(null, '', location.pathname + location.search);
@@ -4240,7 +4241,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.41'; // bump on every release so a phone can tell it has updated. v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.42'; // bump on every release so a phone can tell it has updated. v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -5181,7 +5182,7 @@ function renderMessagesPage(){
 }
 /* ---- Video library (0068, owner 2026-10-28: "a searchable video library for a music agency's singers. Think
    Splice, but for performance videos") ----
-   Clients browse it at /videos/ (public, frontend/videos/index.html). Here the office manages it: bulk upload
+   It is browsed inside the app (renderLibBrowse; /videos/ is a private standalone copy). The office manages it: bulk upload
    into a singer (straight to storage, resumable, so big files survive a shaky connection; the thumbnail and
    length are taken in this browser first), a tagging table (one Event / Tempo / Crowd per video, or several
    rows at once), and the singers and tag lists. Everything is in Supabase (library_* tables, bucket
@@ -5698,21 +5699,130 @@ function bindWhatsApp(){
 
 const LIB_TABS = [['browse','Library'],['videos','Upload & tag'],['singers','Singers'],['tags','Tags']];
 function renderVideoLibraryPage(){
-  const libraryPage = new URL('videos/', location.href.split('#')[0]).href;
-  const frame = `<iframe src="${esc(libraryPage)}?embed=1" title="Video Library" data-testid="lib-browse" class="lib-frame"></iframe>`;
-  if(!canManageLibrary()) return `<div class="lib">${frame}</div>`;
   if(!S.lib && !S.libBusy) setTimeout(loadLibrary, 0);
   if(!S.lib) return `<div class="card card-pad" style="font-size:13px;color:var(--ink-2);">Loading…</div>`;
+  if(!canManageLibrary()) return `<div class="lib">${renderLibBrowse()}</div>`;
   const tab = S.libTab || 'browse';
   return `<div class="lib">
   <div class="lib-head">
     <div class="lib-tabs" role="tablist">${LIB_TABS.map(([k,l])=>`<button type="button" role="tab" aria-selected="${tab===k}" class="${tab===k?'active':''}" data-action="lib-tab" data-id="${k}">${l}</button>`).join('')}</div>
     <select class="tab-select lib-tab-select" aria-label="Section">${LIB_TABS.map(([k,l])=>`<option value="${k}" ${tab===k?'selected':''}>${l}</option>`).join('')}</select>
-    <div class="lib-share"><span>Private: only people with access, signed in</span>
-      <a class="btn btn-sm" href="${esc(libraryPage)}" target="_blank" rel="noopener" data-action="external-link">Full screen ↗</a></div>
+    <div class="lib-share"><span>Private: only people with access, signed in</span></div>
   </div>
-  ${tab==='browse' ? frame
+  ${tab==='browse' ? renderLibBrowse()
     : tab==='singers' ? renderLibSingers() : tab==='tags' ? renderLibTags() : renderLibVideos()}</div>`;
+}
+/* ---- Browsing the library, inside the app (owner 2026-10-29: "i want it to look as part of the app not a
+   seperate window"). Singers first, then one singer's videos (or all of them) with Event / Tempo / Crowd
+   chips and a search; a video plays in an overlay and downloads as the original file. Only shown singers
+   and published videos appear here, the same as the standalone /videos/ page. ---- */
+const LIB_FILTERS = [['singer','Singer'], ...LIB_CATS];
+function libBrowsePool(){
+  const L = S.lib, shown = new Set(L.singers.filter(s=>s.active).map(s=>s.id));
+  const vids = L.videos.filter(v=>v.published && shown.has(v.singer_id));
+  return S.libAt==='all' ? vids : vids.filter(v=>v.singer_id===S.libAt);
+}
+function libInitials(name){ return esc(String(name||'?').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase()); }
+function libFmtLen(s){ s = Math.round(Number(s)||0); if(!s) return ''; const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0'); }
+function libDownloadUrl(v){ const u = LIB_URL(v.video_path); return u ? `${u}&download=${encodeURIComponent(v.file_name || (v.title + '.mp4'))}` : ''; }
+function renderLibBrowse(){
+  const L = S.lib;
+  const singers = L.singers.filter(s=>s.active);
+  const at = S.libAt && (S.libAt==='all' || singers.some(s=>s.id===S.libAt)) ? S.libAt : '';
+  if(!at){
+    const count = id => L.videos.filter(v=>v.published && v.singer_id===id).length;
+    return `<div data-testid="lib-browse">
+      <div class="lib-bar"><div style="min-width:0;"><div class="lib-label">Performance videos</div><h2 class="lib-h">Choose a singer</h2></div>
+        <button class="btn btn-sm" data-action="lib-at" data-id="all">Search all videos</button></div>
+      ${singers.length ? `<div class="lib-singers">${singers.map(s=>`<button type="button" class="lib-singer" data-action="lib-at" data-id="${esc(s.id)}" data-testid="singer-card">
+        <span class="lib-singer-ph">${s.photo_path && LIB_URL(s.photo_path) ? `<img src="${esc(LIB_URL(s.photo_path))}" alt="" loading="lazy"/>` : libInitials(s.name)}</span>
+        <span class="lib-singer-nm"><strong>${esc(s.name)}</strong><span>${count(s.id)} video${count(s.id)===1?'':'s'}</span></span></button>`).join('')}</div>`
+        : `<div class="card lib-empty">No singers yet.</div>`}</div>`;
+  }
+  const singer = at==='all' ? null : singers.find(s=>s.id===at);
+  const pool = libBrowsePool();
+  const F = S.libF || (S.libF = {});
+  const used = new Set(pool.flatMap(v=>v.tagIds));
+  const rows = LIB_FILTERS.map(([c,label])=>{
+    const opts = c==='singer' ? (singer || singers.length<2 ? [] : singers) : libTagsOf(c).filter(t=>used.has(t.id));
+    return opts.length ? `<div class="lib-frow"><span class="lib-label">${label}</span><div class="lib-chips">${opts.map(t=>`<button type="button" class="lib-chip" data-action="lib-chip" data-cat="${c}" data-id="${esc(t.id)}" aria-pressed="${!!(F[c]||[]).includes(t.id)}">${esc(t.name)}</button>`).join('')}</div></div>` : '';
+  }).join('');
+  return `<div data-testid="lib-browse">
+    <div class="lib-bar"><div style="display:flex;align-items:center;gap:12px;min-width:0;">
+        <button class="icon-btn" data-action="lib-at" data-id="" title="All singers" aria-label="All singers">${ICO.chev('l')}</button>
+        ${singer ? `<span class="lib-av">${singer.photo_path && LIB_URL(singer.photo_path) ? `<img src="${esc(LIB_URL(singer.photo_path))}" alt=""/>` : libInitials(singer.name)}</span>` : ''}
+        <div style="min-width:0;"><div class="lib-label">Performance videos</div><h2 class="lib-h">${esc(singer ? singer.name : 'All singers')}</h2></div></div></div>
+    ${rows ? `<div class="card card-pad lib-filters">${rows}</div>` : ''}
+    <div class="lib-toolbar"><input type="search" placeholder="Search titles and songs" data-lib-q value="${esc(S.libQ||'')}" style="flex:1 1 200px;max-width:340px;"/>
+      <span style="display:flex;align-items:center;gap:10px;margin-left:auto;"><span style="font-size:12px;color:var(--ink-3);" data-lib-count></span>
+        <button class="btn btn-sm btn-ghost" data-action="lib-clear">Clear all</button></span></div>
+    <div data-lib-results>${renderLibResults()}</div></div>`;
+}
+// Within a filter any chosen option matches; across filters all must.
+function libBrowseList(){
+  const F = S.libF || {}, q = String(S.libQ||'').trim().toLowerCase();
+  return libBrowsePool().filter(v=>LIB_FILTERS.every(([c])=>{ const want = F[c]||[]; return !want.length || (c==='singer' ? want.includes(v.singer_id) : v.tagIds.some(id=>want.includes(id))); })
+    && (!q || `${v.title} ${v.songs||''}`.toLowerCase().includes(q)))
+    .sort((a,b)=>String(b.recorded_on||'').localeCompare(String(a.recorded_on||'')) || String(b.created_at).localeCompare(String(a.created_at)));
+}
+function renderLibResults(){
+  const L = S.lib, list = libBrowseList();
+  const tagName = new Map(L.tags.map(t=>[t.id,t]));
+  const singerName = id => (L.singers.find(s=>s.id===id)||{}).name || '';
+  const any = Object.values(S.libF||{}).some(a=>a.length) || String(S.libQ||'').trim();
+  const html = list.length ? `<div class="lib-grid">${list.map(v=>{
+    const tags = LIB_CATS.flatMap(([c])=>v.tagIds.map(id=>tagName.get(id)).filter(t=>t && t.category===c));
+    const sub = [S.libAt==='all' ? singerName(v.singer_id) : '', v.songs].filter(Boolean).join(' · ');
+    return `<div class="card lib-vid" data-testid="video-card">
+      <button type="button" class="lib-thumb" data-action="lib-play" data-id="${esc(v.id)}" aria-label="Play ${esc(v.title)}">${v.thumb_path && LIB_URL(v.thumb_path) ? `<img src="${esc(LIB_URL(v.thumb_path))}" alt="" loading="lazy"/>` : ''}
+        <span class="lib-play"><svg width="18" height="18" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"/></svg></span>${libFmtLen(v.duration_s) ? `<span class="lib-dur">${libFmtLen(v.duration_s)}</span>` : ''}</button>
+      <div class="lib-vb"><div class="lib-vt">${esc(v.title)}</div>${sub ? `<div class="lib-vs">${esc(sub)}</div>` : ''}
+        ${tags.length ? `<div class="lib-badges">${tags.map(t=>`<span class="pill">${esc(t.name)}</span>`).join('')}</div>` : ''}
+        <div class="lib-vf"><span>${v.recorded_on ? esc(new Date(v.recorded_on+'T00:00:00').toLocaleDateString('en-US',{ month:'short', year:'numeric' })) : ''}</span>
+          <a class="btn btn-sm" href="${esc(libDownloadUrl(v))}" data-action="external-link" data-testid="download">${ICO.download} Download</a></div></div></div>`; }).join('')}</div>`
+    : `<div class="card lib-empty">${any ? 'No videos match. Try removing a filter.' : 'No videos here yet.'}</div>`;
+  return html + `<span hidden data-lib-n="${list.length}"></span>`;
+}
+function libRefreshResults(){
+  const box = document.querySelector('[data-lib-results]'); if(!box) return;
+  libStopPreviews(); box.innerHTML = renderLibResults(); libSyncCount(); bindLibPreviews();
+}
+function libSyncCount(){
+  const n = document.querySelector('[data-lib-n]'), c = document.querySelector('[data-lib-count]');
+  if(n && c){ const k = Number(n.dataset.libN); c.textContent = `${k} video${k===1?'':'s'}`; }
+}
+function libStopPreviews(){ document.querySelectorAll('video[data-lib-preview]').forEach(el=>{ el.pause(); el.removeAttribute('src'); el.load(); el.remove(); }); }
+// A muted preview on hover (mouse only; on a phone a tap opens the player).
+function bindLibPreviews(){
+  if(!window.matchMedia('(hover:hover) and (pointer:fine)').matches) return;
+  document.querySelectorAll('.lib-thumb[data-id]').forEach(b=>{
+    let t = null;
+    b.addEventListener('mouseenter', ()=>{ t = setTimeout(()=>{
+      const v = S.lib && S.lib.videos.find(x=>x.id===b.dataset.id); if(!v || !LIB_URL(v.video_path)) return;
+      libStopPreviews();
+      const el = document.createElement('video');
+      el.muted = true; el.playsInline = true; el.preload = 'metadata'; el.setAttribute('data-lib-preview','');
+      el.src = LIB_URL(v.video_path) + '#t=' + Math.max(0, Math.round((Number(v.duration_s)||0) * 0.2));
+      el.addEventListener('loadeddata', ()=>{ el.play().catch(()=>{}); });
+      b.appendChild(el);
+    }, 350); });
+    b.addEventListener('mouseleave', ()=>{ clearTimeout(t); libStopPreviews(); });
+  });
+}
+// The player sits outside the app's page so a re-render (a live update elsewhere) never stops the video.
+function libOpenPlayer(id){
+  const v = S.lib && S.lib.videos.find(x=>x.id===id); if(!v) return;
+  libStopPreviews();
+  const ov = document.createElement('div');
+  ov.className = 'lib-ov';
+  ov.innerHTML = `<div class="lib-player" role="dialog" aria-label="${esc(v.title)}"><div class="lib-player-bar"><strong style="overflow-wrap:anywhere;min-width:0;">${esc(v.title)}</strong>
+      <span style="display:flex;gap:8px;"><a class="btn btn-sm btn-primary" href="${esc(libDownloadUrl(v))}">${ICO.download} Download</a><button class="btn btn-sm" data-lib-close>Close</button></span></div>
+    <video controls autoplay playsinline src="${esc(LIB_URL(v.video_path))}"${v.thumb_path ? ` poster="${esc(LIB_URL(v.thumb_path))}"` : ''}></video></div>`;
+  const close = ()=>{ const el = ov.querySelector('video'); el.pause(); el.removeAttribute('src'); el.load(); ov.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = e=>{ if(e.key==='Escape') close(); };
+  ov.addEventListener('click', e=>{ if(e.target===ov || e.target.closest('[data-lib-close]')) close(); });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(ov);
 }
 function renderLibVideos(){
   const L = S.lib, sel = S.libSelected || (S.libSelected = new Set());
@@ -5808,6 +5918,8 @@ async function libMoveSinger(id, dir){
 function bindVideoLibrary(){
   if(S.view!=='videos' || !S.lib) return;
   const q = sel => document.querySelectorAll(sel);
+  libSyncCount(); bindLibPreviews();
+  q('[data-lib-q]').forEach(el=>el.addEventListener('input', ()=>{ S.libQ = el.value; libRefreshResults(); }));
   q('.lib-tab-select').forEach(el=>el.addEventListener('change', ()=>{ S.libTab = el.value; render(); }));
   q('[data-lib-upload-singer]').forEach(el=>el.addEventListener('change', ()=>{ S.libUploadSinger = el.value; render(); }));
   q('[data-lib-files]').forEach(el=>el.addEventListener('change', ()=>{ const f = [...(el.files||[])]; el.value = ''; if(f.length) libUploadFiles(f); }));
@@ -10861,6 +10973,11 @@ function bindGlobal(){
       case 'mark-balance': doMarkBalance(id); break;
       case 'inbox-money': { const it = (S.inboxItems||[]).find(x=>x.id===id); if(it) applyInboxMoney(it, false); break; }
       case 'lib-tab': S.libTab = id; render(); break;
+      case 'lib-at': S.libAt = id; S.libF = {}; S.libQ = ''; libStopPreviews(); render(); window.scrollTo(0,0); break;
+      case 'lib-chip': { const c = t.dataset.cat, F = S.libF || (S.libF = {}), a = F[c] || (F[c] = []);
+        a.includes(id) ? a.splice(a.indexOf(id), 1) : a.push(id); t.setAttribute('aria-pressed', a.includes(id)); libRefreshResults(); break; }
+      case 'lib-clear': S.libF = {}; S.libQ = ''; render(); break;
+      case 'lib-play': libOpenPlayer(id); break;
       case 'wa-open': S.waContact = id; S.waDraft = ''; S.waEditName = null; render(); break;
       case 'wa-new': S.waContact = 'new'; S.waDraft = ''; render(); break;
       case 'wa-back': S.waContact = null; render(); break;

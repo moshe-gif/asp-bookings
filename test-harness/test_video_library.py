@@ -86,7 +86,8 @@ def test_admin_uploads_tags_and_client_downloads(live_server, page, browser):
     try:
         goto_nav(page, "videos")
         # The tab opens on the library itself; managing is on the other tabs.
-        page.frame_locator('[data-testid="lib-browse"]').locator('[data-testid="singer-card"]').first.wait_for(state="visible", timeout=20000)
+        page.locator('[data-testid="lib-browse"] [data-testid="singer-card"]').first.wait_for(state="visible", timeout=20000)
+        assert page.locator("iframe").count() == 0, "the library is part of the app, not an embedded page"
         page.locator('[data-action="lib-tab"][data-id="videos"]').click()
         page.locator('[data-testid="lib-upload"]').wait_for(state="visible", timeout=20000)
 
@@ -117,24 +118,28 @@ def test_admin_uploads_tags_and_client_downloads(live_server, page, browser):
         # (A browser recording states no length, so duration_s may be empty here; camera files have one.)
         assert v["duration_s"] is None or 1 <= float(v["duration_s"]) <= 4
 
-        # The library page (same signed-in browser) finds it, filters it and downloads the original.
-        client = page.context.new_page()
-        client.goto(live_server + "/videos/#/harness-test-singer")
-        card = client.locator('[data-testid="video-card"]')
+        # Browsing (in the app): the singer's page finds it, filters it and downloads the original.
+        page.locator('[data-action="lib-tab"][data-id="browse"]').click()
+        page.locator('[data-testid="singer-card"]', has_text=TEST_SINGER).click()
+        card = page.locator('[data-testid="video-card"]')
         card.first.wait_for(state="visible", timeout=15000)
         text = card.first.inner_text()
         assert "Harness Wedding Clip" in text and "Wedding" in text and "Fast" in text
-        assert client.locator('.chip', has_text="Slow").count() == 0   # only the options this singer uses
-        client.locator('.chip', has_text="Wedding").click()
-        assert client.locator('[data-testid="video-card"]').count() == 1
+        assert page.locator('.lib-chip', has_text="Slow").count() == 0   # only the options this singer uses
+        page.locator('.lib-chip', has_text="Wedding").click()
+        assert page.locator('[data-testid="video-card"]').count() == 1
+        page.locator('[data-lib-q]').fill("no such video")
+        page.get_by_text("No videos match").wait_for(state="visible", timeout=5000)
+        page.locator('[data-lib-q]').fill("")
         href = card.first.locator('[data-testid="download"]').get_attribute("href")
         with urllib.request.urlopen(urllib.request.Request(href, method="GET")) as r:
             assert r.status == 200 and r.read() == video, "the download is the original file"
             assert "attachment" in (r.headers.get("Content-Disposition") or "")
         assert "/object/sign/" in href, "files open through signed links (the bucket is private)"
-        client.locator('[data-play]').first.click()
-        client.locator(".ov video").wait_for(state="visible", timeout=10000)
-        client.close()
+        card.first.locator('[data-action="lib-play"]').click()
+        page.locator(".lib-ov video").wait_for(state="visible", timeout=10000)
+        page.keyboard.press("Escape")
+        assert page.locator(".lib-ov").count() == 0
     finally:
         _remove_test_singer(page)
     assert not errors, f"console errors: {errors}"
