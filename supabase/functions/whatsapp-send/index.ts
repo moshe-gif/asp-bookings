@@ -1,8 +1,8 @@
 // Admin-only WhatsApp send (test page, and the app's "WhatsApp the client/artist" actions). Goes through
 // _shared/whatsapp.ts, so test mode applies: until WHATSAPP_LIVE=yes everything lands on the owner's phone.
-import { jsonFor, preflight, readJson } from "../_shared/http.ts";
+import { corsHeaders, jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin } from "../_shared/auth.ts";
-import { createTemplates360, sendWhatsApp, setWebhook360, templateStatus360, whatsappTestMode } from "../_shared/whatsapp.ts";
+import { createTemplates360, fetchMedia360, sendWhatsApp, setWebhook360, templateStatus360, whatsappTestMode } from "../_shared/whatsapp.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return preflight(req);
@@ -12,12 +12,20 @@ Deno.serve(async (req) => {
   // deno-lint-ignore no-explicit-any
   const b = await readJson<any>(req);
   // The owner's WhatsApp tab (0071): point 360dialog's incoming messages at whatsapp-webhook.
-  if (b?.action === "setup-webhook" || b?.action === "status" || b?.action === "create-templates") {
+  if (b?.action === "setup-webhook" || b?.action === "status" || b?.action === "create-templates" || b?.action === "media") {
     const { data: allowed } = await auth.caller.rpc("can_use_whatsapp");
     if (!allowed) return json({ ok: false, error: "not authorized" }, 403);
     const t = whatsappTestMode();
     if (b.action === "status") return json({ ok: true, connected: !!Deno.env.get("WHATSAPP_TOKEN"), incoming: !!Deno.env.get("WHATSAPP_WEBHOOK_SECRET"), testMode: t.on, testTo: t.to, templates: await templateStatus360() });
     if (b.action === "create-templates") return json({ ok: true, templates: await createTemplates360() });
+    if (b.action === "media") {
+      // Only media that came in on a logged message (never an arbitrary id).
+      const { data: msg } = await auth.caller.from("whatsapp_messages").select("media_id").eq("media_id", String(b.mediaId || "")).maybeSingle();
+      if (!msg) return json({ ok: false, error: "not found" }, 404);
+      const f = await fetchMedia360(msg.media_id);
+      if (!f.ok) return json({ ok: false, error: f.error }, 502);
+      return new Response(f.bytes, { headers: { ...corsHeaders(req), "Content-Type": f.mime, "Cache-Control": "private, max-age=3600" } });
+    }
     const secret = Deno.env.get("WHATSAPP_WEBHOOK_SECRET");
     if (!secret) return json({ ok: false, error: "WHATSAPP_WEBHOOK_SECRET is not set" }, 500);
     const r = await setWebhook360(`${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-webhook`, secret);

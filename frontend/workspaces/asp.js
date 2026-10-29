@@ -4239,7 +4239,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.39'; // bump on every release so a phone can tell it has updated. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.40'; // bump on every release so a phone can tell it has updated. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -5545,11 +5545,13 @@ function stopWhatsAppLive(){ if(waChannel && supabaseClient){ supabaseClient.rem
 async function loadWhatsApp(){
   if(!supabaseClient || !S.realSession || (S.wa && S.wa.loading)) return;
   S.wa = { ...(S.wa||{}), loading:true };
-  const [m, st] = await Promise.all([
+  const [m, st, ct] = await Promise.all([
     supabaseClient.from('whatsapp_messages').select('*').order('created_at', { ascending:false }).limit(2000),
     callEdgeFunction('whatsapp-send', { action:'status' }),
+    supabaseClient.from('whatsapp_contacts').select('contact, name'),
   ]);
-  S.wa = { loading:false, loaded:true, messages:m.data||[], error:m.error ? m.error.message : null, status: st && st.ok ? st : null };
+  S.wa = { loading:false, loaded:true, messages:m.data||[], error:m.error ? m.error.message : null, status: st && st.ok ? st : null,
+    contacts: new Map((ct.data||[]).map(c=>[c.contact, c.name])) };
   if(!waChannel){
     waChannel = supabaseClient.channel('whatsapp-messages').on('postgres_changes', { event:'*', schema:'public', table:'whatsapp_messages' }, p=>{
       if(!S.wa || !S.wa.messages || !p.new || !p.new.id) return;
@@ -5576,15 +5578,15 @@ function waGigNames(){
   best.forEach((e,k)=>out.set(k, `${e.clientName || 'Client'} · ${e.type} ${fmtDateShort(e.date)}`));
   return out;
 }
-// Conversations, newest first. A contact's name: their gig (client · event date), else a crew member on file
-// with that number, else the WhatsApp profile name they sent, else the number.
+// Conversations, newest first. A contact's name: the name the owner saved for the number (0073), else their gig
+// (client · event date), else a crew member on file, else the WhatsApp profile name they sent, else the number.
 function waConversations(){
   const by = new Map();
   for(const m of (S.wa && S.wa.messages)||[]){ const c = by.get(m.contact) || { contact:m.contact, msgs:[] }; c.msgs.push(m); by.set(m.contact, c); }
   const known = new Map(((S.crewRoster||[]).filter(c=>c.phone)).map(c=>[String(c.phone).replace(/\D/g,'').replace(/^(\d{10})$/,'1$1'), c.name]));
   const gigs = waGigNames();
   return [...by.values()].map(c=>{ c.msgs.sort((a,b)=>a.created_at.localeCompare(b.created_at)); const last = c.msgs[c.msgs.length-1];
-    c.name = gigs.get(c.contact) || known.get(c.contact) || (c.msgs.slice().reverse().find(m=>m.contact_name)||{}).contact_name || waPhone(c.contact);
+    c.name = (S.wa.contacts && S.wa.contacts.get(c.contact)) || gigs.get(c.contact) || known.get(c.contact) || (c.msgs.slice().reverse().find(m=>m.contact_name)||{}).contact_name || waPhone(c.contact);
     c.last = last; c.lastIn = c.msgs.filter(m=>m.direction==='in').pop() || null; return c; })
     .sort((a,b)=>b.last.created_at.localeCompare(a.last.created_at));
 }
@@ -5615,10 +5617,13 @@ function renderWhatsAppPage(){
     const outside = cur && (!cur.lastIn || Date.now() - new Date(cur.lastIn.created_at).getTime() > 24*3600*1000);
     thread = `<div class="wa-thread card">
       <div class="wa-thread-head"><button class="icon-btn wa-back" data-action="wa-back" aria-label="Back">${ICO.chev('l')}</button>
-        ${cur ? `<div style="min-width:0;"><strong class="wa-ellipsis" style="display:block;">${esc(cur.name)}</strong><span style="font-size:12px;color:var(--ink-3);">${esc(waPhone(cur.contact))}</span></div>`
+        ${cur ? (S.waEditName===cur.contact
+            ? `<div style="display:flex;gap:6px;flex:1;min-width:0;"><input class="wa-to" data-wa-name value="${esc((S.wa.contacts && S.wa.contacts.get(cur.contact)) || '')}" placeholder="Name for ${esc(waPhone(cur.contact))}"/><button class="btn btn-sm btn-primary" data-action="wa-save-name" data-id="${esc(cur.contact)}">Save</button></div>`
+            : `<div style="min-width:0;flex:1;"><strong class="wa-ellipsis" style="display:block;">${esc(cur.name)}</strong><span style="font-size:12px;color:var(--ink-3);">${esc(waPhone(cur.contact))}</span></div>
+               <button class="icon-btn" data-action="wa-edit-name" data-id="${esc(cur.contact)}" title="Name this contact" aria-label="Name this contact">${ICO.edit}</button>`)
           : `<input class="wa-to" data-wa-to placeholder="Phone number, e.g. 516 555 0123" value="${esc(S.waTo||'')}" inputmode="tel"/>`}</div>
       <div class="wa-msgs" id="wa-msgs">${cur ? cur.msgs.map(m=>`<div class="wa-msg ${m.direction}" data-testid="wa-msg">
-          <div class="wa-bubble">${esc(m.body||'')}${m.real_to ? `<div class="wa-note">Test mode: meant for ${esc(waPhone(m.real_to))}</div>` : ''}${m.error ? `<div class="wa-err">${esc(m.error)}</div>` : ''}
+          <div class="wa-bubble">${m.media_id ? waMediaHtml(m) : ''}${m.media_id && /^\[[a-z]+\]$/.test(m.body||'') ? '' : esc(m.body||'')}${m.real_to ? `<div class="wa-note">Test mode: meant for ${esc(waPhone(m.real_to))}</div>` : ''}${m.error ? `<div class="wa-err">${esc(m.error)}</div>` : ''}
           <span class="wa-meta">${esc(waTime(m.created_at))}${m.direction==='out' ? ` <span class="${m.status==='read'?'wa-read':''}">${WA_TICKS[m.status]||''}</span>` : ''}</span></div></div>`).join('') : ''}</div>
       ${st.incoming===false ? `<div class="wa-hint">Incoming messages aren't connected yet, so the app can't see their replies. A typed message only arrives if they've written to the office number in the last 24 hours.</div>`
         : outside ? `<div class="wa-hint">They haven't written in the last 24 hours, so WhatsApp only delivers an approved template, not a typed message.</div>` : ''}
@@ -5628,6 +5633,36 @@ function renderWhatsAppPage(){
     </div>`;
   }
   return `<div class="wa">${banner}<div class="wa-grid ${showThread?'has-thread':''}">${list}${thread || `<div class="wa-thread card wa-empty"><p>Choose a chat, or start a new one.</p></div>`}</div></div>`;
+}
+const WA_MEDIA_LABEL = { audio:'Play voice note', voice:'Play voice note', image:'Show photo', sticker:'Show sticker', video:'Play video', document:'Open document' };
+function waMediaHtml(m){
+  const url = (S.waMedia||{})[m.media_id];
+  if(url === 'loading') return `<div class="wa-media-btn">Loading…</div>`;
+  if(url && url.startsWith('error:')) return `<div class="wa-err">${esc(url.slice(6))}</div>`;
+  if(!url) return `<button class="btn btn-sm wa-media-btn" data-action="wa-media" data-id="${esc(m.media_id)}">${esc(WA_MEDIA_LABEL[m.kind] || 'Open file')}</button>`;
+  if(m.kind==='image' || m.kind==='sticker') return `<a href="${esc(url)}" target="_blank" rel="noopener"><img class="wa-img" src="${esc(url)}" alt=""/></a>`;
+  if(m.kind==='audio' || m.kind==='voice') return `<audio controls src="${esc(url)}" class="wa-audio"></audio>`;
+  if(m.kind==='video') return `<video controls playsinline src="${esc(url)}" class="wa-img"></video>`;
+  return `<a class="btn btn-sm" href="${esc(url)}" download="${esc(m.body && !/^\[/.test(m.body) ? m.body : 'file')}">Download file</a>`;
+}
+// The file comes through whatsapp-send (it holds the WhatsApp key); kept in memory for this session only.
+async function doWhatsAppMedia(id){
+  S.waMedia = S.waMedia || {}; S.waMedia[id] = 'loading'; render();
+  try{
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-send`, { method:'POST', headers:{ Authorization:`Bearer ${session.access_token}`, apikey:SUPABASE_PUBLISHABLE_KEY, 'Content-Type':'application/json' }, body:JSON.stringify({ action:'media', mediaId:id }) });
+    if(!r.ok){ const j = await r.json().catch(()=>({})); S.waMedia[id] = 'error:' + (j.error || 'Could not load it.'); }
+    else S.waMedia[id] = URL.createObjectURL(await r.blob());
+  }catch(e){ S.waMedia[id] = 'error:Could not load it.'; }
+  render();
+}
+async function doWhatsAppSaveName(contact){
+  const el = document.querySelector('[data-wa-name]'); const name = String(el && el.value || '').trim();
+  const { error } = name ? await supabaseClient.from('whatsapp_contacts').upsert({ contact, name, updated_at:new Date().toISOString() })
+    : await supabaseClient.from('whatsapp_contacts').delete().eq('contact', contact);
+  if(error){ toast('Could not save the name: ' + error.message, 'system'); return; }
+  if(name) S.wa.contacts.set(contact, name); else S.wa.contacts.delete(contact);
+  S.waEditName = null; render();
 }
 async function doWhatsAppSend(){
   const text = String(S.waDraft||'').trim();
@@ -10817,11 +10852,14 @@ function bindGlobal(){
       case 'mark-balance': doMarkBalance(id); break;
       case 'inbox-money': { const it = (S.inboxItems||[]).find(x=>x.id===id); if(it) applyInboxMoney(it, false); break; }
       case 'lib-tab': S.libTab = id; render(); break;
-      case 'wa-open': S.waContact = id; S.waDraft = ''; render(); break;
+      case 'wa-open': S.waContact = id; S.waDraft = ''; S.waEditName = null; render(); break;
       case 'wa-new': S.waContact = 'new'; S.waDraft = ''; render(); break;
       case 'wa-back': S.waContact = null; render(); break;
       case 'wa-send': doWhatsAppSend(); break;
       case 'wa-setup-webhook': doWhatsAppSetupWebhook(); break;
+      case 'wa-media': doWhatsAppMedia(id); break;
+      case 'wa-edit-name': S.waEditName = id; render(); setTimeout(()=>{ const el = document.querySelector('[data-wa-name]'); if(el) el.focus(); }, 0); break;
+      case 'wa-save-name': doWhatsAppSaveName(id); break;
       // Owner 2026-10-29: "a singer login profile so i can see what their login will look like". The
       // office session shows the singer's own pages (their gigs from the office's copy). Read-only: with
       // S.user a singer, artistReadOnly() refuses every save and shared sync pauses until Exit.

@@ -34,15 +34,19 @@ Deno.serve(async (req) => {
   return new Response("ok");
 });
 
+type Media = { id?: string; mime_type?: string; caption?: string; filename?: string };
 type Msg = { id?: string; from?: string; to?: string; timestamp?: string; type?: string;
   text?: { body?: string }; button?: { text?: string }; interactive?: { button_reply?: { title?: string }; list_reply?: { title?: string } };
-  image?: { caption?: string }; video?: { caption?: string }; document?: { caption?: string; filename?: string }; location?: { name?: string; address?: string } };
+  image?: Media; video?: Media; audio?: Media; voice?: Media; sticker?: Media; document?: Media;
+  reaction?: { emoji?: string; message_id?: string }; location?: { name?: string; address?: string } };
 
 function row(m: Msg, direction: "in" | "out", contact: string | undefined, name: string | null) {
   const t = m.type || "text";
-  const body = m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title
+  const media = (m as Record<string, unknown>)[t] as Media | undefined;
+  const mediaId = ["image", "video", "audio", "voice", "sticker", "document"].includes(t) ? media?.id || null : null;
+  const body = (t === "reaction" ? (m.reaction?.emoji ? `Reacted ${m.reaction.emoji}` : "Removed a reaction") : undefined) ?? m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title
     ?? m.image?.caption ?? m.video?.caption ?? m.document?.caption ?? m.document?.filename
     ?? (m.location ? [m.location.name, m.location.address].filter(Boolean).join(", ") : null) ?? null;
-  return { wa_id: m.id, direction, contact: String(contact || "").replace(/\D/g, ""), contact_name: name, body: body ?? `[${t}]`, kind: t,
+  return { wa_id: m.id, direction, contact: String(contact || "").replace(/\D/g, ""), contact_name: name, body: body ?? `[${t}]`, kind: t, media_id: mediaId, media_mime: mediaId ? media?.mime_type || null : null,
     status: direction === "in" ? "received" : "sent", created_at: m.timestamp ? new Date(Number(m.timestamp) * 1000).toISOString() : new Date().toISOString() };
 }

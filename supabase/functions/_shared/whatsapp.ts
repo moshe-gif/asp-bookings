@@ -134,3 +134,18 @@ export async function templateStatus360(): Promise<Record<string, string>> {
   for (const t of j?.waba_templates || j?.data || []) if (WA_TEMPLATES[t.name]) out[t.name] = String(t.status || "").toLowerCase();
   return out;
 }
+
+// An incoming photo / voice note / video / document, by its WhatsApp media id (360dialog: look up the file's
+// URL, swap Meta's host for 360dialog's, download with the key).
+export async function fetchMedia360(mediaId: string): Promise<{ ok: true; bytes: ArrayBuffer; mime: string } | { ok: false; error: string }> {
+  const token = Deno.env.get("WHATSAPP_TOKEN");
+  if (!token) return { ok: false, error: "WhatsApp isn't connected" };
+  const meta = await fetch(`https://waba-v2.360dialog.io/${encodeURIComponent(mediaId)}`, { headers: { "D360-API-KEY": token } });
+  const j = await meta.json().catch(() => ({}));
+  if (!meta.ok || !j?.url) return { ok: false, error: `WhatsApp no longer has this file (${j?.error?.message || meta.status})` };
+  const u = new URL(String(j.url).replace(/\\/g, ""));
+  if (u.hostname !== "lookaside.fbsbx.com") return { ok: false, error: "unexpected media host" };
+  const file = await fetch(`https://waba-v2.360dialog.io${u.pathname}${u.search}`, { headers: { "D360-API-KEY": token } });
+  if (!file.ok) return { ok: false, error: `download failed (${file.status})` };
+  return { ok: true, bytes: await file.arrayBuffer(), mime: j.mime_type || file.headers.get("content-type") || "application/octet-stream" };
+}

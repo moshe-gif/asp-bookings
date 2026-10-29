@@ -30,11 +30,30 @@ def test_owner_has_whatsapp_tab(live_server, page):
     page.evaluate("""() => { S.wa.messages.unshift({ id:'t1', contact:'15550100199', direction:'in', body:'hello', status:'received', created_at:new Date().toISOString() }); }""")
     page.locator('[data-action="wa-new"]').click()
     assert page.locator('[data-testid="wa-conv"]', has_text="Testy Client · Wedding May 6").count() == 1
+    # Name a contact (0073), then remove the name again; a media message offers to open its file.
+    page.evaluate("""() => { S.wa.messages.unshift({ id:'t2', contact:'15550100177', direction:'in', body:'[audio]', kind:'audio', media_id:'harness-no-such-media', status:'received', created_at:new Date().toISOString() }); }""")
+    page.locator('[data-action="wa-new"]').click()
+    page.locator('[data-testid="wa-conv"][data-id="15550100177"]').click()
+    page.locator('[data-action="wa-edit-name"]').click()
+    page.locator("[data-wa-name]").fill("Harness Named Contact")
+    page.locator('[data-action="wa-save-name"]').click()
+    page.locator(".wa-thread-head", has_text="Harness Named Contact").wait_for(state="visible", timeout=10000)
+    page.locator('[data-action="wa-media"]').click()
+    page.locator(".wa-err").wait_for(state="visible", timeout=15000)  # unknown media id: refused, nothing fetched
+    page.locator('[data-action="wa-edit-name"]').click()
+    page.locator("[data-wa-name]").fill("")
+    page.locator('[data-action="wa-save-name"]').click()
+    page.wait_for_function("() => !S.waEditName && !S.wa.contacts.has('15550100177')", timeout=10000)
+    left = page.evaluate("async () => (await supabaseClient.from('whatsapp_contacts').select('contact').eq('contact', '15550100177')).data.length")
+    assert left == 0
+    page.locator('[data-action="wa-new"]').click()
     page.locator("[data-wa-to]").wait_for(state="visible")
     assert page.locator("[data-wa-draft]").count() == 1
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_timeout(400)
     assert not horizontal_overflow(page), horizontal_overflow(page)[:3]
+    # The made-up media id is refused with a 404 on purpose; anything else is a real error.
+    errors = [e for e in errors if "status of 404" not in e]
     assert not errors, errors
 
 
