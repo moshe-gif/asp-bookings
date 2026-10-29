@@ -365,3 +365,39 @@ def test_venue_pick_fills_address(live_server, page):
     ev = page.evaluate("() => JSON.parse(localStorage.getItem('asp_mock_state_v3')||'[]').find(e => e.clientName === 'Venue Pick Client')")
     assert ev and ev["address"] == "1 Test Ave" and ev["city"] == "Lakewood", f"gig didn't keep the venue address: {ev and ev.get('address')}"
     assert not errors, f"console errors: {errors}"
+
+
+DROP_PDF_JS = """(sel) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(['%PDF-1.4 test'], 'confirmation.pdf', { type: 'application/pdf' }));
+    const zone = document.querySelector(sel);
+    zone.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    zone.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+}"""
+
+
+def test_drag_and_drop_flight_and_travel_pdfs(live_server, page):
+    """Drag and drop (owner 2026-10-29: "for flight info and hotel itinerary i want a drag and drop option for
+    pdf"): a PDF dropped on Flight Info fills the form; dropped on Travel Confirmations it is read at once and
+    the hotel is listed to save. parse-travel-docs is stubbed (fake data)."""
+    import json as _json
+    errors = collect_console_errors(page)
+    travel = {"flights": [{"passenger": "", "airline": "Delta", "flightNumber": "DL 4321", "confirmation": "CNF888", "departAirport": "JFK", "arriveAirport": "MIA",
+                           "departAt": "2027-12-02T08:00", "arriveAt": "2027-12-02T11:05", "cabin": "", "seat": ""}],
+              "hotels": [{"name": "Harness Test Hotel", "checkIn": "2027-12-02", "checkOut": "2027-12-03", "confirmation": "H123", "address": "1 Test Way"}], "ground": [], "notes": ""}
+    page.route("**/functions/v1/parse-travel-docs", lambda route: route.fulfill(
+        status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=_json.dumps({"ok": True, "travel": travel})))
+    seed_events(page, [fake_gig("EV-9802", "benny", "2027-12-02", clientName="Drop Test Client", flightNeeded=True)])
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    goto_nav(page, "leads")
+    page.locator('[data-action="open-event"][data-id="EV-9802"]').first.click()
+    page.locator('.sheet [data-action="open-flight-form"]').first.click()
+    page.evaluate(DROP_PDF_JS, '[data-testid="flight-drop"]')
+    page.wait_for_function("() => document.querySelector('[data-form=\"flight\"] input[data-field=\"flightNumber\"]')?.value === 'DL4321'", timeout=10000)
+    page.locator('[data-action="close-flight-form"]').click()
+    page.locator('.sheet [data-action="open-travel-drop"]').first.click()
+    page.evaluate(DROP_PDF_JS, '[data-testid="travel-drop"]')
+    page.locator('[data-form="traveldrop"]', has_text="Harness Test Hotel").wait_for(state="visible", timeout=10000)
+    assert page.locator('[data-form="traveldrop"] [data-action="save-travel-docs"]').count() == 1
+    assert not errors, f"console errors: {errors}"

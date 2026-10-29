@@ -29,6 +29,7 @@ const ICO = {
   plus:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
   kebab:'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
   trash:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/><path d="M10 11v6M14 11v6"/></svg>',
+  upload:'<svg class="ico" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg>',
   wa:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 20.5l1.3-4A8.5 8.5 0 1 1 8 19.6z"/><path d="M9 9.5c.3 1.8 2.6 4.2 4.6 4.6l1-1.2 1.9.9c-.3 1.2-1.3 1.7-2.2 1.6C11 15 8.6 12.6 8.1 9.9c-.1-.9.4-1.9 1.6-2.2l.9 1.9z"/></svg>',
   film:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 9l5 3-5 3z"/></svg>',
   kanban:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="9.5" y="4" width="5" height="10" rx="1.5"/><rect x="16" y="4" width="5" height="13" rx="1.5"/></svg>',
@@ -4239,7 +4240,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.40'; // bump on every release so a phone can tell it has updated. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.41'; // bump on every release so a phone can tell it has updated. v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -7571,7 +7572,7 @@ function renderFlightFormOverlay(){
     <div class="modal" data-stop data-form="flight" style="width:420px;">
       <div class="sheet-head"><h2 style="font-size:1.2rem;">Flight Info</h2><button class="icon-btn" data-action="close-flight-form" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
-        <label class="btn btn-sm" style="cursor:pointer;align-self:flex-start;">${S.flightFileBusy? 'Reading…' : 'Fill from PDF / photo'}<input type="file" data-action="flight-form-file" accept="application/pdf,image/*" style="display:none;" ${S.flightFileBusy?'disabled':''}/></label>
+        <label class="drop-zone ${S.flightFileBusy?'busy':''}" data-drop="flight" data-testid="flight-drop">${ICO.upload}<strong>${S.flightFileBusy? 'Reading the confirmation…' : 'Drop the flight confirmation here'}</strong><span>PDF or screenshot · or tap to choose · fills the form for you to check</span><input type="file" data-action="flight-form-file" accept="application/pdf,image/*" style="display:none;" ${S.flightFileBusy?'disabled':''}/></label>
         <div class="field"><label>Airline</label><input data-field="airline" value="${esc(f.airline||'')}" placeholder="Delta"/></div>
         <div class="field-row">
           <div class="field"><label>Flight #</label><input data-field="flightNumber" value="${esc(f.flightNumber||'')}" placeholder="DL1234"/></div>
@@ -9271,6 +9272,14 @@ function renderPayeeProfileFormModal(){
 // conflicts and the existing cards keep working. The itinerary below shows everything.
 function travelOf(ev){ return { flights:[], hotels:[], ground:[], notes:'', updatedAt:null, ...(ev.travel||{}) }; }
 const travelDT = v=>String(v||'').replace('T',' ').slice(0,16);
+// Attach dropped / chosen confirmations and read them straight away (one step).
+function attachTravelFiles(list){
+  list = list.slice(0, 6);
+  if(!list.length) return;
+  if(list.some(f=>f.size > 5*1024*1024)){ toast('Each file must be under 5 MB.', 'system'); return; }
+  Promise.all(list.map(file=>new Promise(res=>{ const r = new FileReader(); r.onload = ()=>{ const u = String(r.result||''); res({ name:file.name, mediaType:file.type, data:u.slice(u.indexOf(',')+1) }); }; r.readAsDataURL(file); })))
+    .then(files=>{ S.travelDropFiles = files; doReadTravelDocs(); });
+}
 async function doReadTravelDocs(){
   const f = S.travelDropForm || {};
   const files = S.travelDropFiles || [];
@@ -9320,7 +9329,7 @@ function renderTravelDropModal(){
       <div class="sheet-head"><h2 style="font-size:1.2rem;">Travel Confirmations</h2><button class="icon-btn" data-action="close-travel-drop" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <p style="font-size:12px;color:var(--ink-3);margin:0;">Attach the flight, hotel and car confirmations (PDFs or screenshots) or paste their text. Nothing is saved until you press Save.</p>
-        <label class="btn btn-sm" style="cursor:pointer;align-self:flex-start;">${files.length? `${files.length} file${files.length===1?'':'s'} attached` : 'Attach confirmations'}<input type="file" data-action="travel-drop-files" accept="application/pdf,image/*" multiple style="display:none;"/></label>
+        <label class="drop-zone ${busy?'busy':''}" data-drop="travel" data-testid="travel-drop">${ICO.upload}<strong>${busy ? 'Reading…' : files.length ? `${files.length} file${files.length===1?'':'s'}: ${esc(files.map(x=>x.name).join(', '))}` : 'Drop flight, hotel and car confirmations here'}</strong><span>PDFs or screenshots, up to 6 · or tap to choose · read as soon as you drop them</span><input type="file" data-action="travel-drop-files" accept="application/pdf,image/*" multiple style="display:none;" ${busy?'disabled':''}/></label>
         <textarea data-field="text" rows="4" placeholder="…or paste the confirmation emails here" style="${box}">${esc(f.text||'')}</textarea>
         <button class="btn btn-primary btn-sm" style="align-self:flex-start;" data-action="read-travel-docs" ${busy?'disabled':''}>${busy?'Reading…':'Read confirmations'}</button>
         ${x? `<div class="card card-pad">
@@ -10987,11 +10996,17 @@ function bindGlobal(){
     sel.addEventListener('change', ()=>{ const c=getContract(S.contractBuilderId); if(c && sel.value){ c.boilerplate[sel.value] = true; c.updatedAt=new Date().toISOString(); saveContracts(); render(); } });
   });
   document.querySelectorAll('[data-action="travel-drop-files"]').forEach(inp=>{
-    inp.addEventListener('change', ()=>{
-      const list = Array.from(inp.files||[]).slice(0, 6);
-      if(list.some(f=>f.size > 5*1024*1024)){ toast('Each file must be under 5 MB.', 'system'); return; }
-      Promise.all(list.map(file=>new Promise(res=>{ const r = new FileReader(); r.onload = ()=>{ const u = String(r.result||''); res({ name:file.name, mediaType:file.type, data:u.slice(u.indexOf(',')+1) }); }; r.readAsDataURL(file); })))
-        .then(files=>{ S.travelDropFiles = files; render(); });
+    inp.addEventListener('change', ()=>attachTravelFiles(Array.from(inp.files||[])));
+  });
+  // Drag and drop (owner 2026-10-29: "for flight info and hotel itinerary i want a drag and drop option for pdf").
+  document.querySelectorAll('.drop-zone[data-drop]').forEach(zone=>{
+    zone.addEventListener('dragover', e=>{ e.preventDefault(); zone.classList.add('over'); });
+    zone.addEventListener('dragleave', ()=>zone.classList.remove('over'));
+    zone.addEventListener('drop', e=>{
+      e.preventDefault(); zone.classList.remove('over');
+      const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []).filter(f=>/^(application\/pdf|image\/)/.test(f.type));
+      if(!files.length){ toast('Drop a PDF or an image.', 'system'); return; }
+      if(zone.dataset.drop==='flight') doFillFlightFormFromFile(files[0]); else attachTravelFiles(files);
     });
   });
   document.querySelectorAll('[data-action="giginfo-file"]').forEach(inp=>{
