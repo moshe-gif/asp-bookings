@@ -3121,6 +3121,8 @@ function crewPortalEvent(g){
   };
 }
 window.addEventListener('focus', ()=>{ if(S.artistPortal.on) loadArtistPortalData(); });
+// iOS Safari ignores user-scalable=no for pinch; its gesture events can still be cancelled (owner: no zoom).
+document.addEventListener('gesturestart', e=>e.preventDefault(), { passive:false });
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && S.artistPortal.on) loadArtistPortalData(); });
 S.events = loadEvents();
 EVID = S.events.reduce((max,e)=>{ const n=parseInt(String(e.id).split('-')[1],10); return isNaN(n)? max : Math.max(max,n+1); }, EVID);
@@ -3310,7 +3312,7 @@ function resetAfterSignOut(){
   stopClientSignatureWatch();
   stopArtistPortal();
   closeAllOverlays();
-  S.user = null; S.crew = null; S.crewRoster = null; S.gigCrew = null; S.lib = null; S.libUrls = null; S.libTab = null; S.realSession = null; S.realPasskeys = null; S.realRoster = null;
+  S.user = null; S.previewFrom = null; S.crew = null; S.crewRoster = null; S.gigCrew = null; S.lib = null; S.libUrls = null; S.libTab = null; S.realSession = null; S.realPasskeys = null; S.realRoster = null;
   S.realSignInNotFound = false; S.realSignInError = null; S.showRealSignIn = false;
   S.eventId = null; S.showNewLead = false; S.showMobileMenu = false;
   history.pushState(null, '', location.pathname + location.search);
@@ -4071,6 +4073,7 @@ function renderNow(){
     <div class="shell">
       ${isAdmin ? renderRail() : ''}
       <div class="main">
+        ${S.previewFrom ? `<div class="preview-banner" data-testid="preview-banner"><span>Previewing <strong>${esc((artistById(S.user)||{}).name||'')}</strong>'s app · read-only, built from the office's copy of their gigs</span><button class="btn btn-sm" data-action="exit-preview">Exit preview</button></div>` : ''}
         ${isAdmin ? '' : renderArtistTopTabs()}
         <div class="topbar">
           <div style="display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;">
@@ -4233,7 +4236,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.36'; // bump on every release so a phone can tell it has updated. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.37'; // bump on every release so a phone can tell it has updated. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4982,7 +4985,8 @@ function renderArtistDetailPage(artistId){
   return `
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
       <span class="avatar" data-slot="${a.slot}" style="width:52px;height:52px;font-size:17px;">${esc(a.initials)}</span>
-      <div><h2 style="font-size:1.5rem;">${esc(a.name)}</h2><span class="u-label">${esc(a.role||'Artist')} · Viewing as Management</span></div>
+      <div style="flex:1;min-width:0;"><h2 style="font-size:1.5rem;">${esc(a.name)}</h2><span class="u-label">${esc(a.role||'Artist')} · Viewing as Management</span></div>
+      <button class="btn btn-sm" data-action="preview-as-artist" data-id="${esc(artistId)}" title="See the app the way ${esc(a.name.split(' ')[0])} sees it (read-only)">Preview their app</button>
     </div>
     <div class="card card-pad" style="margin-bottom:20px;">${renderCalendarPage(evs, {noLegend:true, singleArtist:true, miniEmbed:true})}</div>
     <div class="section-head"><h2>Upcoming (${upcoming.length})</h2></div>
@@ -5522,6 +5526,7 @@ function renderCrewGigSheet(ev){
   </div>`;
 }
 
+const LIB_TABS = [['browse','Library'],['videos','Upload & tag'],['singers','Singers'],['tags','Tags']];
 function renderVideoLibraryPage(){
   const libraryPage = new URL('videos/', location.href.split('#')[0]).href;
   const frame = `<iframe src="${esc(libraryPage)}?embed=1" title="Video Library" data-testid="lib-browse" class="lib-frame"></iframe>`;
@@ -5531,7 +5536,8 @@ function renderVideoLibraryPage(){
   const tab = S.libTab || 'browse';
   return `<div class="lib">
   <div class="lib-head">
-    <div class="lib-tabs" role="tablist">${[['browse','Library'],['videos','Upload & tag'],['singers','Singers'],['tags','Tags']].map(([k,l])=>`<button type="button" role="tab" aria-selected="${tab===k}" class="${tab===k?'active':''}" data-action="lib-tab" data-id="${k}">${l}</button>`).join('')}</div>
+    <div class="lib-tabs" role="tablist">${LIB_TABS.map(([k,l])=>`<button type="button" role="tab" aria-selected="${tab===k}" class="${tab===k?'active':''}" data-action="lib-tab" data-id="${k}">${l}</button>`).join('')}</div>
+    <select class="tab-select lib-tab-select" aria-label="Section">${LIB_TABS.map(([k,l])=>`<option value="${k}" ${tab===k?'selected':''}>${l}</option>`).join('')}</select>
     <div class="lib-share"><span>Private: only people with access, signed in</span>
       <a class="btn btn-sm" href="${esc(libraryPage)}" target="_blank" rel="noopener" data-action="external-link">Full screen ↗</a></div>
   </div>
@@ -5632,6 +5638,7 @@ async function libMoveSinger(id, dir){
 function bindVideoLibrary(){
   if(S.view!=='videos' || !S.lib) return;
   const q = sel => document.querySelectorAll(sel);
+  q('.lib-tab-select').forEach(el=>el.addEventListener('change', ()=>{ S.libTab = el.value; render(); }));
   q('[data-lib-upload-singer]').forEach(el=>el.addEventListener('change', ()=>{ S.libUploadSinger = el.value; render(); }));
   q('[data-lib-files]').forEach(el=>el.addEventListener('change', ()=>{ const f = [...(el.files||[])]; el.value = ''; if(f.length) libUploadFiles(f); }));
   q('[data-lib-drop]').forEach(el=>{
@@ -10676,6 +10683,11 @@ function bindGlobal(){
       case 'mark-balance': doMarkBalance(id); break;
       case 'inbox-money': { const it = (S.inboxItems||[]).find(x=>x.id===id); if(it) applyInboxMoney(it, false); break; }
       case 'lib-tab': S.libTab = id; render(); break;
+      // Owner 2026-10-29: "a singer login profile so i can see what their login will look like". The
+      // office session shows the singer's own pages (their gigs from the office's copy). Read-only: with
+      // S.user a singer, artistReadOnly() refuses every save and shared sync pauses until Exit.
+      case 'preview-as-artist': if(isAdminUser(S.user) && artistById(id)){ closeAllOverlays(); S.previewFrom = { user:S.user }; S.user = id; S.view = 'a_dashboard'; pendingViewTransition = true; syncURL(); render(); } break;
+      case 'exit-preview': if(S.previewFrom){ const back = S.previewFrom.user, a = S.user; closeAllOverlays(); S.previewFrom = null; S.user = back; S.artistDetailId = a; S.view = 'artist_detail'; syncURL(); render(); } break;
       case 'crew-assign': doCrewCall({ action:'assign', eventId:id, crewId:t.getAttribute('data-crew') }, 'Asked.'); break;
       case 'crew-unassign': doCrewCall({ action:'unassign', eventId:id, crewId:t.getAttribute('data-crew') }, 'Taken back.'); break;
       case 'crew-respond': { const yes = t.getAttribute('data-accept')==='1'; doCrewCall({ action:'respond', eventId:id, accept:yes }, yes ? 'Confirmed. Thank you!' : "Got it, we'll find someone else."); break; }
@@ -10884,7 +10896,7 @@ function bindGlobal(){
       render();
     });
   });
-  document.querySelectorAll('.tab-select').forEach(sel=>{
+  document.querySelectorAll('.tab-select:not(.lib-tab-select)').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.projectTab = sel.value; render(); });
   });
   document.querySelectorAll('.person-refid-select').forEach(sel=>{

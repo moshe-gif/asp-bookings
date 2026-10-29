@@ -45,7 +45,7 @@ def _gigs():
 
 VIEWS_ADMIN = ["dashboard", "calendar", "leads", "needs_review", "artists", "financials", "outside_bookings",
                "documents", "contracts", "contract_builder", "messages", "projects", "pricing", "international",
-               "daily_digest", "travel", "settings"]
+               "daily_digest", "travel", "videos", "settings"]
 VIEWS_ARTIST = ["a_dashboard", "a_calendar", "a_gigs", "a_financials", "a_travel", "a_projects", "settings"]
 
 # Controls that open a modal / sheet / document / panel. Only openers: nothing here saves,
@@ -227,3 +227,15 @@ def test_admin_no_horizontal_overflow(live_server, page):
 
 def test_artist_no_horizontal_overflow(live_server, page):
     _run(page, live_server, "benny", VIEWS_ARTIST)
+
+
+def _open_singer_preview(page):
+    """Artists -> Benny -> Preview their app (the office seeing a singer's app, read-only)."""
+    _goto_view(page, "artists")
+    page.locator('[data-action="open-artist"][data-id="benny"]').first.click()
+    page.locator('[data-action="preview-as-artist"]').click()
+    page.locator('[data-testid="preview-banner"]').wait_for(state="visible", timeout=10000)
+
+
+def test_singer_preview_no_horizontal_overflow(live_server, page):
+    _run(page, live_server, "admin_bookings", VIEWS_ARTIST, populate=_open_singer_preview)

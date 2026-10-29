@@ -20,6 +20,7 @@ import re
 import pytest
 
 from helpers import login_as, dismiss_opener, collect_console_errors
+from overflow_probe import horizontal_overflow
 
 CREW = {"crew_social": ("Test Social", "test-social@aspmgmt.com", "social"),
         "crew_videographer": ("Test Videographer", "test-videographer@aspmgmt.com", "videographer")}
@@ -106,6 +107,23 @@ def test_crew_assign_confirm_and_no_money(live_server, page, browser):
         social.reload()
         social.wait_for_function("() => window.S && S.crew && !!S.artistPortal.loadedAt", timeout=20000)
         social.wait_for_function("([g, v]) => (S.events.find(e => e.id === g).crew || []).some(c => c.crewId === v && c.status === 'confirmed')", arg=[gig, vid_id], timeout=15000)
+
+        # Phones: no sideways scrolling on any crew screen (owner 2026-10-29).
+        for pg in (social, video):
+            for width in (320, 390):
+                pg.set_viewport_size({"width": width, "height": 844})
+                for view in ("c_home", "c_calendar", "videos"):
+                    pg.locator(f'.bn-item[data-view="{view}"]').click()
+                    pg.wait_for_timeout(500)
+                    bad = horizontal_overflow(pg)
+                    assert not bad, f"{width}px {view}: {bad[:3]}"
+                pg.locator('.bn-item[data-view="c_home"]').click()
+                pg.locator(f'[data-testid="crew-gig"] [data-action="open-event"][data-id="{gig}"]').first.click()
+                pg.locator(".sheet").wait_for(state="visible", timeout=10000)
+                pg.wait_for_timeout(700)  # let the sheet finish sliding in
+                bad = horizontal_overflow(pg)
+                assert not bad, f"{width}px gig sheet: {bad[:3]}"
+                pg.locator('[data-action="close-sheet"]').first.click()
 
         # Crew only ever wrote through the crew function (never a REST write).
         for method, url in calls + vcalls:
