@@ -22,5 +22,5 @@ esac
 python3 -c 'import json,sys; print(json.dumps([{"name": sys.argv[1], "value": sys.argv[2]}]))' "$NAME" "$VALUE" |
   curl -sS -X POST "https://api.supabase.com/v1/projects/psgpxbkncuavlnpplykf/secrets" \
     -H "Authorization: Bearer $(cat ~/.asp-secrets/supabase_token)" \
-    -H "Content-Type: application/json" -H "User-Agent: asp-bookings-secrets" --data @- -o /dev/null -w "%{http_code}" |
+    -H "Content-Type: application/json" -H "User-Agent: asp-bookings-secrets" --data @- -o /dev/null -w "%{http_code}\n" |
   { read -r code; [ "$code" = "200" ] || [ "$code" = "201" ] && echo "$NAME set (${VALUE:0:8}…)." || { echo "Supabase answered $code: not set."; exit 1; }; }
