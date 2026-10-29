@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/functions"
 REF=psgpxbkncuavlnpplykf
 TOKEN=$(cat ~/.asp-secrets/supabase_token)
-PUBLIC=" mercury qbo-oauth-callback gcal-oauth-callback gmail-oauth-callback qbo-webhook contract-sign client-pay payee-onboard stripe-webhook client-followups inbox-scan "
+PUBLIC=" mercury whatsapp-webhook qbo-oauth-callback gcal-oauth-callback gmail-oauth-callback qbo-webhook contract-sign client-pay payee-onboard stripe-webhook client-followups inbox-scan "
 
 slugs=("$@")
 if [ "${1:-}" = "all" ]; then slugs=($(ls -d */ | tr -d / | grep -v '^_shared$')); fi

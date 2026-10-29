@@ -14,6 +14,8 @@
 // within 24 hours of the person's last message. So callers send a template (name + body parameters);
 // `text` is for replies inside that window and for test-mode notes.
 
+import { serviceClient } from "./auth.ts";
+
 export type WaMessage =
   | { to: string; template: { name: string; lang?: string; params?: string[] }; text?: undefined }
   | { to: string; text: string; template?: undefined };
@@ -28,7 +30,22 @@ export function waNumber(raw: string): string {
   return d.length === 10 ? "1" + d : d;
 }
 
-export async function sendWhatsApp(msg: WaMessage): Promise<{ ok: boolean; error?: string; id?: string; testRedirect?: boolean }> {
+// Every send is written to whatsapp_messages (0071), so the owner's WhatsApp tab shows it in the conversation.
+export async function sendWhatsApp(msg: WaMessage, sentBy?: string): Promise<{ ok: boolean; error?: string; id?: string; testRedirect?: boolean }> {
+  const out = await sendNow(msg);
+  try {
+    const test = whatsappTestMode(), realTo = waNumber(msg.to);
+    const redirected = test.on && realTo !== waNumber(test.to);
+    await serviceClient().from("whatsapp_messages").insert({
+      wa_id: out.id || null, direction: "out", contact: redirected ? waNumber(test.to) : realTo, real_to: redirected ? realTo : null,
+      body: msg.template ? `[${msg.template.name}] ${(msg.template.params || []).join(" · ")}` : msg.text, kind: msg.template ? "template" : "text",
+      status: out.ok ? "sent" : "failed", error: out.ok ? null : out.error || null, sent_by: sentBy || null,
+    });
+  } catch (_) { /* the log never blocks a send */ }
+  return out;
+}
+
+async function sendNow(msg: WaMessage): Promise<{ ok: boolean; error?: string; id?: string; testRedirect?: boolean }> {
   const token = Deno.env.get("WHATSAPP_TOKEN"), phoneId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
   const via360 = (Deno.env.get("WHATSAPP_PROVIDER") || "").toLowerCase() === "360dialog";
   if (!token || (!via360 && !phoneId)) return { ok: false, error: "WhatsApp isn't connected yet (WHATSAPP_TOKEN" + (via360 ? "" : " / WHATSAPP_PHONE_NUMBER_ID") + " missing)." };
@@ -55,4 +72,65 @@ export async function sendWhatsApp(msg: WaMessage): Promise<{ ok: boolean; error
   const out = await resp.json().catch(() => ({}));
   if (!resp.ok) return { ok: false, error: `WhatsApp: ${out?.error?.message || resp.status}` };
   return { ok: true, id: out?.messages?.[0]?.id, testRedirect: redirect };
+}
+
+// 360dialog: where incoming messages and delivery statuses are sent (our whatsapp-webhook, with a secret header).
+export async function setWebhook360(url: string, secret: string): Promise<{ ok: boolean; error?: string }> {
+  const token = Deno.env.get("WHATSAPP_TOKEN");
+  if (!token) return { ok: false, error: "WhatsApp isn't connected yet (WHATSAPP_TOKEN missing)." };
+  const r = await fetch("https://waba-v2.360dialog.io/v1/configs/webhook", { method: "POST",
+    headers: { "D360-API-KEY": token, "Content-Type": "application/json" }, body: JSON.stringify({ url, headers: { "x-asp-webhook": secret } }) });
+  const out = await r.json().catch(() => ({}));
+  return r.ok ? { ok: true } : { ok: false, error: `360dialog: ${out?.meta?.developer_message || out?.error?.message || r.status}` };
+}
+
+// The office's message templates (owner 2026-10-29: "i need you to be able to send messages to new numbers").
+// WhatsApp lets a business start a conversation only with a template Meta approved; these are submitted from
+// whatsapp-send ("create-templates") and used by name. {{n}} = the params, in order. Meta: utility, en_US, and
+// the body may not start or end with a variable.
+export const WA_TEMPLATES: Record<string, { text: string; example: string[] }> = {
+  deposit_received: { text: "Hi {{1}}, we received your deposit for {{2}} on {{3}}, and your booking is confirmed. If you have any questions, just reply here anytime. Thank you, ASP Management",
+    example: ["Sarah", "Benny Friedman", "Sunday, November 22, 2026"] },
+  deposit_reminder: { text: "Hi {{1}}, this is a friendly reminder about your booking on {{2}}. Your date is held once the deposit is received. You can review, sign and pay here: {{3}} Thank you, ASP Management",
+    example: ["Sarah", "Sunday, November 22, 2026", "https://app.aspmgmt.com/sign/"] },
+  balance_reminder: { text: "Hi {{1}}, thank you for booking with ASP Management. This is a reminder that the remaining balance of {{2}} for {{3}} is due before the event. {{4}} Thank you!",
+    example: ["Sarah", "$4,500", "Sunday, November 22, 2026", "Pay online: https://app.aspmgmt.com/pay/"] },
+  crew_request: { text: "Hi {{1}}, ASP Management would like you to film {{2}} on {{3}} at {{4}}. Please confirm in the app: {{5}} Thank you!",
+    example: ["Aharon", "Benny Friedman", "Sun, Nov 2, 7:30 PM", "Lake Terrace, Lakewood", "https://app.aspmgmt.com"] },
+};
+
+function fill(text: string, params: string[]): string { return text.replace(/\{\{(\d+)\}\}/g, (_, n) => params[Number(n) - 1] ?? ""); }
+
+// A template message; until Meta approves the template (or if it's rejected) the same words go as plain text,
+// which WhatsApp delivers only inside the person's 24-hour reply window.
+export async function sendTemplate(to: string, name: string, params: string[], sentBy?: string) {
+  const t = WA_TEMPLATES[name];
+  const viaTemplate = await sendWhatsApp({ to, template: { name, params } }, sentBy);
+  if (viaTemplate.ok || !t) return viaTemplate;
+  return await sendWhatsApp({ to, text: fill(t.text, params) }, sentBy);
+}
+
+export async function createTemplates360(): Promise<Record<string, string>> {
+  const token = Deno.env.get("WHATSAPP_TOKEN");
+  if (!token) return { error: "WhatsApp isn't connected yet (WHATSAPP_TOKEN missing)." };
+  const out: Record<string, string> = {};
+  for (const [name, t] of Object.entries(WA_TEMPLATES)) {
+    const r = await fetch("https://waba-v2.360dialog.io/v1/configs/templates", { method: "POST",
+      headers: { "D360-API-KEY": token, "Content-Type": "application/json" },
+      body: JSON.stringify({ name, category: "UTILITY", language: "en_US", allow_category_change: true,
+        components: [{ type: "BODY", text: t.text, example: { body_text: [t.example] } }] }) });
+    const j = await r.json().catch(() => ({}));
+    out[name] = r.ok ? `submitted (${j?.status || "pending"})` : `refused: ${j?.meta?.developer_message || j?.error?.message || j?.error?.error_user_msg || r.status}`;
+  }
+  return out;
+}
+
+export async function templateStatus360(): Promise<Record<string, string>> {
+  const token = Deno.env.get("WHATSAPP_TOKEN");
+  if (!token) return {};
+  const r = await fetch("https://waba-v2.360dialog.io/v1/configs/templates?limit=100", { headers: { "D360-API-KEY": token } });
+  const j = await r.json().catch(() => ({}));
+  const out: Record<string, string> = {};
+  for (const t of j?.waba_templates || j?.data || []) if (WA_TEMPLATES[t.name]) out[t.name] = String(t.status || "").toLowerCase();
+  return out;
 }

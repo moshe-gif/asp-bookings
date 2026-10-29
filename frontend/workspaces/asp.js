@@ -29,6 +29,7 @@ const ICO = {
   plus:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
   kebab:'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
   trash:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/><path d="M10 11v6M14 11v6"/></svg>',
+  wa:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 20.5l1.3-4A8.5 8.5 0 1 1 8 19.6z"/><path d="M9 9.5c.3 1.8 2.6 4.2 4.6 4.6l1-1.2 1.9.9c-.3 1.2-1.3 1.7-2.2 1.6C11 15 8.6 12.6 8.1 9.9c-.1-.9.4-1.9 1.6-2.2l.9 1.9z"/></svg>',
   film:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 9l5 3-5 3z"/></svg>',
   kanban:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="9.5" y="4" width="5" height="10" rx="1.5"/><rect x="16" y="4" width="5" height="13" rx="1.5"/></svg>',
   sparkle:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/></svg>',
@@ -3177,7 +3178,7 @@ async function linkRealSessionToRosterNow(session){
     const { data: allAdmins } = await supabaseClient.from('admin_users').select('*').order('created_at');
     (allAdmins||[adminRow]).forEach(row=>{
       const existing = ADMIN_USERS.find(u=>u.id===row.id);
-      const fields = {name:row.name, email:row.email, initials:row.initials, role:row.role, dbId:row.id, libraryAccess:!!row.library_access};
+      const fields = {name:row.name, email:row.email, initials:row.initials, role:row.role, dbId:row.id, libraryAccess:!!row.library_access, whatsappAccess:!!row.whatsapp_access};
       if(existing) Object.assign(existing, fields);
       else ADMIN_USERS.push({id:row.id, ...fields});
     });
@@ -3312,6 +3313,7 @@ function resetAfterSignOut(){
   stopClientSignatureWatch();
   stopArtistPortal();
   closeAllOverlays();
+  stopWhatsAppLive(); S.wa = null; S.waContact = null;
   S.user = null; S.previewFrom = null; S.crew = null; S.crewRoster = null; S.gigCrew = null; S.lib = null; S.libUrls = null; S.libTab = null; S.realSession = null; S.realPasskeys = null; S.realRoster = null;
   S.realSignInNotFound = false; S.realSignInError = null; S.showRealSignIn = false;
   S.eventId = null; S.showNewLead = false; S.showMobileMenu = false;
@@ -4191,6 +4193,7 @@ const MGMT_NAV_ITEMS = [
   ['contract_builder','Contract Builder',ICO.edit],
   ['messages','Inbox',ICO.sms],
   ['videos','Videos',ICO.film],
+  ['whatsapp','WhatsApp',ICO.wa],
 ];
 // External Events (outside_bookings) and Documents were removed from the menu for everyone
 // (2026-10-09, Moshe's call) -- their pages still exist and open by URL (#/outside_bookings,
@@ -4198,7 +4201,7 @@ const MGMT_NAV_ITEMS = [
 // simplified view — hidden for that login only.
 const CEO_HIDDEN_NAV_VIEWS = ['contract_builder'];
 function mgmtNavItemsFor(userId){
-  return MGMT_NAV_ITEMS.filter(([v])=> !(CEO_HIDDEN_NAV_VIEWS.includes(v) && adminRoleOf(userId)==='admin_ceo') && (v!=='videos' || canSeeLibrary()));
+  return MGMT_NAV_ITEMS.filter(([v])=> !(CEO_HIDDEN_NAV_VIEWS.includes(v) && adminRoleOf(userId)==='admin_ceo') && (v!=='videos' || canSeeLibrary()) && (v!=='whatsapp' || canUseWhatsApp()));
 }
 /* ============ "NEW SINCE YOU LAST LOOKED" BADGES ============ */
 // Per-section last-visited date (YYYY-MM-DD), persisted so the badge survives a reload.
@@ -4236,7 +4239,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.37'; // bump on every release so a phone can tell it has updated. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.38'; // bump on every release so a phone can tell it has updated. v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4322,6 +4325,7 @@ const VIEWS = {
   contract_builder: { who:'admin',  title:'Contract Builder',           render:()=>renderContractsBuilderListPage() },
   messages:         { who:'admin',  title:'Inbox',                      render:()=>renderMessagesPage() },
   videos:           { who:'library', title:'Video Library',             render:()=>renderVideoLibraryPage() },
+  whatsapp:         { who:'whatsapp', title:'WhatsApp',                 render:()=>renderWhatsAppPage() },
   projects:         { who:'admin',  title:'Projects',                   render:()=>renderProjectsBoard() },
   pricing:          { who:'admin',  title:'Pricing',                    render:()=>renderPricingPage() },
   international:    { who:'admin',  title:'International Opportunities', render:()=>renderInternationalPage() },
@@ -4341,6 +4345,7 @@ function homeViewFor(isAdmin){ return crewUser() ? 'c_home' : isAdmin ? 'dashboa
 function viewAllowed(view, isAdmin){
   const v = VIEWS[view]; if(!v) return false;
   if(v.who==='library') return canSeeLibrary();
+  if(v.who==='whatsapp') return canUseWhatsApp();
   if(crewUser()) return v.who==='crew' || view==='settings';
   return v.who==='all' || v.who===(isAdmin?'admin':'artist');
 }
@@ -5524,6 +5529,132 @@ function renderCrewGigSheet(ev){
       </div>
     </div>
   </div>`;
+}
+
+
+/* ============ WHATSAPP (0071) ============
+   Owner 2026-10-29: "make a whatsapp tab on the app only visible to my account". The office number's
+   conversations: every message the app sends (logged by _shared/whatsapp.ts) and every message people send
+   to the office (whatsapp-webhook, from 360dialog), live. Only admins given whatsapp_access (set by SQL) can
+   open it; the database refuses everyone else. Replies go through whatsapp-send, so test mode applies. */
+function canUseWhatsApp(){ const a = adminById(S.user); return !!(a && a.whatsappAccess); }
+let waChannel = null;
+function stopWhatsAppLive(){ if(waChannel && supabaseClient){ supabaseClient.removeChannel(waChannel); } waChannel = null; }
+async function loadWhatsApp(){
+  if(!supabaseClient || !S.realSession || (S.wa && S.wa.loading)) return;
+  S.wa = { ...(S.wa||{}), loading:true };
+  const [m, st] = await Promise.all([
+    supabaseClient.from('whatsapp_messages').select('*').order('created_at', { ascending:false }).limit(2000),
+    callEdgeFunction('whatsapp-send', { action:'status' }),
+  ]);
+  S.wa = { loading:false, loaded:true, messages:m.data||[], error:m.error ? m.error.message : null, status: st && st.ok ? st : null };
+  if(!waChannel){
+    waChannel = supabaseClient.channel('whatsapp-messages').on('postgres_changes', { event:'*', schema:'public', table:'whatsapp_messages' }, p=>{
+      if(!S.wa || !S.wa.messages || !p.new || !p.new.id) return;
+      const i = S.wa.messages.findIndex(x=>x.id===p.new.id);
+      if(i>=0) S.wa.messages[i] = p.new; else S.wa.messages.unshift(p.new);
+      if(S.view==='whatsapp') renderPreservingFocus();
+    }).subscribe();
+  }
+  render();
+}
+function waPhone(d){ d = String(d||''); return d.length===11 && d[0]==='1' ? `+1 (${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}` : (d ? '+' + d : ''); }
+function waTime(iso){ const d = new Date(iso), today = new Date(); return d.toDateString()===today.toDateString() ? d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' ' + d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}); }
+// A client's chat is named from their gig (owner 2026-10-29: "automatically added as contact with the date of
+// the event"): the soonest upcoming gig with that phone, else the latest past one. Derived, never stored.
+function waGigNames(){
+  const today = todayISO(), best = new Map();
+  for(const e of S.events||[]){
+    const d = String(e.clientPhone||'').replace(/\D/g,''); if(d.length < 10 || e.unpaid) continue;
+    const k = d.length===10 ? '1' + d : d, cur = best.get(k);
+    const better = !cur || (e.date>=today && (cur.date<today || e.date<cur.date)) || (e.date<today && cur.date<today && e.date>cur.date);
+    if(better) best.set(k, e);
+  }
+  const out = new Map();
+  best.forEach((e,k)=>out.set(k, `${e.clientName || 'Client'} · ${e.type} ${fmtDateShort(e.date)}`));
+  return out;
+}
+// Conversations, newest first. A contact's name: their gig (client · event date), else a crew member on file
+// with that number, else the WhatsApp profile name they sent, else the number.
+function waConversations(){
+  const by = new Map();
+  for(const m of (S.wa && S.wa.messages)||[]){ const c = by.get(m.contact) || { contact:m.contact, msgs:[] }; c.msgs.push(m); by.set(m.contact, c); }
+  const known = new Map(((S.crewRoster||[]).filter(c=>c.phone)).map(c=>[String(c.phone).replace(/\D/g,'').replace(/^(\d{10})$/,'1$1'), c.name]));
+  const gigs = waGigNames();
+  return [...by.values()].map(c=>{ c.msgs.sort((a,b)=>a.created_at.localeCompare(b.created_at)); const last = c.msgs[c.msgs.length-1];
+    c.name = gigs.get(c.contact) || known.get(c.contact) || (c.msgs.slice().reverse().find(m=>m.contact_name)||{}).contact_name || waPhone(c.contact);
+    c.last = last; c.lastIn = c.msgs.filter(m=>m.direction==='in').pop() || null; return c; })
+    .sort((a,b)=>b.last.created_at.localeCompare(a.last.created_at));
+}
+const WA_TICKS = { sent:'✓', delivered:'✓✓', read:'✓✓', failed:'!' };
+function renderWhatsAppPage(){
+  if(!S.wa || (!S.wa.loaded && !S.wa.loading)){ setTimeout(loadWhatsApp, 0); return `<div class="card card-pad" style="font-size:13px;color:var(--ink-2);">Loading…</div>`; }
+  if(!S.wa.loaded) return `<div class="card card-pad" style="font-size:13px;color:var(--ink-2);">Loading…</div>`;
+  const st = S.wa.status || {};
+  const convs = waConversations();
+  const cur = S.waContact==='new' ? null : convs.find(c=>c.contact===S.waContact) || null;
+  const showThread = !!(cur || S.waContact==='new');
+  const banner = `<div class="wa-status">
+      <span>${st.connected ? `<span class="pill pill-good">Connected</span>` : `<span class="pill pill-warn">Not connected</span>`}
+      ${st.testMode ? ` <span class="pill pill-warn">Test mode</span> <span style="color:var(--ink-2);">every message goes to ${esc(waPhone(String(st.testTo||'').replace(/\D/g,'')))}</span>` : ''}
+      ${Object.keys(st.templates||{}).length ? `<span style="color:var(--ink-2);" title="Automatic messages to people who haven't written in 24 hours need Meta-approved templates">· Templates: ${Object.entries(st.templates).map(([k,v])=>`${esc(k.replace(/_/g,' '))} <strong style="color:${v==='approved'?'var(--good-ink)':v==='rejected'?'var(--crit)':'var(--warn-ink)'};">${esc(v)}</strong>`).join(', ')}</span>` : ''}</span>
+      ${st.incoming===false ? `<span style="color:var(--ink-2);">Incoming messages aren't connected yet.</span>` : `<button class="btn btn-sm btn-ghost" data-action="wa-setup-webhook" ${S.waBusy?'disabled':''} title="Point 360dialog's incoming messages at the app">Reconnect incoming</button>`}
+    </div>`;
+  const list = `<div class="wa-list card">
+      <div class="wa-list-head"><strong>Chats</strong><button class="btn btn-sm btn-primary" data-action="wa-new">${ICO.plus} New</button></div>
+      ${convs.length ? convs.map(c=>`<button class="wa-conv ${cur && cur.contact===c.contact ? 'active' : ''}" data-action="wa-open" data-id="${esc(c.contact)}" data-testid="wa-conv">
+        <span class="avatar" data-slot="0" style="width:36px;height:36px;font-size:12px;">${esc(String(c.name).replace(/[^A-Za-z ]/g,'').trim().split(/\s+/).map(w=>w[0]||'').join('').slice(0,2).toUpperCase() || '#')}</span>
+        <span style="min-width:0;flex:1;text-align:left;"><span style="display:flex;justify-content:space-between;gap:6px;"><strong class="wa-ellipsis">${esc(c.name)}</strong><span style="font-size:11px;color:var(--ink-3);flex:none;">${esc(waTime(c.last.created_at))}</span></span>
+          <span class="wa-ellipsis" style="display:block;font-size:12.5px;color:var(--ink-2);">${c.last.direction==='out' ? 'You: ' : ''}${esc(c.last.body||'')}</span></span></button>`).join('')
+        : `<p style="padding:14px;margin:0;font-size:13px;color:var(--ink-3);">No messages yet. Messages the app sends, and messages people send to the office number, show up here.</p>`}
+    </div>`;
+  let thread = '';
+  if(showThread){
+    const outside = cur && (!cur.lastIn || Date.now() - new Date(cur.lastIn.created_at).getTime() > 24*3600*1000);
+    thread = `<div class="wa-thread card">
+      <div class="wa-thread-head"><button class="icon-btn wa-back" data-action="wa-back" aria-label="Back">${ICO.chev('l')}</button>
+        ${cur ? `<div style="min-width:0;"><strong class="wa-ellipsis" style="display:block;">${esc(cur.name)}</strong><span style="font-size:12px;color:var(--ink-3);">${esc(waPhone(cur.contact))}</span></div>`
+          : `<input class="wa-to" data-wa-to placeholder="Phone number, e.g. 516 555 0123" value="${esc(S.waTo||'')}" inputmode="tel"/>`}</div>
+      <div class="wa-msgs" id="wa-msgs">${cur ? cur.msgs.map(m=>`<div class="wa-msg ${m.direction}" data-testid="wa-msg">
+          <div class="wa-bubble">${esc(m.body||'')}${m.real_to ? `<div class="wa-note">Test mode: meant for ${esc(waPhone(m.real_to))}</div>` : ''}${m.error ? `<div class="wa-err">${esc(m.error)}</div>` : ''}
+          <span class="wa-meta">${esc(waTime(m.created_at))}${m.direction==='out' ? ` <span class="${m.status==='read'?'wa-read':''}">${WA_TICKS[m.status]||''}</span>` : ''}</span></div></div>`).join('') : ''}</div>
+      ${outside ? `<div class="wa-hint">They haven't written in the last 24 hours, so WhatsApp only delivers an approved template, not a typed message.</div>` : ''}
+      ${st.testMode ? `<div class="wa-hint">Test mode: what you send goes to ${esc(waPhone(String(st.testTo||'').replace(/\D/g,'')))}, not to them.</div>` : ''}
+      <div class="wa-compose"><textarea data-wa-draft rows="1" placeholder="Message">${esc(S.waDraft||'')}</textarea>
+        <button class="btn btn-primary" data-action="wa-send" ${S.waBusy?'disabled':''}>Send</button></div>
+    </div>`;
+  }
+  return `<div class="wa">${banner}<div class="wa-grid ${showThread?'has-thread':''}">${list}${thread || `<div class="wa-thread card wa-empty"><p>Choose a chat, or start a new one.</p></div>`}</div></div>`;
+}
+async function doWhatsAppSend(){
+  const text = String(S.waDraft||'').trim();
+  const to = S.waContact==='new' ? String(S.waTo||'').replace(/\D/g,'') : S.waContact;
+  if(!text){ toast('Type a message first.', 'system'); return; }
+  if(!to || to.length < 10){ toast('Enter the phone number.', 'system'); return; }
+  S.waBusy = true; render();
+  try{
+    const res = await callEdgeFunction('whatsapp-send', { to:'+' + (to.length===10 ? '1' + to : to), text });
+    if(!res.ok){ toast('Not sent: ' + (res.error || 'WhatsApp refused it.'), 'system'); return; }
+    S.waDraft = ''; if(S.waContact==='new'){ S.waContact = res.testRedirect ? String(S.wa.status.testTo).replace(/\D/g,'') : (to.length===10 ? '1' + to : to); S.waTo = ''; }
+    toast(res.testRedirect ? 'Sent to the test phone (test mode).' : 'Sent.', 'success');
+  } finally { S.waBusy = false; render(); }
+}
+async function doWhatsAppSetupWebhook(){
+  S.waBusy = true; render();
+  try{
+    const res = await callEdgeFunction('whatsapp-send', { action:'setup-webhook' });
+    toast(res.ok ? 'Incoming messages connected.' : 'Could not connect: ' + (res.error || 'unknown'), res.ok ? 'success' : 'system');
+    if(res.ok) S.wa = null;
+  } finally { S.waBusy = false; render(); }
+}
+function bindWhatsApp(){
+  if(S.view!=='whatsapp') return;
+  const box = document.getElementById('wa-msgs'); if(box) box.scrollTop = box.scrollHeight;
+  document.querySelectorAll('[data-wa-draft]').forEach(el=>{
+    el.addEventListener('input', ()=>{ S.waDraft = el.value; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 140) + 'px'; });
+    el.addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey && window.matchMedia('(pointer:fine)').matches){ e.preventDefault(); doWhatsAppSend(); } });
+  });
+  document.querySelectorAll('[data-wa-to]').forEach(el=>el.addEventListener('input', ()=>{ S.waTo = el.value; }));
 }
 
 const LIB_TABS = [['browse','Library'],['videos','Upload & tag'],['singers','Singers'],['tags','Tags']];
@@ -10683,6 +10814,11 @@ function bindGlobal(){
       case 'mark-balance': doMarkBalance(id); break;
       case 'inbox-money': { const it = (S.inboxItems||[]).find(x=>x.id===id); if(it) applyInboxMoney(it, false); break; }
       case 'lib-tab': S.libTab = id; render(); break;
+      case 'wa-open': S.waContact = id; S.waDraft = ''; render(); break;
+      case 'wa-new': S.waContact = 'new'; S.waDraft = ''; render(); break;
+      case 'wa-back': S.waContact = null; render(); break;
+      case 'wa-send': doWhatsAppSend(); break;
+      case 'wa-setup-webhook': doWhatsAppSetupWebhook(); break;
       // Owner 2026-10-29: "a singer login profile so i can see what their login will look like". The
       // office session shows the singer's own pages (their gigs from the office's copy). Read-only: with
       // S.user a singer, artistReadOnly() refuses every save and shared sync pauses until Exit.
@@ -10783,6 +10919,7 @@ function bindGlobal(){
     }
   };
   bindVideoLibrary();
+  bindWhatsApp();
   document.querySelectorAll('select[data-action="mercury-assign"]').forEach(sel=>{
     sel.addEventListener('change', ()=>{ const v = sel.value;
       doMercuryCall({ action:'assign', accountId: sel.getAttribute('data-id'), role: v.startsWith('payee:') ? 'payee' : (v || null), payeeProfileId: v.startsWith('payee:') ? v.slice(6) : null }, 'Saved.'); });

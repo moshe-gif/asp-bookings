@@ -5,13 +5,12 @@
 //   respond  {eventId, accept}   the videographer himself: confirm or turn it down
 // eventId is the gig's legacy id ("EV-…") or its uuid. Nobody here can create, change or cancel a gig.
 // WhatsApp goes through _shared/whatsapp.ts, so test mode applies (the owner's phone until WHATSAPP_LIVE).
-// A business may only open a WhatsApp conversation with an approved template: set WHATSAPP_CREW_TEMPLATE
-// to its name (body {{1}} first name, {{2}} singers, {{3}} when, {{4}} where, {{5}} app link); without
-// it the message goes as plain text, which WhatsApp delivers only inside a 24-hour reply window.
+// The message is the approved "crew_request" template (_shared/whatsapp.ts WA_TEMPLATES); until Meta approves
+// it, the same words go as plain text (delivered only inside a 24-hour reply window).
 import { createClient } from "../_shared/deps.ts";
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { serviceClient } from "../_shared/auth.ts";
-import { sendWhatsApp } from "../_shared/whatsapp.ts";
+import { sendTemplate } from "../_shared/whatsapp.ts";
 import { appUrl } from "../_shared/config.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -65,10 +64,7 @@ Deno.serve(async (req) => {
     if (crew.phone) {
       const { singers, when, where } = await describe(sb, ev);
       const first = String(crew.name).split(/\s+/)[0];
-      const tpl = Deno.env.get("WHATSAPP_CREW_TEMPLATE");
-      whatsapp = tpl
-        ? await sendWhatsApp({ to: crew.phone, template: { name: tpl, params: [first, singers, when, where, appUrl()] } })
-        : await sendWhatsApp({ to: crew.phone, text: `Hi ${first}, ASP Management would like you to film ${singers} on ${when}${where ? ` at ${where}` : ""}. Please confirm in the app: ${appUrl()}` });
+      whatsapp = await sendTemplate(crew.phone, "crew_request", [first, singers, when, where || "the venue", appUrl()], user.id);
     }
     await sb.from("gig_crew").update({ notify_result: whatsapp.ok ? (whatsapp.testRedirect ? "whatsapp (test)" : "whatsapp") : `not sent: ${whatsapp.error}` })
       .eq("event_id", ev.id).eq("crew_id", crew.id);

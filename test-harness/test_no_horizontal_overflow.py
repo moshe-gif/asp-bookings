@@ -45,7 +45,7 @@ def _gigs():
 
 VIEWS_ADMIN = ["dashboard", "calendar", "leads", "needs_review", "artists", "financials", "outside_bookings",
                "documents", "contracts", "contract_builder", "messages", "projects", "pricing", "international",
-               "daily_digest", "travel", "videos", "settings"]
+               "daily_digest", "travel", "videos", "whatsapp", "settings"]
 VIEWS_ARTIST = ["a_dashboard", "a_calendar", "a_gigs", "a_financials", "a_travel", "a_projects", "settings"]
 
 # Controls that open a modal / sheet / document / panel. Only openers: nothing here saves,

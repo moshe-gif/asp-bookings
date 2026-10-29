@@ -2,8 +2,14 @@
 //  - Deposit reminder every 7 days while a gig's contract has gone out (contract_sent) and no deposit is
 //    recorded -- with a fresh link to the same contract + deposit payment (old links keep working).
 //  - Balance reminder every 7 days while a confirmed date (booked) has its balance due, until it's paid.
-// Upcoming gigs only; never when the client has no email, and never for gigs still flagged needsReview. Every send (or failure) is logged in
+// Upcoming gigs only; never for gigs still flagged needsReview. Every send (or failure) is logged in
 // client_followups (0058), which is also how the 7-day rhythm is kept.
+// WhatsApp too (owner 2026-10-29: "i want the balance and deposit reminders to go to whatsapp also"): each
+// reminder also goes to the client's phone (approved template, _shared/whatsapp.ts), logged with sent_to
+// "whatsapp:<number>". And {only:"deposit_confirmations"} (cron every 10 minutes): "when a deposit comes in i
+// want to send a auto whatsapp to the client saying we received the deposit and booking is confirmed" -- once
+// per gig (kind deposit_confirmed). Gigs whose deposit was in before this shipped were marked done by SQL.
+// Test mode applies to both (mail.ts / whatsapp.ts).
 //
 // Auth: the cron call sends header x-cron-secret = CRON_SECRET; an admin can also call it (dryRun:true
 // lists what would go out without sending). Deployed with JWT verification off for the cron call.
@@ -14,6 +20,7 @@ import { brandLogoHtml } from "../_shared/config.ts";
 import { mintContractLink, mintBalanceLink } from "../_shared/paylinks.ts";
 import { clientOwedCentsOf, gigContracts } from "../_shared/connect.ts";
 import { paymentOptionsHtml, depositZelle, balanceZelle, officePhone } from "../_shared/payblock.ts";
+import { sendTemplate, waNumber } from "../_shared/whatsapp.ts";
 
 const DAY = 86_400_000;
 const EVERY_DAYS = 7;
@@ -60,9 +67,29 @@ Deno.serve(async (req) => {
 
   const phone = (await officePhone(sb)) || "";
 
-  const { data: events, error } = await sb.from("events").select("legacy_id, status, date, app_doc")
-    .in("status", ["contract_sent", "booked"]).gte("date", today);
+  const { data: events, error } = await sb.from("events").select("legacy_id, status, date, artist_id, app_doc")
+    .in("status", ["contract_sent", "booked", "paid"]).gte("date", today);
   if (error) return json({ ok: false, error: error.message }, 500);
+
+  if (body.only === "deposit_confirmations") {
+    const { data: done } = await sb.from("client_followups").select("event_legacy_id").eq("kind", "deposit_confirmed").eq("ok", true).limit(10000);
+    const sent = new Set((done || []).map((d) => d.event_legacy_id));
+    const { data: artists } = await sb.from("artists").select("id, legacy_id, name");
+    // deno-lint-ignore no-explicit-any
+    const nameOf = (ref: string) => (artists || []).find((a: any) => a.id === ref || a.legacy_id === ref)?.name;
+    const due = (events || []).filter((e) => { const ev: Row = e.app_doc || {}; return ev.depositReceived && !ev.unpaid && waNumber(ev.clientPhone || "").length >= 10 && !sent.has(e.legacy_id); });
+    const results: Row[] = [];
+    for (const e of due.slice(0, MAX_SENDS_PER_RUN)) {
+      const ev: Row = e.app_doc || {};
+      const who = String(ev.clientName || "").trim().split(/\s+/)[0] || "there";
+      const singers = [e.artist_id, ...((ev.additionalArtists || []).map((x: Row) => x?.artistId))].map((r) => r && nameOf(String(r))).filter(Boolean).join(" & ") || "your event";
+      if (dryRun) { results.push({ gig: e.legacy_id, to: ev.clientPhone, ok: true, dryRun: true }); continue; }
+      const wa = await sendTemplate(ev.clientPhone, "deposit_received", [who, singers, fmtDate(e.date)]);
+      await sb.from("client_followups").insert({ event_legacy_id: e.legacy_id, kind: "deposit_confirmed", sent_to: "whatsapp:" + waNumber(ev.clientPhone), ok: wa.ok, error: wa.ok ? null : wa.error, provider_id: wa.id || null });
+      results.push({ gig: e.legacy_id, ok: wa.ok, error: wa.error });
+    }
+    return json({ ok: true, sent: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results });
+  }
 
   const { data: logs } = await sb.from("client_followups").select("event_legacy_id, kind, sent_at").eq("ok", true)
     .order("sent_at", { ascending: false }).limit(5000);
@@ -73,7 +100,8 @@ Deno.serve(async (req) => {
   for (const e of events || []) {
     const ev: Row = e.app_doc || {};
     const to = String(ev.clientEmail || "").trim();
-    if (!to || ev.unpaid) continue;
+    const waTo = waNumber(ev.clientPhone || "").length >= 10 ? String(ev.clientPhone) : "";
+    if ((!to && !waTo) || ev.unpaid || e.status === "paid") continue;
     const who = String(ev.clientName || "").trim();
     const greeting = who ? `Dear ${who.split(/\s+/)[0]},` : "Hello,";
     const when = fmtDate(e.date);
@@ -85,7 +113,7 @@ Deno.serve(async (req) => {
       if (!sr) continue; // contract not sent through the app's link -- nothing to point them to
       const since = lastSent.get(`${e.legacy_id}|deposit_reminder`) ?? Date.parse(sr.created_at);
       if (now - since < EVERY_DAYS * DAY) continue;
-      planned.push({ kind: "deposit_reminder", gig: e.legacy_id, contract: sr.contract_legacy_id, contractCreatedAt: sr.contract_created_at, to, greeting, when, ev });
+      planned.push({ kind: "deposit_reminder", gig: e.legacy_id, contract: sr.contract_legacy_id, contractCreatedAt: sr.contract_created_at, to, waTo, greeting, when, ev });
     } else if (e.status === "booked" && ev.depositReceived && !ev.balanceReceived) {
       // What the client owes after the contract's deposit (clientOwedCentsOf, the same figure as the app,
       // the pay link and the inbox's payment matching). NaN (an extra artist's figures missing) sends nothing.
@@ -97,22 +125,24 @@ Deno.serve(async (req) => {
       if (ev.needsReview) continue;
       const last = lastSent.get(`${e.legacy_id}|balance_reminder`);
       if (last !== undefined && now - last < EVERY_DAYS * DAY) continue;
-      planned.push({ kind: "balance_reminder", gig: e.legacy_id, to, greeting, when, balance, ev });
+      planned.push({ kind: "balance_reminder", gig: e.legacy_id, to, waTo, greeting, when, balance, ev });
     }
   }
 
-  if (dryRun) return json({ ok: true, dryRun: true, wouldSend: planned.map((p) => ({ kind: p.kind, gig: p.gig, to: p.to, balance: p.balance ?? null, client: p.ev.clientName || '', price: p.ev.price, commission: p.ev.commission })) });
+  if (dryRun) return json({ ok: true, dryRun: true, wouldSend: planned.map((p) => ({ kind: p.kind, gig: p.gig, to: p.to, whatsapp: p.waTo || null, balance: p.balance ?? null, client: p.ev.clientName || '', price: p.ev.price, commission: p.ev.commission })) });
 
   const results: Row[] = [];
   const batch = previewTo
     ? ["deposit_reminder", "balance_reminder"].map((k) => planned.find((p) => p.kind === k)).filter(Boolean).map((p) => ({ ...p, to: previewTo }))
     : planned.slice(0, MAX_SENDS_PER_RUN);
   for (const p of batch) {
-    let subject = "", html = "", contract: string | null = p.contract || null;
+    let subject = "", html = "", contract: string | null = p.contract || null, waParams: string[] = [];
+    const first = String(p.ev.clientName || "").trim().split(/\s+/)[0] || "there";
     try {
       if (p.kind === "deposit_reminder") {
         const link = await mintContractLink(sb, p.contract, p.contractCreatedAt);
         if (!link.ok) { results.push({ kind: p.kind, gig: p.gig, ok: false, skipped: link.error }); continue; } // void / changed / paid: the office handles it
+        waParams = [first, p.when, link.url];
         subject = `Reminder: your date is held once the deposit is received — ${p.when}`;
         html = emailHtml({
           greeting: p.greeting, phone,
@@ -127,6 +157,7 @@ Deno.serve(async (req) => {
         // preview: that would leave a real payable link to a real gig). Otherwise Zelle/check as before.
         const bal = previewTo ? null : await mintBalanceLink(sb, p.gig);
         const payUrl = bal && bal.ok ? bal.url : null;
+        waParams = [first, money(p.balance), p.when, payUrl ? `Pay online: ${payUrl}` : (p.to ? "Payment details are in your email." : "Reply here for payment details.")];
         html = emailHtml({
           greeting: p.greeting, phone,
           lines: [`Thank you for booking with ASP Management. Your date on <strong>${esc(p.when)}</strong> is confirmed.`,
@@ -134,10 +165,17 @@ Deno.serve(async (req) => {
           payment: paymentOptionsHtml({ kind: "balance", payUrl, amount: p.balance, memo: `${p.ev.clientName || ""} ${p.when}`.trim(), zelle: await balanceZelle(sb, p.gig), officePhone: phone }),
         });
       }
-      const sent = await sendRelayEmail(sb, { to: p.to, subject: previewTo ? `[Preview] ${subject}` : subject, html, brand: "asp" });
-      if (previewTo) { results.push({ kind: p.kind, gig: p.gig, ok: sent.ok, error: sent.error, preview: true }); continue; }
-      await sb.from("client_followups").insert({ event_legacy_id: p.gig, contract_legacy_id: contract, kind: p.kind, sent_to: p.to, ok: sent.ok, error: sent.ok ? null : sent.error, provider_id: sent.id || null });
-      results.push({ kind: p.kind, gig: p.gig, ok: sent.ok, error: sent.error });
+      if (p.to) {
+        const sent = await sendRelayEmail(sb, { to: p.to, subject: previewTo ? `[Preview] ${subject}` : subject, html, brand: "asp" });
+        if (previewTo) { results.push({ kind: p.kind, gig: p.gig, ok: sent.ok, error: sent.error, preview: true }); continue; }
+        await sb.from("client_followups").insert({ event_legacy_id: p.gig, contract_legacy_id: contract, kind: p.kind, sent_to: p.to, ok: sent.ok, error: sent.ok ? null : sent.error, provider_id: sent.id || null });
+        results.push({ kind: p.kind, gig: p.gig, ok: sent.ok, error: sent.error });
+      }
+      if (p.waTo && !previewTo) {
+        const wa = await sendTemplate(p.waTo, p.kind, waParams);
+        await sb.from("client_followups").insert({ event_legacy_id: p.gig, contract_legacy_id: contract, kind: p.kind, sent_to: "whatsapp:" + waNumber(p.waTo), ok: wa.ok, error: wa.ok ? null : wa.error, provider_id: wa.id || null });
+        results.push({ kind: p.kind, gig: p.gig, channel: "whatsapp", ok: wa.ok, error: wa.error });
+      }
     } catch (err) {
       const msg = String((err as Error)?.message || err);
       await sb.from("client_followups").insert({ event_legacy_id: p.gig, contract_legacy_id: contract, kind: p.kind, sent_to: p.to, ok: false, error: msg.slice(0, 500) });
