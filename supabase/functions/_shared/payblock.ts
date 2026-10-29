@@ -36,15 +36,22 @@ export function paymentOptionsHtml(o: { kind: "deposit" | "balance" | "invoice";
         ${qr ? "Open your bank app, choose Zelle, and scan." : `Send it with Zelle to <strong style="color:#17171A;">${esc(z.handle)}</strong>.`}${memoLine}
         ${z.note ? `<div style="margin-top:4px;font-size:12px;color:#9A9AA1;">${esc(z.note)}</div>` : ""}
       </td></tr></table>`;
-  const foot = `<p style="font-size:11.5px;color:#9A9AA1;margin:0;">* To pay by check or cash, please call our office${o.officePhone ? ` at ${esc(o.officePhone)}` : ""}.</p>`;
+  const foot = !o.payUrl && !zelleBox
+    ? `<p style="font-size:12.5px;color:#67676D;margin:0;">To pay, please call our office${o.officePhone ? ` at ${esc(o.officePhone)}` : ""}, or use the Pay online link in our email.</p>`
+    : `<p style="font-size:11.5px;color:#9A9AA1;margin:0;">* To pay by check or cash, please call our office${o.officePhone ? ` at ${esc(o.officePhone)}` : ""}.</p>`;
   return `<div class="pay-options" style="margin:18px 0 0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">${button}${zelleBox}${foot}</div>`;
 }
 
 // ASP's Zelle for deposits and invoices (Settings → Online payments, app_records settings/org), else
 // ASP's house payee profile -- the same choice as depositZelle() in the app. Never an artist's.
-export async function depositZelle(sb: Sb): Promise<Zelle | null> {
+// Settings → Online payments → "Don't offer Zelle" (owner 2026-10-29: Stripe + Mercury only) turns both off.
+async function orgSettings(sb: Sb) {
   const { data } = await sb.from("app_records").select("app_doc").eq("collection", "settings").eq("legacy_id", "org").maybeSingle();
-  const o = data?.app_doc?.value || {};
+  return data?.app_doc?.value || {};
+}
+export async function depositZelle(sb: Sb): Promise<Zelle | null> {
+  const o = await orgSettings(sb);
+  if (o.zelleOff === true) return null;
   const qrUrl = typeof o.depositZelleQrUrl === "string" && /^https:\/\//.test(o.depositZelleQrUrl) ? o.depositZelleQrUrl : null;
   const handle = typeof o.depositZelleHandle === "string" ? o.depositZelleHandle.trim() : "";
   if (qrUrl || handle) return { qrUrl, handle };
@@ -61,6 +68,7 @@ export async function depositZelle(sb: Sb): Promise<Zelle | null> {
 // in the app). Never the house's or another artist's.
 // A gig with several artists gets none: one Zelle can't split the balance (they pay online, or call).
 export async function balanceZelle(sb: Sb, eventLegacyId: string): Promise<Zelle | null> {
+  if ((await orgSettings(sb)).zelleOff === true) return null;
   const { data: evRow } = await sb.from("events").select("app_doc").eq("legacy_id", eventLegacyId).maybeSingle();
   if (!evRow?.app_doc || isMultiArtist(evRow.app_doc)) return null;
   const p = await balancePayeeProfile(sb, eventLegacyId, evRow.app_doc);

@@ -130,6 +130,14 @@ def test_settings_shows_online_payments(live_server, page):
     card = page.locator('[data-testid="online-payments-card"]')
     card.wait_for(state='visible', timeout=15000)
     assert 'credit card fee' in card.inner_text().lower()
+    # Zelle on the back burner (owner 2026-10-29): the switch sticks (this browser only; the harness never syncs).
+    box = card.locator('[data-testid="zelle-off"]')
+    assert not box.is_checked()
+    box.check()
+    goto_nav(page, "dashboard")
+    goto_nav(page, "settings")
+    assert page.locator('[data-testid="zelle-off"]').is_checked()
+    page.locator('[data-testid="zelle-off"]').uncheck()
 
 
 def test_bad_pay_link_explains_itself(live_server, page):

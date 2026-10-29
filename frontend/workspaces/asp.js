@@ -2222,6 +2222,9 @@ function zelleQrEmailBlock(ev, artist){
    Inline styles and plain blocks only, so it survives email clients. The server's twin for scheduled
    emails is supabase/functions/_shared/payblock.ts -- keep the two in step. */
 function paymentOptionsEmailBlock({ kind='deposit', payUrl=null, amount=null, memo='', zelle=null }){
+  // Zelle on the back burner (owner 2026-10-29: "process everything through stripe and mercury"): Settings →
+  // Online payments → "Don't offer Zelle". Server twin: _shared/payblock.ts.
+  if(ORG_SETTINGS.zelleOff) zelle = null;
   const what = kind==='balance' ? 'the balance' : kind==='invoice' ? 'this invoice' : 'the deposit';
   const amt = amount ? ` ${moneyCents(amount)}` : '';
   const phone = getBrandConfig('asp').phone;
@@ -2238,7 +2241,9 @@ function paymentOptionsEmailBlock({ kind='deposit', payUrl=null, amount=null, me
         ${qr ? 'Open your bank app, choose Zelle, and scan.' : `Send it with Zelle to <strong style="color:#17171A;">${esc(zelle.handle)}</strong>.`}${memoLine}
         ${zelle.note ? `<div style="margin-top:4px;font-size:12px;color:#9A9AA1;">${esc(zelle.note)}</div>` : ''}
       </td></tr></table>`;
-  const foot = `<p style="font-size:11.5px;color:#9A9AA1;margin:0;">* To pay by check or cash, please call our office${phone?` at ${esc(phone)}`:''}.</p>`;
+  const foot = !payUrl && !zelleBox
+    ? `<p style="font-size:12.5px;color:#67676D;margin:0;">To pay, please call our office${phone?` at ${esc(phone)}`:''}, or use the Pay online link in our email.</p>`
+    : `<p style="font-size:11.5px;color:#9A9AA1;margin:0;">* To pay by check or cash, please call our office${phone?` at ${esc(phone)}`:''}.</p>`;
   return `<div class="pay-options" style="margin:18px 0 0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">${button}${zelleBox}${foot}</div>`;
 }
 // Zelle for deposits and invoices: ASP's own (Settings → Online payments), else ASP's house payee
@@ -4295,7 +4300,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.46'; // bump on every release so a phone can tell it has updated. v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.47'; // bump on every release so a phone can tell it has updated. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -9119,6 +9124,7 @@ function renderOnlinePaymentsCard(){
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">${status}</div>
     ${st && st.connected ? '' : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">${st && st.error ? `Stripe didn't accept the key: ${esc(st.error)}. ` : ''}Clients pay deposits and invoices by card or bank transfer from the email link. Setup: <code>ops/STRIPE_SETUP.md</code>.</p>`}
     ${warnings.map(w=>`<p style="font-size:11.5px;color:var(--warn-ink);margin:0 0 6px;">${w}</p>`).join('')}
+    <label class="lib-check" style="margin:14px 0 2px;white-space:normal;"><input type="checkbox" data-field="zelleOff" data-form="orgsettings" ${ORG_SETTINGS.zelleOff?'checked':''} data-testid="zelle-off"/> Don't offer Zelle to clients (contracts, invoices and emails show only Pay online, and check / cash by calling)</label>
     <h4 style="margin:16px 0 6px;font-size:.95rem;">Zelle for deposits and invoices (ASP)</h4>
     <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 8px;">Shown under the Pay online button as “Scan here to pay the deposit”. Balances use each artist's own Zelle QR (Payee Profiles). Get the QR from your bank app: Zelle → your QR code → save the picture.</p>
     <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
