@@ -9,7 +9,7 @@ eye.
 """
 import pytest
 from helpers import (
-    ADMIN_IDS, ARTIST_IDS, MOBILE_ADMIN_NAV, MOBILE_ARTIST_NAV,
+    ADMIN_IDS, ARTIST_IDS, MOBILE_ADMIN_NAV, MOBILE_ARTIST_NAV, MOBILE_WHATSAPP_NAV, WHATSAPP_ACCESS_IDS,
     login_as, goto_nav, collect_console_errors, has_no_horizontal_overflow,
 )
 
@@ -23,12 +23,15 @@ def test_admin_mobile_nav_sweep(live_server, page, user_id):
     page.goto(live_server)
     login_as(page, user_id)
 
-    for view in MOBILE_ADMIN_NAV:
+    nav = MOBILE_WHATSAPP_NAV if user_id in WHATSAPP_ACCESS_IDS else MOBILE_ADMIN_NAV
+    for view in nav:
         goto_nav(page, view, mobile=True)
         assert has_no_horizontal_overflow(page), (
             f"[{user_id}] horizontal overflow on view '{view}' at {MOBILE_VIEWPORT}"
         )
 
+    hidden = "projects" if user_id in WHATSAPP_ACCESS_IDS else "whatsapp"
+    assert not page.locator(f'.bottom-nav .bn-item[data-view="{hidden}"]').is_visible()
     assert not errors, f"[{user_id}] console errors during mobile nav sweep: {errors}"
 
 

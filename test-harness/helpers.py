@@ -40,6 +40,9 @@ def _password_for(user_id):
 # hamburger-menu-only per earlier UI work) — see frontend/index.html's `.bn-item[data-view=...]
 # {display:none}` rules for the current hide-list. Keep this in sync if that changes.
 MOBILE_ADMIN_NAV = ["dashboard", "calendar", "leads", "projects", "financials"]
+# Admins with WhatsApp access (the owner; the harness account stands in) get WhatsApp in Projects' place.
+MOBILE_WHATSAPP_NAV = ["dashboard", "calendar", "leads", "whatsapp", "financials"]
+WHATSAPP_ACCESS_IDS = {"admin_bookings"}
 MOBILE_ARTIST_NAV = ["a_calendar", "a_gigs", "a_dashboard", "a_travel", "a_financials"]
 
 MGMT_NAV_ITEMS = ["dashboard", "calendar", "leads", "artists", "travel", "projects", "pricing", "financials", "contracts", "contract_builder", "messages"]

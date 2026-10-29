@@ -4239,7 +4239,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.38'; // bump on every release so a phone can tell it has updated. v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.39'; // bump on every release so a phone can tell it has updated. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4276,7 +4276,9 @@ function renderBottomNav(isAdmin){
   // Same role filter as the sidebar/hamburger menu (it used the raw list, so a CEO-hidden page was
   // only kept off the phone bar by a CSS hide-list).
   const items = isAdmin ? mgmtNavItemsFor(S.user) : portalNavItems();
-  return `<div class="bottom-nav${crewUser()?' crew':''}">
+  // The owner's phone bar (2026-10-29: "on the phone i want it [WhatsApp] on the slider menu, remove another
+  // one"): WhatsApp takes Projects' place for whoever has WhatsApp access; Projects stays in the ☰ menu.
+  return `<div class="bottom-nav${crewUser()?' crew':''}${isAdmin && canUseWhatsApp()?' has-wa':''}">
     ${items.map(([v,l,ic])=>`<a href="#" class="bn-item ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span><span>${l}</span></a>`).join('')}
   </div>`;
 }
@@ -5618,7 +5620,8 @@ function renderWhatsAppPage(){
       <div class="wa-msgs" id="wa-msgs">${cur ? cur.msgs.map(m=>`<div class="wa-msg ${m.direction}" data-testid="wa-msg">
           <div class="wa-bubble">${esc(m.body||'')}${m.real_to ? `<div class="wa-note">Test mode: meant for ${esc(waPhone(m.real_to))}</div>` : ''}${m.error ? `<div class="wa-err">${esc(m.error)}</div>` : ''}
           <span class="wa-meta">${esc(waTime(m.created_at))}${m.direction==='out' ? ` <span class="${m.status==='read'?'wa-read':''}">${WA_TICKS[m.status]||''}</span>` : ''}</span></div></div>`).join('') : ''}</div>
-      ${outside ? `<div class="wa-hint">They haven't written in the last 24 hours, so WhatsApp only delivers an approved template, not a typed message.</div>` : ''}
+      ${st.incoming===false ? `<div class="wa-hint">Incoming messages aren't connected yet, so the app can't see their replies. A typed message only arrives if they've written to the office number in the last 24 hours.</div>`
+        : outside ? `<div class="wa-hint">They haven't written in the last 24 hours, so WhatsApp only delivers an approved template, not a typed message.</div>` : ''}
       ${st.testMode ? `<div class="wa-hint">Test mode: what you send goes to ${esc(waPhone(String(st.testTo||'').replace(/\D/g,'')))}, not to them.</div>` : ''}
       <div class="wa-compose"><textarea data-wa-draft rows="1" placeholder="Message">${esc(S.waDraft||'')}</textarea>
         <button class="btn btn-primary" data-action="wa-send" ${S.waBusy?'disabled':''}>Send</button></div>
