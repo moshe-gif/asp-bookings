@@ -3,7 +3,7 @@
 //   (cron, x-cron-secret)  every 10 minutes: copy what isn't in Drive yet
 //   {action:"run"}         a library admin: the same, now
 //   {action:"status"}      a library admin: connected?, how many are backed up / waiting / failing
-// Files land in "ASP Video Library / <singer>" as the original file. Big files go up in 32 MB pieces through
+// Files land in "ASP Media Library / <singer>" as the original file. Big files go up in 32 MB pieces through
 // Google's resumable upload; the place reached is saved after every piece, so a run that ends mid-file (each
 // run stops after ~100 seconds) carries on next time. Deleting a video in the app never touches Drive.
 // Access is Google's "drive.file": the app sees only the files and folders it made itself.
@@ -13,7 +13,7 @@ import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { serviceClient } from "../_shared/auth.ts";
 
 const BUCKET = "library";
-const ROOT_NAME = "ASP Video Library";
+const ROOT_NAME = "ASP Media Library";
 const CHUNK = 32 * 1024 * 1024;         // a multiple of 256 KB, as Google requires
 const BUDGET_MS = 100_000;
 const FOLDER = "application/vnd.google-apps.folder";

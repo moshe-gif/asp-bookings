@@ -4295,7 +4295,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.45'; // bump on every release so a phone can tell it has updated. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.46'; // bump on every release so a phone can tell it has updated. v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -5274,7 +5274,7 @@ async function loadLibrary(){
       supabaseClient.from('library_videos').select('*, library_video_tags(tag_id)').order('created_at', { ascending:false }).limit(2000),
     ]);
     const err = s.error || t.error || v.error;
-    if(err){ toast('Could not load the video library: ' + err.message, 'system'); return; }
+    if(err){ toast('Could not load the media library: ' + err.message, 'system'); return; }
     S.lib = { singers:s.data||[], tags:t.data||[], videos:(v.data||[]).map(x=>({ ...x, tagIds:(x.library_video_tags||[]).map(y=>y.tag_id) })) };
     S.libUrls = {};
     await libSignPaths([...S.lib.videos.flatMap(x=>[x.video_path, x.thumb_path]), ...S.lib.singers.map(x=>x.photo_path)]);
@@ -5303,13 +5303,13 @@ async function libUpdateVideo(id, patch){
 }
 async function libDeleteVideos(ids){
   const vids = S.lib.videos.filter(v=>ids.includes(v.id));
-  if(!vids.length || !confirm(`Delete ${vids.length===1 ? `"${vids[0].title}"` : `${vids.length} videos`}? The file${vids.length===1?' is':'s are'} removed from the library for good.`)) return;
+  if(!vids.length || !confirm(`Delete ${vids.length===1 ? `"${vids[0].title}"` : `${vids.length} files`}? The file${vids.length===1?' is':'s are'} removed from the library for good.`)) return;
   const { error } = await supabaseClient.from('library_videos').delete().in('id', ids);
   if(error){ toast('Could not delete: ' + error.message, 'system'); return; }
   await supabaseClient.storage.from(LIB_BUCKET).remove(vids.flatMap(v=>[v.video_path, v.thumb_path].filter(Boolean)));
   S.lib.videos = S.lib.videos.filter(v=>!ids.includes(v.id));
   S.libSelected = new Set([...(S.libSelected||[])].filter(id=>!ids.includes(id)));
-  toast(`Deleted ${vids.length} video${vids.length===1?'':'s'}.`, 'success'); render();
+  toast(`Deleted ${vids.length} file${vids.length===1?'':'s'}.`, 'success'); render();
 }
 // The first frame worth showing (a fifth of the way in, at most 30s) and the length, read in this browser.
 function libThumbOf(file){
@@ -5439,7 +5439,7 @@ async function libAddSinger(){
 async function libDeleteSinger(id){
   const s = S.lib.singers.find(x=>x.id===id); if(!s) return;
   const vids = S.lib.videos.filter(v=>v.singer_id===id);
-  if(!confirm(`Remove ${s.name} from the library${vids.length ? ` and delete their ${vids.length} video${vids.length===1?'':'s'}` : ''}? This can't be undone.`)) return;
+  if(!confirm(`Remove ${s.name} from the library${vids.length ? ` and delete their ${libCountLine(vids)}` : ''}? This can't be undone.`)) return;
   const { error } = await supabaseClient.from('library_singers').delete().eq('id', id);
   if(error){ toast('Could not remove: ' + error.message, 'system'); return; }
   const files = [...vids.flatMap(v=>[v.video_path, v.thumb_path]), s.photo_path].filter(Boolean);
@@ -5804,7 +5804,7 @@ function renderDriveBackupBadge(){
   if(d.error) return `<span title="${esc(d.error)}">Google Drive backup: couldn't check</span>`;
   if(!d.connected) return `<span>Not backed up yet</span><button class="btn btn-sm" data-action="drive-connect" data-testid="drive-connect">Connect Google Drive</button>`;
   const waiting = d.total - d.backedUp;
-  return `<span title="${esc(`${d.email} · ASP Video Library folder${d.lastRunAt ? ' · last checked ' + new Date(d.lastRunAt).toLocaleString() : ''}${d.lastError ? ' · ' + d.lastError : ''}`)}" data-testid="drive-status">Google Drive: ${waiting ? `${d.backedUp} of ${d.total} backed up${d.failing ? ` · ${d.failing} failing` : ''}` : `all ${d.total} backed up`}</span>
+  return `<span title="${esc(`${d.email} · ASP Media Library folder${d.lastRunAt ? ' · last checked ' + new Date(d.lastRunAt).toLocaleString() : ''}${d.lastError ? ' · ' + d.lastError : ''}`)}" data-testid="drive-status">Google Drive: ${waiting ? `${d.backedUp} of ${d.total} backed up${d.failing ? ` · ${d.failing} failing` : ''}` : `all ${d.total} backed up`}</span>
     ${waiting ? `<button class="btn btn-sm" data-action="drive-backup-now" ${S.driveBusy?'disabled':''}>${S.driveBusy?'Backing up…':'Back up now'}</button>` : ''}`;
 }
 /* ---- Browsing the library, inside the app (owner 2026-10-29: "i want it to look as part of the app not a
@@ -6002,7 +6002,7 @@ function renderLibSingers(){
         <label class="lib-photo" title="${s.photo_path?'Change':'Add'} photo"><span class="lib-photo-av">${s.photo_path?`<img src="${esc(LIB_URL(s.photo_path))}" alt=""/>`:esc(String(s.name||'?').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase())}</span><span class="lib-photo-cam">${ICO.image}</span>
           <input type="file" accept="image/jpeg,image/png,image/webp" data-lib-photo="${esc(s.id)}" style="display:none;"/></label>
         <div style="min-width:0;flex:1;"><input class="lib-inline" value="${esc(s.name)}" data-lib-singer-name="${esc(s.id)}" aria-label="Name" style="width:100%;font-weight:600;font-size:14.5px;"/>
-          <p style="margin:2px 0 0 9px;font-size:11.5px;color:var(--ink-3);">${count(s.id)} video${count(s.id)===1?'':'s'}${s.photo_path?'':' · no card picture yet: tap the circle, or open one of their photos in the Library and choose “Use as card picture”'}</p></div>
+          <p style="margin:2px 0 0 9px;font-size:11.5px;color:var(--ink-3);">${libCountLine(L.videos.filter(v=>v.singer_id===s.id))}${s.photo_path?'':' · no card picture yet: tap the circle, or open one of their photos in the Library and choose “Use as card picture”'}</p></div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;">
         <label class="lib-check"><input type="checkbox" data-lib-singer-active="${esc(s.id)}" ${s.active?'checked':''}/> Shown</label>
