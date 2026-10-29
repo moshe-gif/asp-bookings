@@ -64,7 +64,7 @@ def test_crew_assign_confirm_and_no_money(live_server, page, browser):
         errors = collect_console_errors(social)
         assert social.evaluate("S.view") == "c_home"
         nav = social.locator(".artist-top-tabs .tab").all_inner_texts()
-        assert nav == ["Today", "Calendar", "Videos"], nav
+        assert nav == ["Today", "Calendar", "Media"], nav
         assert social.locator('[data-action="open-ask-ai"]').count() == 0
         rows = social.evaluate("async () => (await supabaseClient.from('crew_gig_view').select('*').limit(5)).data")
         for r in rows:
@@ -98,7 +98,7 @@ def test_crew_assign_confirm_and_no_money(live_server, page, browser):
         row.first.locator('[data-action="crew-respond"][data-accept="1"]').click()
         video.wait_for_function("g => S.events.find(e => e.id === g).myStatus === 'confirmed'", arg=gig, timeout=15000)
         # Videos: the library only, no managing.
-        video.locator('.artist-top-tabs .tab', has_text="Videos").click()
+        video.locator('.artist-top-tabs .tab', has_text="Media").click()
         video.locator('[data-testid="lib-browse"]').wait_for(state="visible", timeout=10000)
         assert video.locator('[data-action="lib-tab"]').count() == 0
         assert not MONEY.search(video.locator(".content").inner_text())

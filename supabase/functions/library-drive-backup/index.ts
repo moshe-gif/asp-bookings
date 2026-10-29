@@ -71,11 +71,13 @@ async function run(sb: Any) {
     const [{ data: vids }, { data: files }, { data: singers }] = await Promise.all([
       sb.from("library_videos").select("id, singer_id, title, songs, recorded_on, video_path, file_name, size_bytes, mime").order("created_at"),
       sb.from("library_drive_files").select("*"),
-      sb.from("library_singers").select("id, name"),
+      sb.from("library_singers").select("id, name, slug"),
     ]);
+    // The test harness's throwaway singer never goes to Drive (its files are deleted minutes later).
+    const harness = new Set((singers || []).filter((s: Any) => String(s.slug || "").startsWith("harness-test")).map((s: Any) => s.id));
     const state = new Map((files || []).map((f: Any) => [f.video_id, f]));
     // Waiting first, then the ones that failed before (fewest tries first), so one bad file can't block the rest.
-    const todo = (vids || []).filter((v: Any) => !(state.get(v.id) as Any)?.backed_up_at)
+    const todo = (vids || []).filter((v: Any) => !harness.has(v.singer_id) && !(state.get(v.id) as Any)?.backed_up_at)
       .sort((a: Any, c: Any) => ((state.get(a.id) as Any)?.attempts || 0) - ((state.get(c.id) as Any)?.attempts || 0));
     for (const v of todo) {
       if (Date.now() - started > BUDGET_MS) break;

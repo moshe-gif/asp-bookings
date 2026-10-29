@@ -4211,7 +4211,7 @@ const MGMT_NAV_ITEMS = [
   ['contracts','Contracts',ICO.leads],
   ['contract_builder','Contract Builder',ICO.edit],
   ['messages','Inbox',ICO.sms],
-  ['videos','Videos',ICO.film],
+  ['videos','Media',ICO.film],
   ['whatsapp','WhatsApp',ICO.wa],
 ];
 // External Events (outside_bookings) and Documents were removed from the menu for everyone
@@ -4252,13 +4252,13 @@ function navBadge(v){
   const n = navBadgeCount(v);
   return n>0 ? `<span class="nav-badge">${n>9?'9+':n}</span>` : '';
 }
-const CREW_NAV_ITEMS = [['c_home','Today',ICO.dash], ['c_calendar','Calendar',ICO.cal], ['videos','Videos',ICO.film]];
+const CREW_NAV_ITEMS = [['c_home','Today',ICO.dash], ['c_calendar','Calendar',ICO.cal], ['videos','Media',ICO.film]];
 // The non-office menu: crew or artist.
 function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS; }
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.43'; // bump on every release so a phone can tell it has updated. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.44'; // bump on every release so a phone can tell it has updated. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4345,7 +4345,7 @@ const VIEWS = {
   contracts:        { who:'admin',  title:'Contracts',                  render:()=>renderContractsPage() },
   contract_builder: { who:'admin',  title:'Contract Builder',           render:()=>renderContractsBuilderListPage() },
   messages:         { who:'admin',  title:'Inbox',                      render:()=>renderMessagesPage() },
-  videos:           { who:'library', title:'Video Library',             render:()=>renderVideoLibraryPage() },
+  videos:           { who:'library', title:'Media Library',             render:()=>renderVideoLibraryPage() },
   whatsapp:         { who:'whatsapp', title:'WhatsApp',                 render:()=>renderWhatsAppPage() },
   projects:         { who:'admin',  title:'Projects',                   render:()=>renderProjectsBoard() },
   pricing:          { who:'admin',  title:'Pricing',                    render:()=>renderPricingPage() },
@@ -4510,13 +4510,13 @@ function renderSettingsPage(){
 
   ${isAdmin ? renderPayeeProfilesCard() : ''}
 
-  ${isAdmin ? renderQuickBooksCard() : ''}
+  ${isAdmin && QBO_CLIENT_ID ? renderQuickBooksCard() : ''}
   ${isAdmin ? renderOnlinePaymentsCard() : ''}
   ${isAdmin ? renderMercuryCard() : ''}
 
   ${isAdmin ? renderGoogleCalendarSyncCard() : ''}
 
-  ${isAdmin ? renderReconciliationCard() : ''}
+  ${isAdmin && QBO_CLIENT_ID ? renderReconciliationCard() : ''}
 
   ${isAdmin ? renderGmailMailboxesCard() : ''}
 
@@ -5221,6 +5221,8 @@ async function libSignPaths(paths){
 // it (upload, tag, singers): the same admins and social crew. The database enforces both.
 function canSeeLibrary(){ return !!crewUser() || !!(adminById(S.user) && adminById(S.user).libraryAccess); }
 function canManageLibrary(){ const c = crewUser(); return c ? c.kind==='social' : !!(adminById(S.user) && adminById(S.user).libraryAccess); }
+const LIB_PHOTO_TYPES = { jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp' };
+const libIsPhoto = v => /^image\//.test((v && v.mime) || '');
 const LIB_VIDEO_TYPES = { mp4:'video/mp4', m4v:'video/x-m4v', mov:'video/quicktime', webm:'video/webm', avi:'video/x-msvideo', mpg:'video/mpeg', mpeg:'video/mpeg' };
 const TUS_SRC = 'https://cdn.jsdelivr.net/npm/tus-js-client@4.2.3/dist/tus.min.js';
 const TUS_SRI = 'sha384-VRMVp3dn5fs5skaKWWUXMrg1rovVl5rGo6H7a1AFrZCdgXtOdQ8TnhsOLTvqRuus';
@@ -5295,6 +5297,16 @@ function libThumbOf(file){
     el.src = url;
   });
 }
+// A photo's small copy for the grid (640px wide), made in this browser.
+async function libPhotoThumbOf(file){
+  try{
+    const bmp = await createImageBitmap(file);
+    const w = Math.min(640, bmp.width), h = Math.round(w * bmp.height / bmp.width);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').drawImage(bmp, 0, 0, w, h); bmp.close && bmp.close();
+    return { blob: await new Promise(r=>c.toBlob(r, 'image/jpeg', 0.85)), duration:null };
+  }catch(e){ return { blob:null, duration:null }; }
+}
 let tusLoading = null;
 function loadTus(){
   if(window.tus) return Promise.resolve(window.tus);
@@ -5333,13 +5345,13 @@ function libShowProgress(it){
 }
 async function libUploadFiles(files){
   const singer = (S.lib.singers||[]).find(s=>s.id===S.libUploadSinger);
-  if(!singer){ toast('Pick the singer first.', 'system'); return; }
+  if(!singer){ toast('Pick the artist first.', 'system'); return; }
   const items = [...files].map(file=>{
     const ext = (file.name.split('.').pop()||'').toLowerCase();
-    return { key:crypto.randomUUID(), file, ext, type: file.type || LIB_VIDEO_TYPES[ext] || '', name:file.name, pct:0, status:'waiting', error:'' };
+    return { key:crypto.randomUUID(), file, ext, type: file.type || LIB_VIDEO_TYPES[ext] || LIB_PHOTO_TYPES[ext] || '', name:file.name, pct:0, status:'waiting', error:'' };
   });
-  const bad = items.filter(x=>!x.type.startsWith('video/') || !Object.values(LIB_VIDEO_TYPES).includes(x.type));
-  if(bad.length) toast(`Skipped ${bad.length} file${bad.length===1?'':'s'} that ${bad.length===1?"isn't a video":"aren't videos"} (mp4, mov, m4v, webm).`, 'system');
+  const bad = items.filter(x=>!Object.values(LIB_VIDEO_TYPES).includes(x.type) && !Object.values(LIB_PHOTO_TYPES).includes(x.type));
+  if(bad.length) toast(`Skipped ${bad.length} file${bad.length===1?'':'s'} the library can't show (videos: mp4, mov, m4v, webm; photos: JPG, PNG, WebP).`, 'system');
   const todo = items.filter(x=>!bad.includes(x));
   S.libUploads = [...(S.libUploads||[]).filter(x=>x.status!=='done'), ...todo]; render();
   let next = 0;
@@ -5348,8 +5360,9 @@ async function libUploadFiles(files){
       const it = todo[next++];
       try{
         it.status = 'preparing'; render();
-        const { blob, duration } = await libThumbOf(it.file);
-        const id = crypto.randomUUID(), path = `videos/${singer.id}/${id}.${it.ext || 'mp4'}`;
+        const photo = it.type.startsWith('image/');
+        const { blob, duration } = photo ? await libPhotoThumbOf(it.file) : await libThumbOf(it.file);
+        const id = crypto.randomUUID(), path = `${photo ? 'photos' : 'videos'}/${singer.id}/${id}.${it.ext || (photo ? 'jpg' : 'mp4')}`;
         it.status = 'uploading'; render();
         let shown = 0;
         await libUploadFile(it.file, path, it.type, p=>{ it.pct = p; if(p - shown > 0.01 || p===1){ shown = p; libShowProgress(it); } });
@@ -5368,7 +5381,7 @@ async function libUploadFiles(files){
   };
   await Promise.all([worker(), worker()]);
   const ok = todo.filter(x=>x.status==='done').length;
-  if(ok){ S.libFilterSinger = singer.id; S.libUntaggedOnly = true; toast(`${ok} video${ok===1?'':'s'} uploaded — tag them below.`, 'success'); }
+  if(ok){ S.libFilterSinger = singer.id; S.libUntaggedOnly = true; toast(`${ok} file${ok===1?'':'s'} uploaded — tag them below.`, 'success'); }
   render();
 }
 async function libSaveSinger(id, patch){
@@ -5767,6 +5780,25 @@ function libBrowsePool(){
   const vids = L.videos.filter(v=>v.published && shown.has(v.singer_id));
   return S.libAt==='all' ? vids : vids.filter(v=>v.singer_id===S.libAt);
 }
+// The picture on an artist's card: the one chosen for them, else their newest photo in the library.
+function libSingerPic(s){
+  if(s.photo_path && LIB_URL(s.photo_path)) return LIB_URL(s.photo_path);
+  const p = S.lib.videos.find(v=>v.singer_id===s.id && v.published && libIsPhoto(v) && LIB_URL(v.thumb_path || v.video_path));
+  return p ? LIB_URL(p.thumb_path || p.video_path) : '';
+}
+function libCountLine(items){
+  const ph = items.filter(libIsPhoto).length, vi = items.length - ph;
+  return [vi || !ph ? `${vi} video${vi===1?'':'s'}` : '', ph ? `${ph} photo${ph===1?'':'s'}` : ''].filter(Boolean).join(' · ');
+}
+// Makes a library photo the artist's card picture (a copy, so deleting the photo later keeps the picture).
+async function libUseAsSingerPhoto(videoId){
+  const v = S.lib.videos.find(x=>x.id===videoId), s = v && S.lib.singers.find(x=>x.id===v.singer_id); if(!v || !s) return;
+  const path = `singers/${s.id}-${Date.now()}.${(v.video_path.split('.').pop()||'jpg').toLowerCase()}`;
+  const { error } = await supabaseClient.storage.from(LIB_BUCKET).copy(v.video_path, path);
+  if(error){ toast('Could not set the picture: ' + error.message, 'system'); return; }
+  const old = s.photo_path;
+  if(await libSaveSinger(s.id, { photo_path:path })){ await libSignPaths([path]); toast(`${s.name}'s card picture is set.`, 'success'); render(); if(old) supabaseClient.storage.from(LIB_BUCKET).remove([old]); }
+}
 function libInitials(name){ return esc(String(name||'?').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase()); }
 function libFmtLen(s){ s = Math.round(Number(s)||0); if(!s) return ''; const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0'); }
 function libDownloadUrl(v){ const u = LIB_URL(v.video_path); return u ? `${u}&download=${encodeURIComponent(v.file_name || (v.title + '.mp4'))}` : ''; }
@@ -5775,28 +5807,30 @@ function renderLibBrowse(){
   const singers = L.singers.filter(s=>s.active);
   const at = S.libAt && (S.libAt==='all' || singers.some(s=>s.id===S.libAt)) ? S.libAt : '';
   if(!at){
-    const count = id => L.videos.filter(v=>v.published && v.singer_id===id).length;
+    const count = id => libCountLine(L.videos.filter(v=>v.published && v.singer_id===id));
     return `<div data-testid="lib-browse">
-      <div class="lib-bar"><div style="min-width:0;"><div class="lib-label">Performance videos</div><h2 class="lib-h">Choose a singer</h2></div>
-        <button class="btn btn-sm" data-action="lib-at" data-id="all">Search all videos</button></div>
+      <div class="lib-bar"><div style="min-width:0;"><div class="lib-label">Videos &amp; photos</div><h2 class="lib-h">Choose an artist</h2></div>
+        <button class="btn btn-sm" data-action="lib-at" data-id="all">Search everything</button></div>
       ${singers.length ? `<div class="lib-singers">${singers.map(s=>`<button type="button" class="lib-singer" data-action="lib-at" data-id="${esc(s.id)}" data-testid="singer-card">
-        <span class="lib-singer-ph">${s.photo_path && LIB_URL(s.photo_path) ? `<img src="${esc(LIB_URL(s.photo_path))}" alt="" loading="lazy"/>` : libInitials(s.name)}</span>
-        <span class="lib-singer-nm"><strong>${esc(s.name)}</strong><span>${count(s.id)} video${count(s.id)===1?'':'s'}</span></span></button>`).join('')}</div>`
-        : `<div class="card lib-empty">No singers yet.</div>`}</div>`;
+        <span class="lib-singer-ph">${libSingerPic(s) ? `<img src="${esc(libSingerPic(s))}" alt="" loading="lazy"/>` : libInitials(s.name)}</span>
+        <span class="lib-singer-nm"><strong>${esc(s.name)}</strong><span>${count(s.id)}</span></span></button>`).join('')}</div>`
+        : `<div class="card lib-empty">No artists yet.</div>`}</div>`;
   }
   const singer = at==='all' ? null : singers.find(s=>s.id===at);
   const pool = libBrowsePool();
   const F = S.libF || (S.libF = {});
   const used = new Set(pool.flatMap(v=>v.tagIds));
-  const rows = LIB_FILTERS.map(([c,label])=>{
+  const kinds = new Set(pool.map(v=>libIsPhoto(v) ? 'photo' : 'video'));
+  const kindRow = kinds.size > 1 ? `<div class="lib-frow"><span class="lib-label">Show</span><div class="lib-chips">${[['','Everything'],['video','Videos'],['photo','Photos']].map(([k,l])=>`<button type="button" class="lib-chip" data-action="lib-kind" data-id="${k}" aria-pressed="${(S.libKind||'')===k}">${l}</button>`).join('')}</div></div>` : '';
+  const rows = kindRow + LIB_FILTERS.map(([c,label])=>{
     const opts = c==='singer' ? (singer || singers.length<2 ? [] : singers) : libTagsOf(c).filter(t=>used.has(t.id));
     return opts.length ? `<div class="lib-frow"><span class="lib-label">${label}</span><div class="lib-chips">${opts.map(t=>`<button type="button" class="lib-chip" data-action="lib-chip" data-cat="${c}" data-id="${esc(t.id)}" aria-pressed="${!!(F[c]||[]).includes(t.id)}">${esc(t.name)}</button>`).join('')}</div></div>` : '';
   }).join('');
   return `<div data-testid="lib-browse">
     <div class="lib-bar"><div style="display:flex;align-items:center;gap:12px;min-width:0;">
         <button class="icon-btn" data-action="lib-at" data-id="" title="All singers" aria-label="All singers">${ICO.chev('l')}</button>
-        ${singer ? `<span class="lib-av">${singer.photo_path && LIB_URL(singer.photo_path) ? `<img src="${esc(LIB_URL(singer.photo_path))}" alt=""/>` : libInitials(singer.name)}</span>` : ''}
-        <div style="min-width:0;"><div class="lib-label">Performance videos</div><h2 class="lib-h">${esc(singer ? singer.name : 'All singers')}</h2></div></div></div>
+        ${singer ? `<span class="lib-av">${libSingerPic(singer) ? `<img src="${esc(libSingerPic(singer))}" alt=""/>` : libInitials(singer.name)}</span>` : ''}
+        <div style="min-width:0;"><div class="lib-label">Videos &amp; photos</div><h2 class="lib-h">${esc(singer ? singer.name : 'All artists')}</h2></div></div></div>
     ${rows ? `<div class="card card-pad lib-filters">${rows}</div>` : ''}
     <div class="lib-toolbar"><input type="search" placeholder="Search titles and songs" data-lib-q value="${esc(S.libQ||'')}" style="flex:1 1 200px;max-width:340px;"/>
       <span style="display:flex;align-items:center;gap:10px;margin-left:auto;"><span style="font-size:12px;color:var(--ink-3);" data-lib-count></span>
@@ -5805,8 +5839,8 @@ function renderLibBrowse(){
 }
 // Within a filter any chosen option matches; across filters all must.
 function libBrowseList(){
-  const F = S.libF || {}, q = String(S.libQ||'').trim().toLowerCase();
-  return libBrowsePool().filter(v=>LIB_FILTERS.every(([c])=>{ const want = F[c]||[]; return !want.length || (c==='singer' ? want.includes(v.singer_id) : v.tagIds.some(id=>want.includes(id))); })
+  const F = S.libF || {}, q = String(S.libQ||'').trim().toLowerCase(), kind = S.libKind || '';
+  return libBrowsePool().filter(v=>(!kind || (kind==='photo') === libIsPhoto(v)) && LIB_FILTERS.every(([c])=>{ const want = F[c]||[]; return !want.length || (c==='singer' ? want.includes(v.singer_id) : v.tagIds.some(id=>want.includes(id))); })
     && (!q || `${v.title} ${v.songs||''}`.toLowerCase().includes(q)))
     .sort((a,b)=>String(b.recorded_on||'').localeCompare(String(a.recorded_on||'')) || String(b.created_at).localeCompare(String(a.created_at)));
 }
@@ -5814,18 +5848,18 @@ function renderLibResults(){
   const L = S.lib, list = libBrowseList();
   const tagName = new Map(L.tags.map(t=>[t.id,t]));
   const singerName = id => (L.singers.find(s=>s.id===id)||{}).name || '';
-  const any = Object.values(S.libF||{}).some(a=>a.length) || String(S.libQ||'').trim();
+  const any = Object.values(S.libF||{}).some(a=>a.length) || String(S.libQ||'').trim() || S.libKind;
   const html = list.length ? `<div class="lib-grid">${list.map(v=>{
     const tags = LIB_CATS.flatMap(([c])=>v.tagIds.map(id=>tagName.get(id)).filter(t=>t && t.category===c));
     const sub = [S.libAt==='all' ? singerName(v.singer_id) : '', v.songs].filter(Boolean).join(' · ');
     return `<div class="card lib-vid" data-testid="video-card">
-      <button type="button" class="lib-thumb" data-action="lib-play" data-id="${esc(v.id)}" aria-label="Play ${esc(v.title)}">${v.thumb_path && LIB_URL(v.thumb_path) ? `<img src="${esc(LIB_URL(v.thumb_path))}" alt="" loading="lazy"/>` : ''}
-        <span class="lib-play"><svg width="18" height="18" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"/></svg></span>${libFmtLen(v.duration_s) ? `<span class="lib-dur">${libFmtLen(v.duration_s)}</span>` : ''}</button>
+      <button type="button" class="lib-thumb ${libIsPhoto(v) ? 'is-photo' : ''}" data-action="lib-play" data-id="${esc(v.id)}" aria-label="${libIsPhoto(v) ? 'View' : 'Play'} ${esc(v.title)}">${LIB_URL(v.thumb_path || (libIsPhoto(v) ? v.video_path : '')) ? `<img src="${esc(LIB_URL(v.thumb_path || v.video_path))}" alt="" loading="lazy"/>` : ''}
+        ${libIsPhoto(v) ? '' : `<span class="lib-play"><svg width="18" height="18" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"/></svg></span>${libFmtLen(v.duration_s) ? `<span class="lib-dur">${libFmtLen(v.duration_s)}</span>` : ''}`}</button>
       <div class="lib-vb"><div class="lib-vt">${esc(v.title)}</div>${sub ? `<div class="lib-vs">${esc(sub)}</div>` : ''}
         ${tags.length ? `<div class="lib-badges">${tags.map(t=>`<span class="pill">${esc(t.name)}</span>`).join('')}</div>` : ''}
         <div class="lib-vf"><span>${v.recorded_on ? esc(new Date(v.recorded_on+'T00:00:00').toLocaleDateString('en-US',{ month:'short', year:'numeric' })) : ''}</span>
           <a class="btn btn-sm" href="${esc(libDownloadUrl(v))}" data-action="external-link" data-testid="download">${ICO.download} Download</a></div></div></div>`; }).join('')}</div>`
-    : `<div class="card lib-empty">${any ? 'No videos match. Try removing a filter.' : 'No videos here yet.'}</div>`;
+    : `<div class="card lib-empty">${any ? 'Nothing matches. Try removing a filter.' : 'Nothing here yet.'}</div>`;
   return html + `<span hidden data-lib-n="${list.length}"></span>`;
 }
 function libRefreshResults(){
@@ -5834,13 +5868,13 @@ function libRefreshResults(){
 }
 function libSyncCount(){
   const n = document.querySelector('[data-lib-n]'), c = document.querySelector('[data-lib-count]');
-  if(n && c){ const k = Number(n.dataset.libN); c.textContent = `${k} video${k===1?'':'s'}`; }
+  if(n && c){ const k = Number(n.dataset.libN); c.textContent = `${k} item${k===1?'':'s'}`; }
 }
 function libStopPreviews(){ document.querySelectorAll('video[data-lib-preview]').forEach(el=>{ el.pause(); el.removeAttribute('src'); el.load(); el.remove(); }); }
 // A muted preview on hover (mouse only; on a phone a tap opens the player).
 function bindLibPreviews(){
   if(!window.matchMedia('(hover:hover) and (pointer:fine)').matches) return;
-  document.querySelectorAll('.lib-thumb[data-id]').forEach(b=>{
+  document.querySelectorAll('.lib-thumb[data-id]:not(.is-photo)').forEach(b=>{
     let t = null;
     b.addEventListener('mouseenter', ()=>{ t = setTimeout(()=>{
       const v = S.lib && S.lib.videos.find(x=>x.id===b.dataset.id); if(!v || !LIB_URL(v.video_path)) return;
@@ -5860,12 +5894,13 @@ function libOpenPlayer(id){
   libStopPreviews();
   const ov = document.createElement('div');
   ov.className = 'lib-ov';
+  const photo = libIsPhoto(v), singer = S.lib.singers.find(x=>x.id===v.singer_id);
   ov.innerHTML = `<div class="lib-player" role="dialog" aria-label="${esc(v.title)}"><div class="lib-player-bar"><strong style="overflow-wrap:anywhere;min-width:0;">${esc(v.title)}</strong>
-      <span style="display:flex;gap:8px;"><a class="btn btn-sm btn-primary" href="${esc(libDownloadUrl(v))}">${ICO.download} Download</a><button class="btn btn-sm" data-lib-close>Close</button></span></div>
-    <video controls autoplay playsinline src="${esc(LIB_URL(v.video_path))}"${v.thumb_path ? ` poster="${esc(LIB_URL(v.thumb_path))}"` : ''}></video></div>`;
-  const close = ()=>{ const el = ov.querySelector('video'); el.pause(); el.removeAttribute('src'); el.load(); ov.remove(); document.removeEventListener('keydown', onKey); };
+      <span style="display:flex;gap:8px;flex-wrap:wrap;">${photo && singer && canManageLibrary() ? `<button class="btn btn-sm" data-lib-cover data-testid="lib-use-photo">Use as ${esc(singer.name.split(/\s+/)[0])}'s card picture</button>` : ''}<a class="btn btn-sm btn-primary" href="${esc(libDownloadUrl(v))}">${ICO.download} Download</a><button class="btn btn-sm" data-lib-close>Close</button></span></div>
+    ${photo ? `<img src="${esc(LIB_URL(v.video_path))}" alt="${esc(v.title)}"/>` : `<video controls autoplay playsinline src="${esc(LIB_URL(v.video_path))}"${v.thumb_path ? ` poster="${esc(LIB_URL(v.thumb_path))}"` : ''}></video>`}</div>`;
+  const close = ()=>{ const el = ov.querySelector('video'); if(el){ el.pause(); el.removeAttribute('src'); el.load(); } ov.remove(); document.removeEventListener('keydown', onKey); };
   const onKey = e=>{ if(e.key==='Escape') close(); };
-  ov.addEventListener('click', e=>{ if(e.target===ov || e.target.closest('[data-lib-close]')) close(); });
+  ov.addEventListener('click', e=>{ if(e.target.closest('[data-lib-cover]')){ close(); libUseAsSingerPhoto(v.id); return; } if(e.target===ov || e.target.closest('[data-lib-close]')) close(); });
   document.addEventListener('keydown', onKey);
   document.body.appendChild(ov);
 }
@@ -5880,14 +5915,14 @@ function renderLibVideos(){
   return `
   <div class="card card-pad" style="margin-bottom:14px;" data-testid="lib-upload">
     <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:12px;">
-      <h3 style="margin:0;">Upload videos</h3>
-      <select data-lib-upload-singer style="max-width:100%;min-width:200px;"><option value="">Choose the singer…</option>${L.singers.map(s=>`<option value="${esc(s.id)}" ${s.id===S.libUploadSinger?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+      <h3 style="margin:0;">Upload videos &amp; photos</h3>
+      <select data-lib-upload-singer style="max-width:100%;min-width:200px;"><option value="">Choose the artist…</option>${L.singers.map(s=>`<option value="${esc(s.id)}" ${s.id===S.libUploadSinger?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
     </div>
     <label class="lib-drop ${S.libUploadSinger?'':'off'}" data-lib-drop>
       <span class="lib-drop-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg></span>
-      <strong style="font-size:14px;">${S.libUploadSinger ? 'Drop videos here, or click to choose' : 'Choose the singer first, then drop videos here'}</strong>
-      <span style="font-size:12px;color:var(--ink-3);">As many as you like at once · mp4, mov, m4v, webm · up to 5 GB each</span>
-      <input type="file" accept="video/*,.mov,.m4v" multiple data-lib-files style="display:none;" ${S.libUploadSinger?'':'disabled'}/>
+      <strong style="font-size:14px;">${S.libUploadSinger ? 'Drop videos and photos here, or click to choose' : 'Choose the artist first, then drop files here'}</strong>
+      <span style="font-size:12px;color:var(--ink-3);">As many as you like at once · videos: mp4, mov, m4v, webm, up to 5 GB · photos: JPG, PNG, WebP</span>
+      <input type="file" accept="video/*,image/jpeg,image/png,image/webp,.mov,.m4v" multiple data-lib-files style="display:none;" ${S.libUploadSinger?'':'disabled'}/>
     </label>
     ${ups.length ? `<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">${ups.map(u=>`<div style="font-size:12.5px;min-width:0;" data-lib-up="${esc(u.key)}">
       <div style="display:flex;justify-content:space-between;gap:8px;"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${esc(u.name)}</span>
@@ -5899,7 +5934,7 @@ function renderLibVideos(){
     <select data-lib-filter-singer style="max-width:100%;"><option value="">All singers</option>${L.singers.map(s=>`<option value="${esc(s.id)}" ${s.id===S.libFilterSinger?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
     <input type="search" placeholder="Search titles and songs" data-lib-search value="${esc(S.libSearch||'')}" style="flex:1 1 180px;max-width:300px;"/>
     <label class="lib-check"><input type="checkbox" data-lib-untagged ${S.libUntaggedOnly?'checked':''}/> Needs tags only</label>
-    <span style="font-size:12px;color:var(--ink-3);margin-left:auto;">${list.length} video${list.length===1?'':'s'}</span>
+    <span style="font-size:12px;color:var(--ink-3);margin-left:auto;">${list.length} file${list.length===1?'':'s'}</span>
   </div>
   ${selCount ? `<div class="card card-pad" style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;" data-testid="lib-bulk">
     <strong style="font-size:13px;">${selCount} selected:</strong>
@@ -5908,10 +5943,10 @@ function renderLibVideos(){
     <button class="btn btn-sm btn-ghost" data-action="lib-select-none">Clear selection</button>
   </div>` : ''}
   ${list.length ? `<div class="card table-cards"><table>
-    <thead><tr><th><input type="checkbox" data-lib-select-all ${selCount && selCount===list.length?'checked':''} aria-label="Select all"/></th><th>Video</th><th>Title &amp; songs</th>${LIB_CATS.map(([,l])=>`<th>${l}</th>`).join('')}<th>Shown</th><th></th></tr></thead>
+    <thead><tr><th><input type="checkbox" data-lib-select-all ${selCount && selCount===list.length?'checked':''} aria-label="Select all"/></th><th>File</th><th>Title &amp; songs</th>${LIB_CATS.map(([,l])=>`<th>${l}</th>`).join('')}<th>Shown</th><th></th></tr></thead>
     <tbody>${list.map(v=>`<tr data-testid="lib-row">
       <td data-label="Select"><input type="checkbox" data-lib-select="${esc(v.id)}" ${sel.has(v.id)?'checked':''} aria-label="Select"/></td>
-      <td data-label="Video"><a href="${esc(LIB_URL(v.video_path))}" target="_blank" rel="noopener" data-action="external-link" style="display:block;width:120px;max-width:100%;aspect-ratio:16/9;border-radius:6px;overflow:hidden;background:#000;position:relative;">${v.thumb_path?`<img src="${esc(LIB_URL(v.thumb_path))}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;"/>`:''}${fmtLen(v.duration_s)?`<span style="position:absolute;right:4px;bottom:4px;background:rgba(0,0,0,.7);color:#fff;font-size:10px;padding:0 4px;border-radius:3px;">${fmtLen(v.duration_s)}</span>`:''}</a>
+      <td data-label="File"><a href="${esc(LIB_URL(v.video_path))}" target="_blank" rel="noopener" data-action="external-link" style="display:block;width:120px;max-width:100%;aspect-ratio:16/9;border-radius:6px;overflow:hidden;background:#000;position:relative;">${v.thumb_path?`<img src="${esc(LIB_URL(v.thumb_path))}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;"/>`:''}${fmtLen(v.duration_s)?`<span style="position:absolute;right:4px;bottom:4px;background:rgba(0,0,0,.7);color:#fff;font-size:10px;padding:0 4px;border-radius:3px;">${fmtLen(v.duration_s)}</span>`:''}</a>
         ${!S.libFilterSinger?`<div style="font-size:11px;color:var(--ink-3);margin-top:3px;">${esc(singerName(v.singer_id))}</div>`:''}</td>
       <td data-label="Title"><input value="${esc(v.title)}" data-lib-title="${esc(v.id)}" aria-label="Title" style="width:100%;min-width:0;"/>
         <input value="${esc(v.songs||'')}" data-lib-songs="${esc(v.id)}" placeholder="Song name(s)" aria-label="Songs" style="width:100%;min-width:0;margin-top:4px;font-size:12px;"/>
@@ -5920,7 +5955,7 @@ function renderLibVideos(){
       <td data-label="Shown"><input type="checkbox" data-lib-published="${esc(v.id)}" ${v.published?'checked':''} aria-label="Shown in the library"/></td>
       <td><button class="icon-btn" data-action="lib-delete-video" data-id="${esc(v.id)}" title="Delete" aria-label="Delete">${ICO.trash}</button></td>
     </tr>`).join('')}</tbody></table></div>`
-  : `<div class="card lib-empty">${L.videos.length ? 'No videos match.' : 'No videos yet — choose a singer and drop some in above.'}</div>`}`;
+  : `<div class="card lib-empty">${L.videos.length ? 'Nothing matches.' : 'Nothing yet — choose an artist and drop videos or photos in above.'}</div>`}`;
 }
 function renderLibSingers(){
   const L = S.lib, count = id => L.videos.filter(v=>v.singer_id===id).length;
@@ -5930,7 +5965,7 @@ function renderLibSingers(){
         <label class="lib-photo" title="${s.photo_path?'Change':'Add'} photo"><span class="lib-photo-av">${s.photo_path?`<img src="${esc(LIB_URL(s.photo_path))}" alt=""/>`:esc(String(s.name||'?').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase())}</span><span class="lib-photo-cam">${ICO.image}</span>
           <input type="file" accept="image/jpeg,image/png,image/webp" data-lib-photo="${esc(s.id)}" style="display:none;"/></label>
         <div style="min-width:0;flex:1;"><input class="lib-inline" value="${esc(s.name)}" data-lib-singer-name="${esc(s.id)}" aria-label="Name" style="width:100%;font-weight:600;font-size:14.5px;"/>
-          <p style="margin:2px 0 0 9px;font-size:11.5px;color:var(--ink-3);">${count(s.id)} video${count(s.id)===1?'':'s'}${s.photo_path?'':' · no photo yet: tap the circle'}</p></div>
+          <p style="margin:2px 0 0 9px;font-size:11.5px;color:var(--ink-3);">${count(s.id)} video${count(s.id)===1?'':'s'}${s.photo_path?'':' · no card picture yet: tap the circle, or open one of their photos in the Library and choose “Use as card picture”'}</p></div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;">
         <label class="lib-check"><input type="checkbox" data-lib-singer-active="${esc(s.id)}" ${s.active?'checked':''}/> Shown</label>
@@ -5971,7 +6006,7 @@ function bindVideoLibrary(){
   q('[data-lib-drop]').forEach(el=>{
     el.addEventListener('dragover', e=>{ e.preventDefault(); el.style.borderColor = 'var(--accent)'; });
     el.addEventListener('dragleave', ()=>{ el.style.borderColor = ''; });
-    el.addEventListener('drop', e=>{ e.preventDefault(); el.style.borderColor = ''; if(!S.libUploadSinger){ toast('Pick the singer first.', 'system'); return; } const f = [...(e.dataTransfer.files||[])]; if(f.length) libUploadFiles(f); });
+    el.addEventListener('drop', e=>{ e.preventDefault(); el.style.borderColor = ''; if(!S.libUploadSinger){ toast('Pick the artist first.', 'system'); return; } const f = [...(e.dataTransfer.files||[])]; if(f.length) libUploadFiles(f); });
   });
   q('[data-lib-filter-singer]').forEach(el=>el.addEventListener('change', ()=>{ S.libFilterSinger = el.value; render(); }));
   q('[data-lib-untagged]').forEach(el=>el.addEventListener('change', ()=>{ S.libUntaggedOnly = el.checked; render(); }));
@@ -7677,6 +7712,9 @@ function renderAdminActions(ev){
   const buttons=[];
   if(ev.status==='lead'||ev.status==='negotiating'){
     // (The contract lives in the Contracts card -- one place to create, view and send it; owner 2026-10-15.)
+    // Confirming without the contract / deposit steps (owner 2026-10-29: "a button to confirm a gig that's
+    // currently a new lead as an admin"): it becomes Booked; the deposit is still owed and tracked.
+    buttons.push(`<button class="btn btn-primary btn-block" data-action="confirm-lead" data-id="${ev.id}" data-testid="confirm-lead">${ICO.check} Confirm Booking</button>`);
   }
   if(ev.status==='contract_sent'){
     buttons.push(`<button class="btn btn-primary btn-block" data-action="mark-deposit" data-id="${ev.id}">${ICO.check} Mark Booking Fee Received — Lock In Booking</button>`);
@@ -9127,6 +9165,7 @@ function renderMercuryCard(){
     ${recent.length ? `<h4 style="margin:14px 0 6px;font-size:.95rem;">Recent transfers</h4>${recent.map(t=>`<p style="font-size:12px;margin:0 0 4px;overflow-wrap:anywhere;">${esc(t.status==='sent'?'Sent':t.status==='test'?'Test':'Cancelled')}: ${moneyCents(t.amount_cents/100)} to ${esc(t.payee_name||'')} for ${esc(t.event_legacy_id)}${t.note && t.status!=='cancelled' ? ` — ${esc(t.note)}` : ''}</p>`).join('')}` : ''}
   </div>`;
 }
+// Shown only once QuickBooks is set up (QBO_CLIENT_ID); owner 2026-10-29 asked for the "not set up" card gone.
 function renderQuickBooksCard(){
   const st = S.qboStatus;
   const configured = !!QBO_CLIENT_ID;
@@ -9598,6 +9637,15 @@ function doSendContract(id){
   // Send and Edit at the top; a new one opens in the builder to be filled in.
   if(latest){ S.contractBuilderId = latest.id; S.showContractBuilderDoc = true; }
   else { startContractForLead(id); return; }
+  render();
+}
+function doConfirmLead(id){
+  const ev = getEvent(id); if(!ev || !['lead','negotiating'].includes(ev.status)) return;
+  if(!confirm('Confirm this gig as booked? It goes on the calendar as Booked. The deposit still shows as owed until you mark it received.')) return;
+  logEvent(ev, 'success', 'Confirmed as booked by the office (before a contract or deposit).');
+  const result = updateEvent(id, { status:'booked' });
+  if(!result.ok){ toast(result.error==='conflict' ? 'This gig changed elsewhere since you loaded it — reload and try again.' : 'Could not save.', 'system'); return; }
+  toast('Gig confirmed — it is now Booked.', 'success');
   render();
 }
 function doMarkDeposit(id, extra={}){
@@ -10861,6 +10909,7 @@ function bindGlobal(){
       case 'pricing-artist': S.pricingArtist = id; render(); break;
       case 'send-contract': doSendContract(id); break;
       case 'mark-deposit': doMarkDeposit(id); break;
+      case 'confirm-lead': doConfirmLead(id); break;
       case 'toggle-flight': doToggleFlight(id); break;
       case 'open-flight-form': S.flightForm={}; S.showFlightForm=true; render(); break;
       case 'close-flight-form': S.showFlightForm=false; render(); break;
@@ -11018,11 +11067,12 @@ function bindGlobal(){
       case 'mark-balance': doMarkBalance(id); break;
       case 'inbox-money': { const it = (S.inboxItems||[]).find(x=>x.id===id); if(it) applyInboxMoney(it, false); break; }
       case 'lib-tab': S.libTab = id; render(); break;
-      case 'lib-at': S.libAt = id; S.libF = {}; S.libQ = ''; libStopPreviews(); render(); window.scrollTo(0,0); break;
+      case 'lib-at': S.libAt = id; S.libF = {}; S.libQ = ''; S.libKind = ''; libStopPreviews(); render(); window.scrollTo(0,0); break;
       case 'lib-chip': { const c = t.dataset.cat, F = S.libF || (S.libF = {}), a = F[c] || (F[c] = []);
         a.includes(id) ? a.splice(a.indexOf(id), 1) : a.push(id); t.setAttribute('aria-pressed', a.includes(id)); libRefreshResults(); break; }
-      case 'lib-clear': S.libF = {}; S.libQ = ''; render(); break;
+      case 'lib-clear': S.libF = {}; S.libQ = ''; S.libKind = ''; render(); break;
       case 'lib-play': libOpenPlayer(id); break;
+      case 'lib-kind': S.libKind = id; render(); break;
       case 'drive-connect': doOAuthConnect('gdrive'); break;
       case 'drive-backup-now': doDriveBackupNow(false); break;
       case 'wa-open': S.waContact = id; S.waDraft = ''; S.waEditName = null; render(); break;

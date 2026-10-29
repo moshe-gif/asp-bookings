@@ -131,7 +131,7 @@ def test_admin_uploads_tags_and_client_downloads(live_server, page, browser):
         page.locator('.lib-chip', has_text="Wedding").click()
         assert page.locator('[data-testid="video-card"]').count() == 1
         page.locator('[data-lib-q]').fill("no such video")
-        page.get_by_text("No videos match").wait_for(state="visible", timeout=5000)
+        page.get_by_text("Nothing matches").wait_for(state="visible", timeout=5000)
         page.locator('[data-lib-q]').fill("")
         href = card.first.locator('[data-testid="download"]').get_attribute("href")
         with urllib.request.urlopen(urllib.request.Request(href, method="GET")) as r:
@@ -142,6 +142,26 @@ def test_admin_uploads_tags_and_client_downloads(live_server, page, browser):
         page.locator(".lib-ov video").wait_for(state="visible", timeout=10000)
         page.keyboard.press("Escape")
         assert page.locator(".lib-ov").count() == 0
+
+        # A photo too (Media Library): it shows as a photo, opens full size, and can become the card picture.
+        page.locator('[data-action="lib-tab"][data-id="videos"]').click()
+        page.locator("[data-lib-upload-singer]").select_option(label=TEST_SINGER)
+        png = page.evaluate("""() => new Promise(r => { const c = document.createElement('canvas'); c.width = 320; c.height = 400;
+          const g = c.getContext('2d'); g.fillStyle = '#4C6FA5'; g.fillRect(0, 0, 320, 400);
+          c.toBlob(b => b.arrayBuffer().then(a => r(Array.from(new Uint8Array(a)))), 'image/png'); })""")
+        page.locator("[data-lib-files]").set_input_files({"name": "Harness_Headshot.png", "mimeType": "image/png", "buffer": bytes(png)})
+        page.wait_for_function("() => S.lib.videos.some(v => v.title === 'Harness Headshot' && v.mime === 'image/png' && v.thumb_path)", timeout=30000)
+        page.locator('[data-action="lib-tab"][data-id="browse"]').click()
+        page.locator('[data-action="lib-at"][data-id=""]').click()
+        cardpic = page.locator('[data-testid="singer-card"]', has_text=TEST_SINGER).locator("img")
+        cardpic.wait_for(state="visible", timeout=10000)   # the newest photo stands in until one is chosen
+        page.locator('[data-testid="singer-card"]', has_text=TEST_SINGER).click()
+        page.locator('.lib-chip', has_text="Photos").click()
+        assert page.locator('[data-testid="video-card"]').count() == 1
+        page.locator('[data-testid="video-card"] [data-action="lib-play"]').click()
+        page.locator(".lib-ov img").wait_for(state="visible", timeout=10000)
+        page.locator('[data-testid="lib-use-photo"]').click()
+        page.wait_for_function("n => (S.lib.singers.find(s => s.name === n) || {}).photo_path", arg=TEST_SINGER, timeout=15000)
     finally:
         _remove_test_singer(page)
     assert not errors, f"console errors: {errors}"

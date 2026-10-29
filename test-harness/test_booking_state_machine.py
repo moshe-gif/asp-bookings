@@ -117,3 +117,19 @@ def test_concurrent_mark_deposit_surfaces_conflict_instead_of_silent_overwrite(l
     )
     assert not errors_a, f"console errors in tab A: {errors_a}"
     assert not errors_b, f"console errors in tab B: {errors_b}"
+
+
+def test_admin_confirms_a_new_lead(live_server, page):
+    """Owner 2026-10-29: a Confirm Booking button on a new lead (no contract / deposit step first)."""
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    create_lead(page, "Test Harness Confirm Lead", "2027-08-21", artist_id="benny")
+    sheet = page.locator(".sheet")
+    assert "New Lead" in sheet.inner_text()
+    page.once("dialog", lambda d: d.accept())
+    sheet.locator('[data-testid="confirm-lead"]').click()
+    page.wait_for_function("() => S.events.some(e => e.clientName === 'Test Harness Confirm Lead' && e.status === 'booked' && !e.depositReceived)", timeout=10000)
+    assert sheet.locator('[data-testid="confirm-lead"]').count() == 0
+    assert "Booked" in sheet.inner_text()
+    assert not errors, f"console errors: {errors}"

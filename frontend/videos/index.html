@@ -139,7 +139,7 @@
     const [singers, tags, videos] = await Promise.all([
       get('library_singers?select=id,slug,name,photo_path&active=eq.true&order=sort,name'),
       get('library_tags?select=id,category,name&order=category,sort,name'),
-      get('library_videos?select=id,singer_id,title,songs,recorded_on,duration_s,video_path,thumb_path,file_name,library_video_tags(tag_id)&published=eq.true&order=recorded_on.desc.nullslast,created_at.desc'),
+      get('library_videos?select=id,singer_id,title,songs,recorded_on,duration_s,video_path,thumb_path,file_name,mime,library_video_tags(tag_id)&published=eq.true&mime=not.like.image/*&order=recorded_on.desc.nullslast,created_at.desc'),
     ]);
     const tagById = new Map(tags.map(t=>[t.id,t]));
     videos.forEach(v=>{ v.tags = (v.library_video_tags||[]).map(x=>tagById.get(x.tag_id)).filter(Boolean); });
