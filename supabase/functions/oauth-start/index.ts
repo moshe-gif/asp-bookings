@@ -1,4 +1,4 @@
-// Issues the one-time OAuth `state` for connecting QuickBooks / Google Calendar / a Gmail mailbox
+// Issues the one-time OAuth `state` for connecting QuickBooks / Google Calendar / a Gmail mailbox / Google Drive
 // (2026-10-09 audit 1.2). Only a signed-in admin can get one; it is stored server-side
 // (oauth_states, migration 0034, service-role only) for 10 minutes and consumed by the matching
 // *-oauth-callback, which rejects any state it didn't issue.
@@ -21,7 +21,13 @@ Deno.serve(async (req) => {
   let body: { provider?: string; mailboxId?: string };
   try { body = await req.json(); } catch { return json({ ok: false, error: "bad json" }, 400); }
   const provider = body?.provider;
-  if (!provider || !["qbo", "gcal", "gmail"].includes(provider)) return json({ ok: false, error: "unknown provider" }, 400);
+  if (!provider || !["qbo", "gcal", "gmail", "gdrive"].includes(provider)) return json({ ok: false, error: "unknown provider" }, 400);
+
+  // Google Drive backup of the Video Library (0074): only the people who run the library.
+  if (provider === "gdrive") {
+    const { data: ok } = await auth.caller.rpc("is_library_admin");
+    if (!ok) return json({ ok: false, error: "not authorized" }, 403);
+  }
 
   const sb = serviceClient();
   let mailboxId: string | null = null;

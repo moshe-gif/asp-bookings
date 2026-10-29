@@ -2549,7 +2549,7 @@ async function doOAuthConnect(provider, mailboxId){
     });
     const data = await resp.json().catch(()=>({ ok:false, error:'Unexpected response from the server.' }));
     if(!resp.ok || data.ok===false || !data.state){ toast('Could not start the connection: ' + (data.error||'unknown error'), 'system'); return; }
-    location.href = provider==='qbo' ? qboAuthorizeUrl(data.state) : provider==='gcal' ? gcalAuthorizeUrl(data.state) : gmailAuthorizeUrl(data.state, mailboxId);
+    location.href = provider==='qbo' ? qboAuthorizeUrl(data.state) : provider==='gcal' ? gcalAuthorizeUrl(data.state) : provider==='gdrive' ? driveAuthorizeUrl(data.state) : gmailAuthorizeUrl(data.state, mailboxId);
   } catch(err){ toast('Could not start the connection: ' + String(err), 'system'); }
 }
 function qboAuthorizeUrl(state){
@@ -2583,6 +2583,14 @@ function gmailAuthorizeUrl(state, mailboxId){
   // (owner 2026-10-27 hit a block signing in with his personal account); select_account still lets them switch.
   const hint = box && box.email ? `&login_hint=${encodeURIComponent(box.email)}` : '';
   return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(GMAIL_CLIENT_ID)}&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(GMAIL_REDIRECT_URI)}&response_type=code&access_type=offline&prompt=${encodeURIComponent('consent select_account')}${hint}&state=${encodeURIComponent(state)}`;
+}
+
+// The Video Library's Google Drive backup (0074): the same Google client and callback as Gmail, asking only
+// for "drive.file" (the files and folders the app makes itself), signed in as the backup account.
+const DRIVE_BACKUP_ACCOUNT = 'office@aspmgmt.com';
+function driveAuthorizeUrl(state){
+  const scope = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
+  return `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(GMAIL_CLIENT_ID)}&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(GMAIL_REDIRECT_URI)}&response_type=code&access_type=offline&prompt=${encodeURIComponent('consent select_account')}&login_hint=${encodeURIComponent(DRIVE_BACKUP_ACCOUNT)}&state=${encodeURIComponent(state)}`;
 }
 
 /* ============ STATE ============ */
@@ -3316,7 +3324,7 @@ function resetAfterSignOut(){
   stopArtistPortal();
   closeAllOverlays();
   stopWhatsAppLive(); S.wa = null; S.waContact = null;
-  S.user = null; S.previewFrom = null; S.crew = null; S.crewRoster = null; S.gigCrew = null; S.lib = null; S.libUrls = null; S.libTab = null; S.libAt = null; S.libF = null; S.libQ = null; S.realSession = null; S.realPasskeys = null; S.realRoster = null;
+  S.user = null; S.previewFrom = null; S.crew = null; S.crewRoster = null; S.gigCrew = null; S.lib = null; S.libUrls = null; S.libTab = null; S.libAt = null; S.libF = null; S.libQ = null; S.drive = null; S.realSession = null; S.realPasskeys = null; S.realRoster = null;
   S.realSignInNotFound = false; S.realSignInError = null; S.showRealSignIn = false;
   S.eventId = null; S.showNewLead = false; S.showMobileMenu = false;
   history.pushState(null, '', location.pathname + location.search);
@@ -3585,6 +3593,15 @@ async function refreshGcalStatus(){
   if(gmail==='connected'){ toast('Gmail mailbox connected.', 'success'); loadGmailStatus(); }
   else if(gmail==='error'){ toast('Could not connect that Gmail mailbox -- check the setup and try again.', 'system'); }
   else if(gmail==='mismatch'){ toast('Not connected: the Google account you signed in with is not the mailbox being connected. Sign in to Google as that mailbox and try again.', 'system'); }
+})();
+(function checkDriveRedirect(){
+  const params = new URLSearchParams(location.search);
+  const r = params.get('gdrive');
+  if(!r) return;
+  history.replaceState(null, '', location.pathname + location.hash);
+  if(r==='connected'){ toast('Google Drive connected. The library is backing up now.', 'success'); setTimeout(()=>doDriveBackupNow(true), 1500); }
+  else if(r==='mismatch'){ toast(`Not connected: sign in to Google as ${DRIVE_BACKUP_ACCOUNT} and try again.`, 'system'); }
+  else { toast('Could not connect Google Drive. Try again.', 'system'); }
 })();
 (function checkGcalRedirect(){
   const params = new URLSearchParams(location.search);
@@ -4241,7 +4258,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.42'; // bump on every release so a phone can tell it has updated. v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.43'; // bump on every release so a phone can tell it has updated. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -5707,10 +5724,38 @@ function renderVideoLibraryPage(){
   <div class="lib-head">
     <div class="lib-tabs" role="tablist">${LIB_TABS.map(([k,l])=>`<button type="button" role="tab" aria-selected="${tab===k}" class="${tab===k?'active':''}" data-action="lib-tab" data-id="${k}">${l}</button>`).join('')}</div>
     <select class="tab-select lib-tab-select" aria-label="Section">${LIB_TABS.map(([k,l])=>`<option value="${k}" ${tab===k?'selected':''}>${l}</option>`).join('')}</select>
-    <div class="lib-share"><span>Private: only people with access, signed in</span></div>
+    <div class="lib-share">${renderDriveBackupBadge()}</div>
   </div>
   ${tab==='browse' ? renderLibBrowse()
     : tab==='singers' ? renderLibSingers() : tab==='tags' ? renderLibTags() : renderLibVideos()}</div>`;
+}
+// Google Drive backup (0074), for the people who run the library (not crew).
+function canRunDriveBackup(){ return !crewUser() && !!(adminById(S.user) && adminById(S.user).libraryAccess); }
+async function loadDriveBackup(){
+  if(!canRunDriveBackup() || S.driveLoading) return;
+  S.driveLoading = true;
+  try{
+    const res = await callEdgeFunction('library-drive-backup', { action:'status' });
+    S.drive = res && res.ok ? res : { error:(res && res.error) || 'unknown' };
+  } finally { S.driveLoading = false; render(); }
+}
+async function doDriveBackupNow(quiet){
+  if(S.driveBusy) return;
+  S.driveBusy = true; render();
+  try{
+    const res = await callEdgeFunction('library-drive-backup', { action:'run' });
+    if(!quiet) toast(res.ok ? (res.skipped ? 'A backup is already running.' : `Backed up ${res.backedUp||0} video${res.backedUp===1?'':'s'}${res.error?' (one had a problem: '+res.error+')':''}.`) : 'Backup failed: ' + (res.error||'unknown'), res.ok && !res.error ? 'success' : 'system');
+  } finally { S.driveBusy = false; S.drive = null; loadDriveBackup(); }
+}
+function renderDriveBackupBadge(){
+  if(!canRunDriveBackup()) return `<span>Private: only people with access, signed in</span>`;
+  const d = S.drive;
+  if(!d){ setTimeout(loadDriveBackup, 0); return `<span>Google Drive backup…</span>`; }
+  if(d.error) return `<span title="${esc(d.error)}">Google Drive backup: couldn't check</span>`;
+  if(!d.connected) return `<span>Not backed up yet</span><button class="btn btn-sm" data-action="drive-connect" data-testid="drive-connect">Connect Google Drive</button>`;
+  const waiting = d.total - d.backedUp;
+  return `<span title="${esc(`${d.email} · ASP Video Library folder${d.lastRunAt ? ' · last checked ' + new Date(d.lastRunAt).toLocaleString() : ''}${d.lastError ? ' · ' + d.lastError : ''}`)}" data-testid="drive-status">Google Drive: ${waiting ? `${d.backedUp} of ${d.total} backed up${d.failing ? ` · ${d.failing} failing` : ''}` : `all ${d.total} backed up`}</span>
+    ${waiting ? `<button class="btn btn-sm" data-action="drive-backup-now" ${S.driveBusy?'disabled':''}>${S.driveBusy?'Backing up…':'Back up now'}</button>` : ''}`;
 }
 /* ---- Browsing the library, inside the app (owner 2026-10-29: "i want it to look as part of the app not a
    seperate window"). Singers first, then one singer's videos (or all of them) with Event / Tempo / Crowd
@@ -10978,6 +11023,8 @@ function bindGlobal(){
         a.includes(id) ? a.splice(a.indexOf(id), 1) : a.push(id); t.setAttribute('aria-pressed', a.includes(id)); libRefreshResults(); break; }
       case 'lib-clear': S.libF = {}; S.libQ = ''; render(); break;
       case 'lib-play': libOpenPlayer(id); break;
+      case 'drive-connect': doOAuthConnect('gdrive'); break;
+      case 'drive-backup-now': doDriveBackupNow(false); break;
       case 'wa-open': S.waContact = id; S.waDraft = ''; S.waEditName = null; render(); break;
       case 'wa-new': S.waContact = 'new'; S.waDraft = ''; render(); break;
       case 'wa-back': S.waContact = null; render(); break;

@@ -57,6 +57,7 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0071_whatsapp_inbox | Applied 2026-10-29 — the owner's WhatsApp tab: `whatsapp_messages` (every message in or out; written by `_shared/whatsapp.ts` and `whatsapp-webhook`, read with `admin_users.whatsapp_access` via `can_use_whatsapp()`; on Realtime); the 0070 trigger now guards `whatsapp_access` too (SQL only). |
 | 0072_deposit_confirmations | Applied 2026-10-29 — `client_followups.kind` adds `deposit_confirmed` (the WhatsApp "deposit received, booking confirmed", sent once per gig by `client-followups {only:"deposit_confirmations"}`, pg_cron job `deposit-confirmations` every 10 minutes); the 106 gigs whose deposit was already in were marked done ('baseline', nothing sent). |
 | 0073_whatsapp_media_contacts | Applied 2026-10-29 — `whatsapp_messages.media_id` / `media_mime` (incoming photos, voice notes, videos, documents open in the tab through `whatsapp-send` "media"); `whatsapp_contacts` (names the owner gives a number; WhatsApp access only). |
+| 0074_library_drive_backup | Applied 2026-10-29 — Video Library backup to Google Drive (office@aspmgmt.com): `drive_backup` (the one connection + run lock), `library_drive_folders`, `library_drive_files` (progress per video, resumable upload link); all service role only. `oauth_states` allows 'gdrive'. Cron job `library-drive-backup` every 10 minutes (copied from inbox-scan's command). |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in

@@ -26,6 +26,9 @@ Deno.serve(async (req) => {
   const sb = serviceClient();
   // The mailbox comes from the consumed state row (set by oauth-start), never from the URL.
   const st = await consumeOAuthState(sb, url.searchParams.get("state"), "gmail");
+  // The same Google sign-in also connects the Video Library's Drive backup (0074), so no second
+  // redirect address has to be registered with Google.
+  if (!st && await consumeOAuthState(sb, url.searchParams.get("state"), "gdrive")) return connectDrive(sb, code, appUrl);
   const mailboxId = st && st.mailbox_id;
   if (!mailboxId) {
     console.error("Gmail OAuth callback: missing/invalid/expired state");
@@ -90,3 +93,27 @@ Deno.serve(async (req) => {
 
   return Response.redirect(`${appUrl}/?gmail=connected#/settings`, 302);
 });
+
+// Video Library backup (0074): the account that signed in must be the one the backup is for
+// (drive_backup.account_email, office@aspmgmt.com).
+// deno-lint-ignore no-explicit-any
+async function connectDrive(sb: any, code: string, appUrl: string): Promise<Response> {
+  const back = (r: string) => Response.redirect(`${appUrl}/?gdrive=${r}#/videos`, 302);
+  const r = await fetch(GOOGLE_TOKEN_URL, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ code, client_id: Deno.env.get("GMAIL_CLIENT_ID")!, client_secret: Deno.env.get("GMAIL_CLIENT_SECRET")!,
+      redirect_uri: Deno.env.get("GMAIL_REDIRECT_URI")!, grant_type: "authorization_code" }),
+  }).catch(() => null);
+  if (!r || !r.ok) { console.error("Drive token exchange failed", r && await r.text()); return back("error"); }
+  const tokens = await r.json();
+  const who = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+  const email = who.ok ? String((await who.json()).email || "").toLowerCase() : "";
+  const { data: cfg } = await sb.from("drive_backup").select("account_email").eq("id", 1).maybeSingle();
+  if (!email || email !== String(cfg?.account_email || "").toLowerCase()) { console.error("Drive: wrong account", email); return back("mismatch"); }
+  if (!tokens.refresh_token) return back("error");
+  const { error } = await sb.from("drive_backup").update({
+    refresh_token: tokens.refresh_token, access_token: tokens.access_token,
+    access_token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(), connected_at: new Date().toISOString(), last_error: null,
+  }).eq("id", 1);
+  return back(error ? "error" : "connected");
+}

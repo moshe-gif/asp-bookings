@@ -88,6 +88,8 @@ def test_admin_uploads_tags_and_client_downloads(live_server, page, browser):
         # The tab opens on the library itself; managing is on the other tabs.
         page.locator('[data-testid="lib-browse"] [data-testid="singer-card"]').first.wait_for(state="visible", timeout=20000)
         assert page.locator("iframe").count() == 0, "the library is part of the app, not an embedded page"
+        # The Google Drive backup shows its state (connect, or how much is backed up).
+        page.locator('[data-testid="drive-connect"], [data-testid="drive-status"]').first.wait_for(state="visible", timeout=20000)
         page.locator('[data-action="lib-tab"][data-id="videos"]').click()
         page.locator('[data-testid="lib-upload"]').wait_for(state="visible", timeout=20000)
 
