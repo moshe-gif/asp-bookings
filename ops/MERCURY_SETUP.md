@@ -21,9 +21,11 @@ what would have moved (the app's test mode). Mercury's sandbox moves sandbox mon
 ## Setup
 
 1. Mercury → open the singers' accounts (Accounts → Open account), named after each singer.
-2. Mercury → Settings → API Tokens → create a token. Read-only is enough to watch money come in; to let
-   approvals move money between ASP's own accounts it must allow moving money. Allow the Supabase
-   Edge Functions' IPs if Mercury asks for an IP allow-list (or leave it unrestricted).
+2. Mercury → Settings → API Tokens → create a **Custom Scopes** token with no IP list (done 2026-10-29):
+   Fetch Depository Accounts, Fetch Transactions, Fetch Recipients, Fetch Transfer Money Requests,
+   Transfer Money with Approval, Send Money with Approval. Scopes marked * need a fixed-IP list, which
+   Supabase Edge Functions can't have, so none are used. An approved share becomes a Mercury
+   "request-transfer" that waits for approval in Mercury by a user other than the token's creator.
 3. Copy the token, then in Terminal: `~/asp-bookings/supabase/set-secret.sh MERCURY_API_TOKEN` (reads it from
    the clipboard; never paste it in chat or the repo). Optional: `MERCURY_API_BASE=https://api-sandbox.mercury.com/api/v1` with a sandbox token.
 4. Apply `supabase/migrations/0067_mercury_split.sql`; deploy: `supabase/deploy-function.sh mercury client-pay`.

@@ -1,7 +1,7 @@
 // Mercury, ASP's bank (migration 0067, ops/MERCURY_SETUP.md). Plain fetch against the REST API.
 //
-// Function Secrets: MERCURY_API_TOKEN (a Mercury API token; read-only is enough to watch money come
-// in, moving money between ASP's own accounts needs one allowed to move money),
+// Function Secrets: MERCURY_API_TOKEN (a Mercury Custom token, no IP list: Fetch Depository Accounts,
+// Fetch Transactions, Fetch Recipients, Transfer / Send Money with Approval -- set 2026-10-29),
 // MERCURY_API_BASE (optional; https://api-sandbox.mercury.com/api/v1 for Mercury's sandbox),
 // MERCURY_LIVE (exactly "yes" lets an approved transfer move real money; until then approving one on
 // the real bank only records what would have moved -- the app's test mode, owner 2026-10-14).

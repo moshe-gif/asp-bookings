@@ -9199,7 +9199,7 @@ function renderMercuryCard(){
           ${payees.map(p=>`<option value="payee:${esc(p.id)}" ${a.role==='payee'&&a.payee_profile_id===p.id?'selected':''}>${esc(p.entityName)}${p.artistId && artistById(p.artistId) ? ` (${esc(artistById(p.artistId).name)})` : ''}</option>`).join('')}
           <option value="ignore" ${a.role==='ignore'?'selected':''}>Ignore (not gig money)</option>
         </select></div>`).join('')}` : ''}
-    ${recent.length ? `<h4 style="margin:14px 0 6px;font-size:.95rem;">Recent transfers</h4>${recent.map(t=>`<p style="font-size:12px;margin:0 0 4px;overflow-wrap:anywhere;">${esc(t.status==='sent'?'Sent':t.status==='test'?'Test':'Cancelled')}: ${moneyCents(t.amount_cents/100)} to ${esc(t.payee_name||'')} for ${esc(t.event_legacy_id)}${t.note && t.status!=='cancelled' ? ` — ${esc(t.note)}` : ''}</p>`).join('')}` : ''}
+    ${recent.length ? `<h4 style="margin:14px 0 6px;font-size:.95rem;">Recent transfers</h4>${recent.map(t=>`<p style="font-size:12px;margin:0 0 4px;overflow-wrap:anywhere;">${esc(t.status==='sent'?'Sent to Mercury':t.status==='test'?'Test':'Cancelled')}: ${moneyCents(t.amount_cents/100)} to ${esc(t.payee_name||'')} for ${esc(t.event_legacy_id)}${t.note && t.status!=='cancelled' ? ` — ${esc(t.note)}` : ''}</p>`).join('')}` : ''}
   </div>`;
 }
 // Shown only once QuickBooks is set up (QBO_CLIENT_ID); owner 2026-10-29 asked for the "not set up" card gone.

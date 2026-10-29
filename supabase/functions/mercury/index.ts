@@ -121,11 +121,13 @@ Deno.serve(async (req) => {
       return { ok: true, test: true };
     }
     const req = { sourceAccountId: main.account_id, destinationAccountId: dest.account_id, amount: t.amount_cents / 100, idempotencyKey: t.id, note };
-    let r = await mercuryApi("POST", "/transfer", req);
-    if (!r.ok && (r.status === 0 || r.status >= 500 || r.status === 429)) r = await mercuryApi("POST", "/transfer", req);
+    // "Transfer Money with Approval" (owner 2026-10-29): the token needs no fixed-IP list, and Mercury holds
+    // the move until someone approves it in Mercury (not the user who made the token).
+    let r = await mercuryApi("POST", "/request-transfer", req);
+    if (!r.ok && (r.status === 0 || r.status >= 500 || r.status === 429)) r = await mercuryApi("POST", "/request-transfer", req);
     if (!r.ok) return fail(mercuryError(r));
-    await sb.from("mercury_transfers").update({ status: "sent", sent_at: new Date().toISOString(), mercury_debit_id: r.data?.debitTransaction?.id || null,
-      note: `${usd(t.amount_cents)} moved from ${main.name} to ${dest.name}.` }).eq("id", id);
+    await sb.from("mercury_transfers").update({ status: "sent", sent_at: new Date().toISOString(), mercury_debit_id: r.data?.requestId || null,
+      note: `${usd(t.amount_cents)} from ${main.name} to ${dest.name} is waiting for approval in Mercury.` }).eq("id", id);
     return { ok: true };
   }
 
