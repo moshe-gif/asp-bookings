@@ -1596,6 +1596,8 @@ function balancePayBlocker(ev){
     if(x.aspCut==null) return `${a?a.name:'An artist on this gig'}'s share isn't set on the gig.`;
     payees.push(p);
   }
+  // Balances paid to ASP and split through Mercury (Settings → Bank): no artist Stripe account needed (the server agrees).
+  if(ORG_SETTINGS.payoutVia==='mercury') return '';
   const notReady = payees.find(p=>!stripePayeeActive(stripePayeeOf(p.id)));
   if(notReady) return `${notReady.entityName||'A payee'} hasn't finished setting up online payouts (Settings → Payee Profiles).`;
   return '';
@@ -2505,6 +2507,8 @@ function gigDepositDue(ev){
   return d > 0 ? d : gigAspCuts(ev);
 }
 function clientBalanceDue(ev){ return clientOwed(ev, gigDepositDue(ev)); }
+// Everything the client pays for the gig (every artist's fee + charges) -- "total charged" on every screen.
+function clientTotal(ev){ return clientOwed(ev, 0); }
 // The standard ASP booking fee / commission. Single owner of the rate (it was a 0.15 literal in 3
 // places and "15%"/"85%" label text in 4 -- 2026-10-09 audit 3.8). Each gig still stores its own
 // ev.commission, which can differ (negotiated), so labels show the real figures, not this rate.
@@ -3205,10 +3209,17 @@ async function linkRealSessionToRosterNow(session){
   // of sending staff to the office about a problem that isn't theirs (2026-10-09 audit 4.3).
   let adminRow = null, artistRow = null, crewRow = null;
   try{
-    const [a, r] = await Promise.all([
-      supabaseClient.from('admin_users').select('*').eq('user_id', session.user.id).maybeSingle(),
-      supabaseClient.from('artists').select('*').eq('user_id', session.user.id).maybeSingle(),
-    ]);
+    // Tried up to 3 times: right after signing in, a device whose clock runs a little behind the server gets
+    // "JWT issued at future" for a second or two (seen 2026-11-02 as an occasional "Couldn't reach ASP Bookings").
+    let a, r;
+    for(let attempt=0; attempt<3; attempt++){
+      if(attempt) await new Promise(res=>setTimeout(res, 1500*attempt));
+      [a, r] = await Promise.all([
+        supabaseClient.from('admin_users').select('*').eq('user_id', session.user.id).maybeSingle(),
+        supabaseClient.from('artists').select('*').eq('user_id', session.user.id).maybeSingle(),
+      ]);
+      if(!a.error && !r.error) break;
+    }
     if(a.error || r.error) throw new Error((a.error||r.error).message);
     adminRow = a.data; artistRow = r.data;
     if(!adminRow && !artistRow){
@@ -4356,7 +4367,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.48'; // bump on every release so a phone can tell it has updated. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.49'; // bump on every release so a phone can tell it has updated. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4836,14 +4847,14 @@ function renderDailyDigestPage(){
   ${openLeads.length? `<div class="card card-pad" style="margin-bottom:20px;">${openLeads.map(e=>row(e, `${-daysUntil(e.createdAt)}d old`)).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing open — all caught up.</div>`}
 
   <div class="section-head"><h2>Awaiting Down Payment (${awaitingDeposit.length})</h2></div>
-  ${awaitingDeposit.length? `<div class="card card-pad" style="margin-bottom:20px;">${awaitingDeposit.map(e=>row(e, money(e.commission))).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
+  ${awaitingDeposit.length? `<div class="card card-pad" style="margin-bottom:20px;">${awaitingDeposit.map(e=>row(e, money(gigDepositDue(e)))).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
 
   <div class="section-head"><h2>Awaiting Final Payment (${awaitingBalance.length})</h2></div>
-  ${awaitingBalance.length? `<div class="card card-pad" style="margin-bottom:20px;">${awaitingBalance.map(e=>row(e, money(artistPayout(e)))).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
+  ${awaitingBalance.length? `<div class="card card-pad" style="margin-bottom:20px;">${awaitingBalance.map(e=>row(e, money(clientBalanceDue(e)))).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
 
   <div class="section-head"><h2>Payment Follow-Up — Alternative Method (${altPayment.length})</h2></div>
   <p style="font-size:11.5px;color:var(--ink-3);margin:-14px 0 8px;">Not on QuickBooks/Zelle — no automated reminder, follow up directly.</p>
-  ${altPayment.length? `<div class="card card-pad" style="margin-bottom:20px;">${altPayment.map(e=>row(e, `${paymentMethodLabel(e)} · ${money(e.depositReceived? artistPayout(e) : e.commission)}`)).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
+  ${altPayment.length? `<div class="card card-pad" style="margin-bottom:20px;">${altPayment.map(e=>row(e, `${paymentMethodLabel(e)} · ${money(e.depositReceived? clientBalanceDue(e) : gigDepositDue(e))}`)).join('')}</div>` : `<div class="card empty" style="margin-bottom:20px;">Nothing outstanding.</div>`}
 
   <button class="btn btn-primary" data-action="copy-daily-digest">${ICO.share} Copy WhatsApp Message for Ilan (Open Leads)</button>
   `;
@@ -4937,7 +4948,7 @@ function renderCalendarPage(events, opts={}){
     const rangeLabel = `${days[0].toLocaleDateString('en-US',{month:'short',day:'numeric'})} – ${days[6].toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}`;
     return head(rangeLabel) + `<div style="display:flex;flex-direction:column;gap:10px;">
       ${days.map(d=>{
-        const iso = fmtISO(d);
+        const iso = localISO(d);
         const evs = filtered.filter(e=>e.date===iso).sort((a,b)=>a.time.localeCompare(b.time));
         return `<div class="card card-pad">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:${evs.length?'6px':'0'};">
@@ -4952,7 +4963,7 @@ function renderCalendarPage(events, opts={}){
   }
 
   if(mode==='day'){
-    const iso = fmtISO(S.calDate);
+    const iso = localISO(S.calDate);
     const evs = filtered.filter(e=>e.date===iso).sort((a,b)=>a.time.localeCompare(b.time));
     return head(S.calDate.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})) + `
       ${isAdmin? `<button class="btn btn-sm btn-primary" data-action="quick-add-event" data-date="${iso}" style="margin-bottom:12px;">${ICO.plus} Add Event</button>` : ''}
@@ -5192,6 +5203,12 @@ async function applyInboxMoney(it, auto){
   const m = it.money && it.money.match, t = inboxMoneyTarget(it);
   if(!m || !t || !supabaseClient || !S.realSession || !isAdminUser(S.user)) return false;
   if(inboxMoneyRecorded(it)){ if(!auto) toast('That payment is already recorded.', 'system'); return false; }
+  // The amount matters (SSOT audit 2026-11-02): a short balance isn't "paid in full" unless the office says so.
+  const gotCents = Number(it.money.amount_cents)||0;
+  if(m.kind==='balance' && gotCents && m.due_cents && gotCents < m.due_cents - 100){
+    if(auto) return false;
+    if(!confirm(`This payment is ${money(gotCents/100)}, but ${money(m.due_cents/100)} is due. Mark the balance as paid in full anyway?`)) return false;
+  }
   const now = new Date().toISOString();
   const { data, error } = await supabaseClient.from('inbox_items').update({ money_applied_at:now, status:'done', handled_at:now })
     .eq('id', it.id).is('money_applied_at', null).select('id');
@@ -5212,7 +5229,9 @@ async function applyInboxMoney(it, auto){
     // when this is what booked it (many gigs were booked before their deposit was recorded).
     const ev = t.ev, booking = STATUS_GROUPS.open.includes(ev.status);
     logEvent(ev, 'success', `Deposit received: ${note}.${booking ? ' Job officially booked & locked on calendar.' : ''}`);
-    const patch = { depositReceived:true, depositReceivedDate: it.money.date || todayISO(),
+    // depositPaid = what actually came in, so a short or larger deposit moves the balance by the real amount
+    // (the same field online deposits and the server's balance math use).
+    const patch = { depositReceived:true, depositReceivedDate: it.money.date || todayISO(), ...(gotCents ? { depositPaid: gotCents/100 } : {}),
       depositVerification:{ method: INBOX_MONEY_METHOD(it.money.method), note, loggedBy: auto ? null : S.user, loggedAt: now, inboxItemId: it.id } };
     if(booking) patch.status = 'booked';
     if(!reportEventSave(updateEvent(ev.id, patch), 'recording the deposit')) return false;
@@ -6158,8 +6177,9 @@ function renderPricingPage(){
 function renderFinancialsPage(){
   const filt = S.finArtistFilter==='all' ? S.events : S.events.filter(e=>e.artistId===S.finArtistFilter);
   const booked = filt.filter(e=>isConfirmed(e));
-  const gross = booked.reduce((s,e)=>s+e.price,0);
-  const commission = booked.reduce((s,e)=>s+e.commission,0);
+  // Every artist on the gig counts (SSOT audit 2026-11-02: extra artists' fees and ASP cuts were left out).
+  const gross = booked.reduce((s,e)=>s+clientTotal(e)-chargesTotal(e),0);
+  const commission = booked.reduce((s,e)=>s+gigAspCuts(e),0);
   const payouts = booked.reduce((s,e)=>s+artistPayout(e),0);
   const avg = booked.length ? Math.round(gross/booked.length) : 0;
   const openInvoices = CUSTOM_INVOICES.filter(i=>i.status==='open');
@@ -7547,8 +7567,10 @@ function renderClientContactModal(){
 function renderLedger(ev, opts={}){
   const extras = ev.charges||[];
   const extrasSum = chargesTotal(ev);
-  const total = ev.price + extrasSum;
+  // One owner for each figure (SSOT audit 2026-11-02): the client's total and ASP's fee include every extra artist.
+  const total = clientTotal(ev);
   const artistTotal = artistPayout(ev);
+  const others = gigExtraArtists(ev);
   const compact = !!opts.compact;
   return `<div class="card card-pad" style="${compact?'padding:12px 14px;':''}">
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
@@ -7563,9 +7585,10 @@ function renderLedger(ev, opts={}){
         : `<div class="ledger-row"><span>Performance Fee</span><span class="amt">${ev.price? money(ev.price) : ''} <button class="btn btn-sm ${ev.price?'btn-ghost':'btn-primary'}" style="padding:2px 8px;margin-left:6px;" data-action="edit-gig-fee" data-id="${ev.id}">${ev.price?'Edit':'Add fee'}</button></span></div>`}
       ${extras.map(c=>`<div class="ledger-row"><span>${esc(c.label)}${c.addedAfterSigning?` <span class="pill pill-warn" style="padding:1px 6px;font-size:9px;vertical-align:1px;">notify client</span>`:''} <a href="#" data-action="remove-charge" data-id="${ev.id}" data-chargeid="${c.id}" style="color:var(--crit);text-decoration:none;margin-left:4px;">×</a></span><span class="amt">${money(c.amount)}</span></div>`).join('')}
       ${S.showAddCharge? renderAddChargeRow(ev) : ''}
+      ${others.map(x=>`<div class="ledger-row"><span>${esc((artistById(x.artistId)||{}).name||'Additional artist')}</span><span class="amt">${x.feeAmount!=null && x.feeAmount!=='' ? money(Number(x.feeAmount)||0) : 'fee not set'}</span></div>`).join('')}
       <div class="ledger-row"><span>Total charged to client</span><span class="amt">${money(total)}</span></div>
-      <div class="ledger-row"><span>ASP booking fee ${ev.depositReceived?'· received':`· due via ${esc(paymentMethodLabel(ev))}`}</span><span class="amt">${money(ev.commission)}</span></div>
-      <div class="ledger-row total"><span>Artist payout (85% + charges, via Zelle)</span><span class="amt">${money(artistTotal)}</span></div>
+      <div class="ledger-row"><span>ASP booking fee ${ev.depositReceived?'· received':`· due via ${esc(paymentMethodLabel(ev))}`}</span><span class="amt">${money(gigAspCuts(ev))}</span></div>
+      <div class="ledger-row total"><span>${others.length ? esc((artistById(ev.artistId)||{}).name||'Artist')+' payout' : 'Artist payout'} (after ASP's fee, plus charges)</span><span class="amt">${money(artistTotal)}</span></div>
       <div class="ledger-row"><span>Balance status</span><span class="amt">${ev.balanceReceived? `Received ${fmtDateShort(ev.balanceReceivedDate)}` : (ev.depositReceived? (isStandardPayment(ev)?'Pending — reminders active':'Pending — follow up directly'):'—')}</span></div>
       ${renderBalanceOnlineRow(ev)}
     </div>
@@ -9753,7 +9776,8 @@ function doMarkDeposit(id, extra={}){
   logEvent(ev,'success',`Bookkeeping marked booking fee received (${paymentMethodLabel(ev)}) — job officially booked & locked on calendar.`);
   // No internal-notification channel exists, so nothing claims the team was told (2026-10-12:
   // the log only records what actually happened; the client confirmation below is a real email).
-  const result = updateEvent(id, { status:'booked', depositReceived:true, depositReceivedDate:todayISO(), ...extra });
+  // A gig already past "booked" (fully paid) stays where it is (SSOT audit 2026-11-02: this moved paid gigs back).
+  const result = updateEvent(id, { ...(STATUS_GROUPS.open.includes(ev.status) ? { status:'booked' } : {}), depositReceived:true, depositReceivedDate:todayISO(), ...extra });
   if(!result.ok){
     toast(result.error==='conflict' ? 'This booking changed elsewhere since you loaded it — reload before marking the deposit received.' : 'Could not save.', 'system');
     return false;
@@ -10056,7 +10080,7 @@ function setOutsideBookingFieldByPath(b, path, value){
 }
 function doAddOutsideBookingReminder(bookingId){
   const b = getOutsideBooking(bookingId); if(!b) return;
-  b.reminders.push({ id:'REM-'+Math.random().toString(36).slice(2,7), dueAt: fmtISO(addDays(new Date(),7)), owner:'', recurrenceDays:null, completedAt:null, snoozedUntil:null, notes:'' });
+  b.reminders.push({ id:'REM-'+Math.random().toString(36).slice(2,7), dueAt: localISO(addDays(new Date(),7)), owner:'', recurrenceDays:null, completedAt:null, snoozedUntil:null, notes:'' });
   saveOutsideBookings(); render();
 }
 function doRemoveOutsideBookingReminder(bookingId, reminderId){
@@ -10074,7 +10098,7 @@ function doCompleteOutsideBookingReminder(bookingId, reminderId){
 function doSnoozeOutsideBookingReminder(bookingId, reminderId, days){
   const b = getOutsideBooking(bookingId); if(!b) return;
   const r = b.reminders.find(x=>x.id===reminderId); if(!r) return;
-  r.snoozedUntil = fmtISO(addDays(new Date(), days));
+  r.snoozedUntil = localISO(addDays(new Date(), days));
   saveOutsideBookings(); render();
 }
 function setOutsideBookingReminderFieldByPath(b, reminderId, field, value){
@@ -10146,11 +10170,10 @@ function doAddCharge(id){
   if(!label || !amount || amount<=0){ toast('Enter a charge type and an amount.', 'system'); return; }
   const ev = getEvent(id); if(!ev) return;
   const postSigning = ev.depositReceived;
-  const charges = ev.charges || [];
-  charges.push({id:'CH-'+Date.now(), label, amount, addedAfterSigning: postSigning});
+  const charges = [...(ev.charges || []), {id:'CH-'+Date.now(), label, amount, addedAfterSigning: postSigning}]; // a copy: a refused save changes nothing
   logEvent(ev,'system',`Charge added: ${label} (${money(amount)}).`);
   if(postSigning){
-    const newTotal = ev.price + chargesTotal({...ev, charges});
+    const newTotal = clientTotal({...ev, charges});
     logEvent(ev,'warning',`Added after signing — client's total changed. New total: ${money(newTotal)}.`);
     logEvent(ev,'warning',`Let the client know: their total is now ${money(newTotal)} (was ${money(newTotal-amount)}).`);
   }
@@ -10284,11 +10307,11 @@ function doAddProject(){
     if(findConflicts(ev).length) toast(`⚠ Scheduling conflict — ${artist.name} already has something at that time.`, 'system');
     S.events.unshift(ev); saveEvents();
     const cadence = Number(f.releaseCadenceDays)||7;
-    const firstRelease = f.releaseDate || fmtISO(addDays(new Date(f.recordingDate+'T00:00:00'), 7));
+    const firstRelease = f.releaseDate || localISO(addDays(new Date(f.recordingDate+'T00:00:00'), 7));
     const created = [];
     for(let i=0;i<count;i++){
       const guest = (f['guest'+(i+1)]||'').trim();
-      const due = fmtISO(addDays(new Date(firstRelease+'T00:00:00'), i*cadence));
+      const due = localISO(addDays(new Date(firstRelease+'T00:00:00'), i*cadence));
       const proj = makeProject(artist, type, guest? `Episode — ${guest}` : `Episode ${i+1} — ${fmtDateShort(f.recordingDate)}`, 1, 1, due, {
         subtitle: guest? `Guest: ${guest}` : '',
         people: guest? [{id:'PPL-'+Math.random().toString(36).slice(2,7), role:'Guest', name:guest}] : [],
@@ -10524,7 +10547,7 @@ function doSubmitBlockTime(){
   const end = f.endDate ? new Date(f.endDate+'T00:00:00') : start;
   if(end < start){ toast('End date is before the start date.', 'system'); return; }
   const dates = [];
-  for(let d=new Date(start); d<=end; d.setDate(d.getDate()+1)) dates.push(fmtISO(new Date(d)));
+  for(let d=new Date(start); d<=end; d.setDate(d.getDate()+1)) dates.push(localISO(new Date(d)));
   let hadConflict = false;
   dates.forEach(date=>{
     const ev = {

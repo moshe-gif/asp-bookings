@@ -102,6 +102,9 @@ Deno.serve(async (req) => {
     const to = String(ev.clientEmail || "").trim();
     const waTo = waNumber(ev.clientPhone || "").length >= 10 ? String(ev.clientPhone) : "";
     if ((!to && !waTo) || ev.unpaid || e.status === "paid") continue;
+    // Cash / check / other arrangements get no automated reminders -- the app says so on the gig (isStandardPayment);
+    // the server used to send them anyway (SSOT audit 2026-11-02).
+    if (ev.paymentMethod && ev.paymentMethod !== "standard") continue;
     const who = String(ev.clientName || "").trim();
     const greeting = who ? `Dear ${who.split(/\s+/)[0]},` : "Hello,";
     const when = fmtDate(e.date);

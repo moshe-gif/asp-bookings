@@ -9,7 +9,7 @@
 // Service role only (these write rows the app's admins normally create).
 import { appUrl } from "./config.ts";
 import { stripeConfigured, stripeMode } from "./stripe.ts";
-import { balanceDescription, balancePayeeProfile, balanceSplit, gigCardFeeBps, splitAccounts } from "./connect.ts";
+import { balanceDescription, balancePayeeProfile, balanceSplit, gigCardFeeBps, payoutViaMercury, splitAccounts } from "./connect.ts";
 
 // deno-lint-ignore no-explicit-any
 type Sb = any;
@@ -120,7 +120,9 @@ export async function mintBalanceLink(sb: Sb, eventLegacyId: string): Promise<Mi
   if (cents < 50) return { ok: false, error: "nothing_due" };
   if (!stripeConfigured()) return { ok: false, error: "unavailable" };
   // Every artist on the gig gets their share, so every one of their payees must be set up.
-  if (split.parts.length && !(await splitAccounts(sb, split.parts, stripeMode() === "live"))) return { ok: false, error: "payee_not_set_up" };
+  // When balances go to ASP's account and are split through Mercury (Settings → Bank), the artists need no Stripe
+  // account -- client-pay skips the same check (SSOT audit 2026-11-02: links were never made in that mode).
+  if (split.parts.length && !(await payoutViaMercury(sb)) && !(await splitAccounts(sb, split.parts, stripeMode() === "live"))) return { ok: false, error: "payee_not_set_up" };
   const payee = await balancePayeeProfile(sb, eventLegacyId, ev);   // the main payee: what the link is checked against
   if (!payee?.id) return { ok: false, error: "payee_not_set_up" };
   const { data: pays, error } = await sb.from("payment_requests").select("pay_status")
