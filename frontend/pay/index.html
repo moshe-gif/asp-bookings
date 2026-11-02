@@ -44,6 +44,8 @@
 (function(){
   const root = document.getElementById('root');
   let token = '';
+  // A WhatsApp button can't carry a #, so it opens ?t=<token>; move it back into the # (kept out of the address bar's query).
+  try{ const t = new URLSearchParams(location.search).get('t'); if (t && !location.hash) history.replaceState(null, '', location.pathname + '#' + encodeURIComponent(t)); }catch(e){}
   try{ token = decodeURIComponent((location.hash||'').replace(/^#/, '')); }catch(e){}
   const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function showMessage(h, p){ root.innerHTML = `<div class="card msg"><h1>${esc(h)}</h1><p class="muted" style="margin:0;">${esc(p)}</p></div>`; }

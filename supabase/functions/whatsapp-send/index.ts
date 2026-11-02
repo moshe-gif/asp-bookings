@@ -2,7 +2,7 @@
 // _shared/whatsapp.ts, so test mode applies: until WHATSAPP_LIVE=yes everything lands on the owner's phone.
 import { corsHeaders, jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin } from "../_shared/auth.ts";
-import { createTemplates360, fetchMedia360, sendWhatsApp, setWebhook360, templateStatus360, whatsappTestMode } from "../_shared/whatsapp.ts";
+import { createTemplates360, fetchMedia360, sendWhatsApp, setWebhook360, templateStatus360, waLogoUrl, whatsappTestMode } from "../_shared/whatsapp.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return preflight(req);
@@ -33,7 +33,8 @@ Deno.serve(async (req) => {
   }
   if (!b?.to) return json({ ok: false, error: "missing recipient" }, 400);
   const sent = b.template?.name
-    ? await sendWhatsApp({ to: b.to, template: { name: String(b.template.name), lang: b.template.lang, params: Array.isArray(b.template.params) ? b.template.params.map(String) : [] } }, auth.user.id)
+    ? await sendWhatsApp({ to: b.to, template: { name: String(b.template.name), lang: b.template.lang, params: Array.isArray(b.template.params) ? b.template.params.map(String) : [],
+        headerImage: b.template.logo ? waLogoUrl() : undefined, button: typeof b.template.button === "string" ? b.template.button : undefined } }, auth.user.id)
     : typeof b.text === "string" && b.text.trim() ? await sendWhatsApp({ to: b.to, text: b.text }, auth.user.id)
     : null;
   if (!sent) return json({ ok: false, error: "send a template or text" }, 400);

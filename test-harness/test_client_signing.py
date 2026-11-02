@@ -127,3 +127,12 @@ def test_bad_signing_link_explains_itself(live_server, page):
     page.goto(live_server + '/sign/')
     page.reload()
     page.get_by_text('This link doesn’t work').wait_for(state='visible', timeout=15000)
+
+
+def test_whatsapp_button_link_opens_the_page(live_server, page):
+    # A WhatsApp button can't carry a '#', so it opens ?t=<token>; the page moves it back into the '#'.
+    for path in ('/sign/', '/pay/'):
+        page.goto(live_server + path + '?t=' + 'A' * 43)
+        page.get_by_text('This link doesn’t work').wait_for(state='visible', timeout=15000)
+        assert page.evaluate("location.search") == ''
+        assert page.evaluate("location.hash") == '#' + 'A' * 43
