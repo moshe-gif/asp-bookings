@@ -112,7 +112,14 @@ def login_as_real(page, email=None, password=None):
         raise RuntimeError(f"Real sign-in failed: {error_message}")
     # linkRealSessionToRoster() (asp.js) runs a Supabase query before S.user is set and the real
     # page renders, so this takes a beat longer than Demo Mode's old synchronous click-through did.
-    page.wait_for_selector("h1", timeout=15000)
+    try:
+        page.wait_for_selector("h1", timeout=15000)
+    except Exception as e:
+        # Sign-in normally takes ~2s; a hang is worth knowing about -- say what the page showed.
+        state = page.evaluate("""() => ({ user: !!(window.S && S.user), realSession: !!(window.S && S.realSession),
+            err: window.S && S.realSignInError, notFound: window.S && S.realSignInNotFound,
+            text: (document.body.innerText || '').slice(0, 300) })""")
+        raise AssertionError(f"sign-in did not finish in 15s: {state}") from e
 
 
 def login_as(page, user_id):

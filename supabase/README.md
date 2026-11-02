@@ -59,6 +59,8 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0073_whatsapp_media_contacts | Applied 2026-10-29 — `whatsapp_messages.media_id` / `media_mime` (incoming photos, voice notes, videos, documents open in the tab through `whatsapp-send` "media"); `whatsapp_contacts` (names the owner gives a number; WhatsApp access only). |
 | 0074_library_drive_backup | Applied 2026-10-29 — Video Library backup to Google Drive (office@aspmgmt.com): `drive_backup` (the one connection + run lock), `library_drive_folders`, `library_drive_files` (progress per video, resumable upload link); all service role only. `oauth_states` allows 'gdrive'. Cron job `library-drive-backup` every 10 minutes (copied from inbox-scan's command). |
 | 0075_removable_logins | Applied 2026-10-29 — every foreign key to `auth.users` that blocked deleting a login (NO ACTION) is now SET NULL (`user_settings`: CASCADE), so Settings → Users → Remove works for people with history. |
+| 0076_admin_roster_guard | Applied 2026-11-02 — from a browser no one can change their own role/email, re-link a login, or create/edit/promote/remove a CEO/COO unless they are CEO/COO (security audit). |
+| 0077_office_list_private | Applied 2026-11-02 — the office list (admin_users) is readable by admins only; others see just their own row. |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in

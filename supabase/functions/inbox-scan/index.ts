@@ -71,8 +71,25 @@ function bankVerified(msg: Any, fromAddr: string): string | null {
   const dom = (fromAddr.match(/@([A-Za-z0-9.-]+)/)?.[1] || "").toLowerCase();
   const bank = BANK_DOMAINS.find((b) => dom === b || dom.endsWith("." + b));
   if (!bank) return null;
-  const auth = (msg.payload?.headers || []).filter((h: Any) => h.name.toLowerCase() === "authentication-results").map((h: Any) => String(h.value).toLowerCase()).join(" ");
-  return new RegExp(`dkim=pass[^;]*header\\.(?:d|i)=@?(?:[a-z0-9-]+\\.)*${bank.replace(/\./g, "\\.")}\\b`).test(auth) ? bank : null;
+  // Only the result Gmail itself wrote (the topmost one, from mx.google.com) counts -- a sender can add their own
+  // Authentication-Results lower down -- and the signing domain must be the bank's, not "chase.com.evil.tld"
+  // (security audit 2026-11-02).
+  const auth = String((msg.payload?.headers || []).find((h: Any) => h.name.toLowerCase() === "authentication-results")?.value || "").toLowerCase();
+  if (!auth.trim().startsWith("mx.google.com")) return null;
+  const b = bank.replace(/\./g, "\\.");
+  const dkim = new RegExp(`dkim=pass[^;]*header\\.(?:d|i)=@?(?:[a-z0-9-]+\\.)*${b}(?=[;\\s)]|$)`).test(auth);
+  const dmarc = /dmarc=pass/.test(auth);
+  return dkim && dmarc ? bank : null;
+}
+
+// The amount a bank alert is about: the first dollar figure in the bank's own text (the sender's memo comes after
+// it, so a memo saying "$4,500" can't make a $1 payment look like a deposit). Null if none.
+function firstDollarCents(msg: Any): number | null {
+  const parts = { text: [] as string[], html: [] as string[], attach: [] as Any[] };
+  walk(msg.payload, parts);
+  const text = parts.text.join("\n") || stripHtml(parts.html.join("\n"));
+  const m = text.match(/\$\s?([0-9][0-9,]*\.\d{2})/);
+  return m ? Math.round(Number(m[1].replace(/,/g, "")) * 100) : null;
 }
 
 Deno.serve(async (req) => {
@@ -214,7 +231,8 @@ Deno.serve(async (req) => {
   // What a payment email pays and whether the amount is exactly what's due. Claude proposes; this checks.
   function moneyOf(msg: Any, fromAddr: string, x: Any, out: Any, gig: string | null): Any {
     const amount_cents = Math.round((Number(String(x.amount ?? "").replace(/[^0-9.]/g, "")) || 0) * 100) || null;
-    const bank = bankVerified(msg, fromAddr);
+    let bank = bankVerified(msg, fromAddr);
+    if (bank && (!amount_cents || firstDollarCents(msg) !== amount_cents)) bank = null; // the bank's figure must be the one we record
     let match: Any = null;
     if (out.pays === "invoice" && invById.has(out.invoice_id)) {
       const due_cents = invTotal(invById.get(out.invoice_id));

@@ -440,6 +440,8 @@ const BOILERPLATE_TOGGLES = [
   ['artistCancelsReturnsDeposit','If the Artist cancels, the deposit is returned in full'],
   ['notBindingUntilDeposit','This contract is not binding until the deposit is received'],
 ];
+// Bank account / routing numbers are never written here (the repo is public; owner's audit 2026-11-02): they
+// live only in the shared payee list (app_records), which replaces this seed at a browser's first sign-in.
 function seedPayeeProfiles(){
   const blArtist = ARTISTS.find(a=>/baruch levine/i.test(a.name||''));
   const emArtist = ARTISTS.find(a=>/eli marcus/i.test(a.name||''));
@@ -450,7 +452,7 @@ function seedPayeeProfiles(){
   return [
     { id:'PP-'+(PPID++), artistId:null, entityName:'ASP Management Services LLC',
       zelle:'billing@aspmgmt.com', checkPayee:'ASP Management Services', checkAddress:'1098 East 21st St, Brooklyn, NY 11210',
-      wireBankName:'Chase Bank', wireBankAddress:'', wireAccountName:'ASP Management Services LLC', wireAccountNumber:'2909266806', wireRoutingNumber:'021000021', wireSwift:'', notes:'',
+      wireBankName:'Chase Bank', wireBankAddress:'', wireAccountName:'ASP Management Services LLC', wireAccountNumber:'', wireRoutingNumber:'', wireSwift:'', notes:'',
       defaultBoilerplate: blankBoilerplateDefaults(), defaultOvertimeInterval:'half_hour' },
     { id:'PP-'+(PPID++), artistId: blArtist ? blArtist.id : null, entityName:'Baruch Levine Music Inc.',
       zelle:'', checkPayee:'Baruch Levine Music Inc.', checkAddress:'',
@@ -463,12 +465,12 @@ function seedPayeeProfiles(){
       defaultBoilerplate: { ...blankBoilerplateDefaults(), mechitza:true, noSecularSongs:true, weatherReturnsDeposit:true }, defaultOvertimeInterval:'half_hour' },
     { id:'PP-'+(PPID++), artistId: slArtist ? slArtist.id : null, entityName:'Tantz Vee A Yid LLC',
       zelle:'ShmiliLandauMusic@gmail.com', checkPayee:'Tantz Vee A Yid LLC', checkAddress:'4906 11th Ave, Brooklyn, NY 11219',
-      wireBankName:'Chase Bank', wireBankAddress:'', wireAccountName:'Tantz Vee A Yid LLC', wireAccountNumber:'591669059', wireRoutingNumber:'021000021', wireSwift:'',
+      wireBankName:'Chase Bank', wireBankAddress:'', wireAccountName:'Tantz Vee A Yid LLC', wireAccountNumber:'', wireRoutingNumber:'', wireSwift:'',
       notes:'For deposit via check, send a picture of front & back via WhatsApp to 929-392-6076.',
       defaultBoilerplate: { ...blankBoilerplateDefaults(), mechitza:true, noSecularSongs:true, noMixedDancing:true, weatherReturnsDeposit:true }, defaultOvertimeInterval:'15_min' },
     { id:'PP-'+(PPID++), artistId: null, entityName:'Airschnitz Productions LLC',
       zelle:'airschnitzprod@gmail.com', checkPayee:'Airschnitz Productions LLC', checkAddress:'50 Lawrence Ave, Lawrence, NY 11559',
-      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'611993269', wireRoutingNumber:'021000021', wireSwift:'',
+      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'', wireRoutingNumber:'', wireSwift:'',
       notes:'Shared payee entity used for Benny Friedman, Dovi Neuburger, and similar bookings.',
       defaultBoilerplate: { ...blankBoilerplateDefaults(), weatherReturnsDeposit:true, postponementCreditsReschedule:true }, defaultOvertimeInterval:'half_hour' },
     { id:'PP-'+(PPID++), artistId: mtArtist ? mtArtist.id : null, entityName:'Moshe Tischler Inc',
@@ -478,12 +480,12 @@ function seedPayeeProfiles(){
       defaultBoilerplate: { ...blankBoilerplateDefaults(), bandSoundLightingApproval:true, mediaReleaseApproval:true, postponementCreditsReschedule:true, artistCancelsReturnsDeposit:true }, defaultOvertimeInterval:'half_hour' },
     { id:'PP-'+(PPID++), artistId: yrArtist ? yrArtist.id : null, entityName:'Airschnitz Productions LLC',
       zelle:'airschnitzprod@gmail.com', checkPayee:'Airschnitz Productions LLC', checkAddress:'50 Lawrence Ave, Lawrence, NY 11559',
-      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'611993269', wireRoutingNumber:'021000021', wireSwift:'', notes:'',
+      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'', wireRoutingNumber:'', wireSwift:'', notes:'',
       defaultBoilerplate: { ...blankBoilerplateDefaults(), mechitza:true, noSecularSongs:true, weatherReturnsDeposit:true }, defaultOvertimeInterval:'half_hour',
       defaultCancellation: { type:'full_within_days', withinDays:40 } },
     { id:'PP-'+(PPID++), artistId: bfArtist ? bfArtist.id : null, entityName:'Airschnitz Productions LLC',
       zelle:'airschnitzprod@gmail.com', checkPayee:'Airschnitz Productions LLC', checkAddress:'50 Lawrence Ave, Lawrence, NY 11559',
-      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'611993269', wireRoutingNumber:'021000021', wireSwift:'', notes:'',
+      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'', wireRoutingNumber:'', wireSwift:'', notes:'',
       defaultBoilerplate: blankBoilerplateDefaults(), defaultOvertimeInterval:'half_hour',
       defaultTravelClause: { flightsCount:1, flightsClass:'business', hotelRooms:1, hotelNights:1, hotelTier:'standard', food:false, shabbos:false, groundTransport:false } },
   ];
@@ -505,7 +507,7 @@ function migratePayeeProfiles(){
   const airschnitz = PAYEE_PROFILES.find(p=>!p.artistId && /airschnitz/i.test(p.entityName||''));
   if(airschnitz){
     const fill = { zelle:'airschnitzprod@gmail.com', checkPayee:'Airschnitz Productions LLC', checkAddress:'50 Lawrence Ave, Lawrence, NY 11559',
-      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'611993269', wireRoutingNumber:'021000021' };
+      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'', wireRoutingNumber:'' };
     Object.keys(fill).forEach(k=>{ if(!airschnitz[k]){ airschnitz[k] = fill[k]; migrated = true; } });
   }
   PAYEE_PROFILES.forEach(p=>{ if(p.wireBankAddress===undefined){ p.wireBankAddress = ''; migrated = true; } });
@@ -530,7 +532,7 @@ function migratePayeeProfiles(){
   if(yrArtist && !PAYEE_PROFILES.some(p=>p.artistId===yrArtist.id)){
     PAYEE_PROFILES.push({ id:'PP-'+(PPID++), artistId: yrArtist.id, entityName:'Airschnitz Productions LLC',
       zelle:'airschnitzprod@gmail.com', checkPayee:'Airschnitz Productions LLC', checkAddress:'50 Lawrence Ave, Lawrence, NY 11559',
-      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'611993269', wireRoutingNumber:'021000021', wireSwift:'', notes:'',
+      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'', wireRoutingNumber:'', wireSwift:'', notes:'',
       defaultBoilerplate: { ...blankBoilerplateDefaults(), mechitza:true, noSecularSongs:true, weatherReturnsDeposit:true }, defaultOvertimeInterval:'half_hour',
       defaultCancellation: { type:'full_within_days', withinDays:40 } });
     migrated = true;
@@ -539,7 +541,7 @@ function migratePayeeProfiles(){
   if(bfArtist && !PAYEE_PROFILES.some(p=>p.artistId===bfArtist.id)){
     PAYEE_PROFILES.push({ id:'PP-'+(PPID++), artistId: bfArtist.id, entityName:'Airschnitz Productions LLC',
       zelle:'airschnitzprod@gmail.com', checkPayee:'Airschnitz Productions LLC', checkAddress:'50 Lawrence Ave, Lawrence, NY 11559',
-      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'611993269', wireRoutingNumber:'021000021', wireSwift:'', notes:'',
+      wireBankName:'Chase Bank', wireBankAddress:'2219 Broadway, New York, NY 10024', wireAccountName:'Airschnitz Productions LLC', wireAccountNumber:'', wireRoutingNumber:'', wireSwift:'', notes:'',
       defaultBoilerplate: blankBoilerplateDefaults(), defaultOvertimeInterval:'half_hour',
       defaultTravelClause: { flightsCount:1, flightsClass:'business', hotelRooms:1, hotelNights:1, hotelTier:'standard', food:false, shabbos:false, groundTransport:false } });
     migrated = true;
@@ -1100,6 +1102,14 @@ function setContractFieldByPath(c, path, value){
 // fields that must recompute something live (fee/deposit/balance figures); every other
 // contract-editor field follows the rest of the app's convention of storing silently and
 // rendering on the next explicit action, so typing in a paragraph textarea never loses its cursor.
+// Changes from the server (other admins, re-checks) arrive in bursts -- one list after another. They are drawn
+// once, on the next frame, instead of once per list.
+let remoteRenderQueued = false;
+function scheduleRemoteRender(){
+  if(remoteRenderQueued) return;
+  remoteRenderQueued = true;
+  requestAnimationFrame(()=>{ remoteRenderQueued = false; renderPreservingFocus(); });
+}
 function renderPreservingFocus(){
   const active = document.activeElement;
   const key = active && active.dataset ? active.dataset.focusKey : null;
@@ -2952,7 +2962,7 @@ function createSharedCollection(cfg){
     if(i>=0) list[i] = row.app_doc; else list.push(row.app_doc);
     return true;
   }
-  function afterRemoteChange(){ bumpCounter(); saveMarker(); cfg.saveLocal(); renderPreservingFocus(); }
+  function afterRemoteChange(){ bumpCounter(); saveMarker(); cfg.saveLocal(); scheduleRemoteRender(); }
   function subscribe(){
     if(st.channel) return;
     st.subscribedOnce = false;
@@ -2984,10 +2994,14 @@ function createSharedCollection(cfg){
     const { rows, error } = await fetchAll();
     if(error || !st.on) return;
     const remoteIds = new Set(rows.map(r=>r.legacy_id));
-    rows.forEach(applyRemote);
+    let changed = rows.map(applyRemote).some(Boolean);
+    const before = cfg.get().length;
     cfg.set(cfg.get().filter(r=>remoteIds.has(r.id) || !st.synced.has(r.id) || isDirty(r)));
+    if(cfg.get().length!==before) changed = true;
     [...st.synced.keys()].forEach(id=>{ if(!remoteIds.has(id)) st.synced.delete(id); });
-    afterRemoteChange();
+    // Redraw only when something really changed (owner 2026-11-01: "the screen flashing and glitching" --
+    // coming back to the app re-checked ~9 lists and redrew the whole screen after each one, even unchanged).
+    if(changed) afterRemoteChange(); else saveMarker();
     flush();
   }
   function stop(){
@@ -3096,6 +3110,7 @@ async function loadArtistPortalData(){
   if(!S.artistPortal.on || S.artistPortal.loading) return;
   S.artistPortal.loading = true;
   const user = S.user;
+  const before = JSON.stringify([S.events, S.crewRoster, S.artistPortal.error, !!S.artistPortal.loadedAt]);
   try{
     if(crewUser()){
       const [g, c] = await Promise.all([
@@ -3123,7 +3138,8 @@ async function loadArtistPortalData(){
     S.artistPortal.error = String(err && err.message || err);
   }finally{
     S.artistPortal.loading = false;
-    if(S.artistPortal.on) render();
+    // A refresh that found nothing new draws nothing (a redraw on every return to the app read as flashing).
+    if(S.artistPortal.on && JSON.stringify([S.events, S.crewRoster, S.artistPortal.error, !!S.artistPortal.loadedAt])!==before) render();
   }
 }
 // One view row pair -> the event shape the existing renderers use. No finance row = "being confirmed".
@@ -3488,7 +3504,10 @@ function doEditRealUser(){
 }
 if(supabaseClient){
   supabaseClient.auth.onAuthStateChange((event, session)=>{
-    if((event==='SIGNED_IN' || event==='INITIAL_SESSION') && session && !S.user) linkRealSessionToRoster(session);
+    // Outside the callback (setTimeout): Supabase holds its auth lock while this runs, and the roster queries
+    // need that lock too -- calling them here now and then froze sign-in (Supabase's documented deadlock;
+    // seen as an occasional 15s+ hang after signing in, 2026-11-02).
+    if((event==='SIGNED_IN' || event==='INITIAL_SESSION') && session && !S.user) setTimeout(()=>{ if(!S.user) linkRealSessionToRoster(session); }, 0);
     if(event==='SIGNED_OUT' && (S.user || S.realSession)) resetAfterSignOut();
   });
 }
@@ -3530,7 +3549,14 @@ async function doParseLeadPaste(){
 }
 // Shared by the paste box and the Inbox's "Create lead": copy the reader's fields into the New Lead form.
 function fillLeadFormFrom(f, x){
-    const set = (k, v)=>{ if(v) f[k] = v; };
+    // Text read by AI from an outside email / pasted message: dates, times and the price are kept only when they
+    // look like one (security audit 2026-11-02 -- never trust what a stranger's email put there).
+    const set = (k, v)=>{ if(v) f[k] = String(v).slice(0, 200); };
+    const DATE = /^\d{4}-\d{2}-\d{2}$/, TIME = /^\d{2}:\d{2}$/;
+    if(!DATE.test(x.date||'')) x = { ...x, date:'' };
+    if(!TIME.test(x.time||'')) x = { ...x, time:'' };
+    if(!TIME.test(x.endTime||'')) x = { ...x, endTime:'' };
+    if(!/^\d+(\.\d{1,2})?$/.test(String(x.price||'').replace(/[$,\s]/g,''))) x = { ...x, price:'' }; else x = { ...x, price:String(x.price).replace(/[$,\s]/g,'') };
     set('clientName', x.clientName); set('clientEmail', x.clientEmail); set('clientPhone', x.clientPhone);
     set('date', x.date); set('venue', x.venue); set('city', x.city); set('state', x.state); set('price', x.price);
     if(x.type && EVENT_TYPES.includes(x.type)) f.type = x.type;
@@ -4103,6 +4129,11 @@ function shouldRefocus(id){ return autoFocusBeforeRender.focusedId===id || !auto
 // -> render() -- runs right after it instead of inside it. Nested, it removed DOM the outer render
 // was still using ("The node to be removed is no longer a child of this node").
 let renderDepth = 0, renderQueued = false;
+let lastAppHtml = null, appTouched = true, appObserver = null; // see markAppRendered
+// The pop-ups bindGlobal() draws outside #app (they aren't in the compared HTML, so they always redraw).
+const BODY_OVERLAY_FLAGS = ['showFlightForm','showTransportForm','showDressCodeForm','showEditEvent','showTemplatePicker','showContractBuilder',
+  'showContractBuilderDoc','showSendContractConfirm','showVerifyDeposit','showClientContact','showTravelDrop','showGigInfoForm','showGigInfoDoc',
+  'showItinerary','showInvoiceDoc','showDocumentBuilder'];
 function render(){
   if(renderDepth){ renderQueued = true; return; }
   renderDepth++;
@@ -4110,8 +4141,14 @@ function render(){
   if(renderQueued){ renderQueued = false; render(); }
 }
 function renderNow(){
-  autoFocusBeforeRender = { focusedId: document.activeElement && document.activeElement.id || null, present: AUTO_FOCUS_INPUT_IDS.filter(id=>document.getElementById(id)) };
   const app = document.getElementById('app');
+  const html = S.user ? appHtml() : renderLogin() + renderInstallBanner();
+  // Draw only what changed (owner 2026-11-01: "the screen flashing and glitching"): opening the app ran ~11
+  // redraws in its first second (one per status check that finished), each rebuilding the whole screen and
+  // swallowing taps. A redraw that would produce the same screen is skipped -- unless a pop-up form is open
+  // (those are drawn outside #app) or something changed the screen by hand since the last redraw.
+  if(html===lastAppHtml && !appTouchedSinceRender() && !BODY_OVERLAY_FLAGS.some(k=>S[k]) && !document.querySelector('body > [id$="OverlayHost"]')){ pendingViewTransition = false; return; }
+  autoFocusBeforeRender = { focusedId: document.activeElement && document.activeElement.id || null, present: AUTO_FOCUS_INPUT_IDS.filter(id=>document.getElementById(id)) };
   const prevScroll = { sheet: document.querySelector('.sheet')?.scrollTop, modal: document.querySelector('.modal')?.scrollTop };
   const hadOverlay = !!document.querySelector('.overlay');
   const oldRailRects = captureNavRects('.rail-nav', 'vertical');
@@ -4130,9 +4167,41 @@ function renderNow(){
       exitClone.style.width = r.width+'px'; exitClone.style.height = r.height+'px';
     }
   }
-  if(!S.user){ app.innerHTML = renderLogin() + renderInstallBanner(); bindGlobal(); return; }
+  if(!S.user){ app.innerHTML = html; bindGlobal(); markAppRendered(html); return; }
+  app.innerHTML = html;
+  pendingViewTransition = false;
+  bindGlobal();
+  positionNavSlider('.rail-nav', 'rail-slider', oldRailRects, 'vertical');
+  positionNavSlider('.bottom-nav', 'bn-slider', oldBnRects, 'horizontal');
+  if(exitClone){
+    document.body.appendChild(exitClone);
+    setTimeout(()=>{ exitClone.remove(); }, 280);
+  }
+  if(hadOverlay){
+    document.querySelectorAll('.overlay, .modal, .sheet, .doc').forEach(el=>{ el.style.animationDuration='0.001ms'; });
+  }
+  if(prevScroll.sheet){ const s=document.querySelector('.sheet'); if(s) s.scrollTop = prevScroll.sheet; }
+  if(prevScroll.modal){ const m=document.querySelector('.modal'); if(m) m.scrollTop = prevScroll.modal; }
+  markAppRendered(html);
+}
+// The screen as last drawn, and whether anything changed it by hand since (a button set to "Sending…", a list
+// filtered in place): then the next redraw always runs. Our own redraw's changes are discarded.
+function markAppRendered(html){
+  const app = document.getElementById('app');
+  if(!appObserver && typeof MutationObserver!=='undefined'){
+    appObserver = new MutationObserver(()=>{ appTouched = true; });
+    appObserver.observe(app, { subtree:true, childList:true, characterData:true, attributes:true, attributeFilter:['class','style','disabled','hidden','value','checked','selected','open','src','href','aria-pressed','aria-expanded'] });
+    // Typing, picking an option or a file changes the field without changing the page's HTML; a redraw after
+    // that must run (it is how a failed save puts the old value back -- review 2026-11-01).
+    ['input','change'].forEach(ev=>app.addEventListener(ev, ()=>{ appTouched = true; }, true));
+  }
+  if(appObserver) appObserver.takeRecords();
+  lastAppHtml = html; appTouched = !appObserver;
+}
+function appTouchedSinceRender(){ return appTouched || !!(appObserver && appObserver.takeRecords().length); }
+function appHtml(){
   const isAdmin = isAdminUser(S.user);
-  app.innerHTML = `
+  return `
     <div class="shell">
       ${isAdmin ? renderRail() : ''}
       <div class="main">
@@ -4174,19 +4243,6 @@ function renderNow(){
     ${S.showBookingConfirmation ? renderBookingConfirmationPreview() : ''}
     ${renderInstallBanner()}
   `;
-  pendingViewTransition = false;
-  bindGlobal();
-  positionNavSlider('.rail-nav', 'rail-slider', oldRailRects, 'vertical');
-  positionNavSlider('.bottom-nav', 'bn-slider', oldBnRects, 'horizontal');
-  if(exitClone){
-    document.body.appendChild(exitClone);
-    setTimeout(()=>{ exitClone.remove(); }, 280);
-  }
-  if(hadOverlay){
-    document.querySelectorAll('.overlay, .modal, .sheet, .doc').forEach(el=>{ el.style.animationDuration='0.001ms'; });
-  }
-  if(prevScroll.sheet){ const s=document.querySelector('.sheet'); if(s) s.scrollTop = prevScroll.sheet; }
-  if(prevScroll.modal){ const m=document.querySelector('.modal'); if(m) m.scrollTop = prevScroll.modal; }
 }
 
 function renderDayEventRow(e, isAdmin, action, opts={}){
@@ -4300,7 +4356,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.47'; // bump on every release so a phone can tell it has updated. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.48'; // bump on every release so a phone can tell it has updated. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4929,7 +4985,7 @@ function renderCalendarPage(events, opts={}){
           ${isAdmin? `<button class="cal-add-btn" data-action="quick-add-event" data-date="${c.iso}" title="Add event">${ICO.plus}</button>`:''}
           <span class="cal-date">${c.d}</span>
           ${evs.slice(0,max).map(e=>{const a=artistById(e.artistId)||NO_ARTIST; const label = opts.singleArtist? (e.clientName||e.type).split(' ')[0] : a.name.split(' ')[0]; const timePrefix = (!e.time || e.time==='00:00') ? '' : fmtTime(e.time).replace(':00','')+' '; return `<div class="cal-evt" data-action="open-event" data-id="${e.id}"><span class="dot" data-slot="${a.slot}"></span><span>${timePrefix}${esc(label)}</span></div>`;}).join('')}
-          ${evs.length>max? `<span class="cal-more" data-action="open-day" data-date="${c.iso}">+${evs.length-max} more</span>`:''}
+          ${evs.length>max? `<span class="cal-more" data-action="open-day" data-date="${c.iso}">+${evs.length-max}<span class="cal-more-w"> more</span></span>`:''}
         </div>`;
       }).join('')}
     </div>
@@ -4970,7 +5026,7 @@ function renderArtistFilterRow(current, action, opts={}){
     </div>
     <select class="artist-filter-select" data-action="${action}">
       ${opts.noAll ? '' : `<option value="all" ${current==='all'?'selected':''}>All Artists</option>`}
-      ${ARTISTS.map(a=>`<option value="${a.id}" ${current===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
+      ${ARTISTS.map(a=>`<option value="${esc(a.id)}" ${current===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
     </select>
   `;
 }
@@ -5533,6 +5589,7 @@ async function doCrewCall(body, okMsg){
   } finally {
     S.crewBusy = false;
     if(crewUser()) await loadArtistPortalData(); else await loadCrewRoster();
+    render(); // the buttons come back even when the reload found nothing new
   }
 }
 const crewSingers = ev => (ev.singers||[]).map(x=>x.name).join(' & ') || 'Gig';
@@ -5778,7 +5835,7 @@ function renderVideoLibraryPage(){
   return `<div class="lib">
   <div class="lib-head">
     <div class="lib-tabs" role="tablist">${LIB_TABS.map(([k,l])=>`<button type="button" role="tab" aria-selected="${tab===k}" class="${tab===k?'active':''}" data-action="lib-tab" data-id="${k}">${l}</button>`).join('')}</div>
-    <select class="tab-select lib-tab-select" aria-label="Section">${LIB_TABS.map(([k,l])=>`<option value="${k}" ${tab===k?'selected':''}>${l}</option>`).join('')}</select>
+    <select class="tab-select lib-tab-select" aria-label="Section">${LIB_TABS.map(([k,l])=>`<option value="${esc(k)}" ${tab===k?'selected':''}>${l}</option>`).join('')}</select>
     <div class="lib-share">${renderDriveBackupBadge()}</div>
   </div>
   ${tab==='browse' ? renderLibBrowse()
@@ -6087,8 +6144,8 @@ function renderPricingPage(){
           const p = getPricing(artistId, type);
           return `<tr>
             <td data-label="Event Type">${esc(type)}</td>
-            <td data-label="Hourly Rate"><span class="u-mono" style="margin-right:2px;">$</span><input type="number" min="0" step="25" value="${p.hourlyRate}" data-action="set-hourly-rate" data-artist="${artistId}" data-type="${esc(type)}" style="width:90px;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-family:var(--font-mono);"/></td>
-            <td data-label="Included Hours"><input type="number" min="0" step="0.5" value="${p.includedHours}" data-action="set-included-hours" data-artist="${artistId}" data-type="${esc(type)}" style="width:70px;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-family:var(--font-mono);"/></td>
+            <td data-label="Hourly Rate"><span class="u-mono" style="margin-right:2px;">$</span><input type="number" min="0" step="25" value="${esc(p.hourlyRate)}" data-action="set-hourly-rate" data-artist="${artistId}" data-type="${esc(type)}" style="width:90px;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-family:var(--font-mono);"/></td>
+            <td data-label="Included Hours"><input type="number" min="0" step="0.5" value="${esc(p.includedHours)}" data-action="set-included-hours" data-artist="${artistId}" data-type="${esc(type)}" style="width:70px;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-family:var(--font-mono);"/></td>
             <td data-label="Overtime" class="u-mono">${money(p.hourlyRate)}/½ hr</td>
           </tr>`;
         }).join('')}
@@ -6265,9 +6322,9 @@ function renderOutsideBookingRemindersSection(b){
     </div>
     ${b.reminders.length? b.reminders.map(r=>`<div style="display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--surface-2);border-radius:8px;">
       <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
-        <div class="field"><label>Due</label><input type="date" data-outside-reminder-field="${r.id}.dueAt" value="${r.dueAt?r.dueAt.slice(0,10):''}"/></div>
+        <div class="field"><label>Due</label><input type="date" data-outside-reminder-field="${r.id}.dueAt" value="${esc(r.dueAt?r.dueAt.slice(0,10):'')}"/></div>
         <div class="field"><label>Owner</label><input data-outside-reminder-field="${r.id}.owner" value="${esc(r.owner||'')}" placeholder="e.g. Rivky"/></div>
-        <div class="field" style="width:120px;"><label>Repeat (days)</label><input type="number" data-outside-reminder-field="${r.id}.recurrenceDays" value="${r.recurrenceDays||''}" placeholder="one-time"/></div>
+        <div class="field" style="width:120px;"><label>Repeat (days)</label><input type="number" data-outside-reminder-field="${r.id}.recurrenceDays" value="${esc(r.recurrenceDays||'')}" placeholder="one-time"/></div>
         <button class="icon-btn" data-action="remove-outside-booking-reminder" data-clause="${b.id}" data-id="${r.id}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
       </div>
       <input data-outside-reminder-field="${r.id}.notes" value="${esc(r.notes||'')}" placeholder="What's this reminder for?"/>
@@ -6300,9 +6357,9 @@ function renderOutsideBookingDetailSheet(){
           <div class="field"><label>Event Type</label><input data-outside-field="top.eventType" value="${esc(b.eventType||'')}" placeholder="e.g. Wedding, Corporate"/></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Date</label><input type="date" data-outside-field="top.date" value="${b.date||''}"/></div>
-          <div class="field"><label>Start Time</label><input type="time" data-outside-field="top.startTime" value="${b.startTime||''}"/></div>
-          <div class="field"><label>End Time</label><input type="time" data-outside-field="top.endTime" value="${b.endTime||''}"/></div>
+          <div class="field"><label>Date</label><input type="date" data-outside-field="top.date" value="${esc(b.date||'')}"/></div>
+          <div class="field"><label>Start Time</label><input type="time" data-outside-field="top.startTime" value="${esc(b.startTime||'')}"/></div>
+          <div class="field"><label>End Time</label><input type="time" data-outside-field="top.endTime" value="${esc(b.endTime||'')}"/></div>
         </div>
         <div class="field"><label>Timezone</label><input data-outside-field="top.timezone" value="${esc(b.timezone||'')}"/></div>
         <div class="field-row">
@@ -6323,8 +6380,8 @@ function renderOutsideBookingDetailSheet(){
         </div>
         <div class="field"><label>Client Phone</label><input data-outside-field="top.clientPhone" value="${esc(b.clientPhone||'')}"/></div>
         <div class="field-row">
-          <div class="field"><label>Total Amount</label><input type="number" data-outside-field="top.totalAmount" value="${b.totalAmount||0}"/></div>
-          <div class="field"><label>ASP Cut</label><input type="number" data-outside-field="top.aspCut" value="${b.aspCut||0}"/></div>
+          <div class="field"><label>Total Amount</label><input type="number" data-outside-field="top.totalAmount" value="${esc(b.totalAmount||0)}"/></div>
+          <div class="field"><label>ASP Cut</label><input type="number" data-outside-field="top.aspCut" value="${esc(b.aspCut||0)}"/></div>
         </div>
         <div class="field"><label>Source</label><input data-outside-field="top.source" value="${esc(b.source||'')}" placeholder="e.g. referral, direct inquiry"/></div>
         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-outside-field="top.showOnAspCalendar" ${b.showOnAspCalendar?'checked':''}/> Show on ASP main calendar</label>
@@ -6481,7 +6538,7 @@ function renderAssigneeChip(p, personId){
 function renderTaskAssigneeSelect(p, t){
   return `<select class="task-assignee-select" data-id="${p.id}" data-taskid="${t.id}" style="font-size:11px;padding:3px 5px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);max-width:120px;color:var(--ink);">
     <option value="">Unassigned</option>
-    ${(p.people||[]).map(person=>`<option value="${person.id}" ${t.assignedTo===person.id?'selected':''}>${esc(person.name)}</option>`).join('')}
+    ${(p.people||[]).map(person=>`<option value="${esc(person.id)}" ${t.assignedTo===person.id?'selected':''}>${esc(person.name)}</option>`).join('')}
   </select>`;
 }
 function taskAssigneeCounts(p){
@@ -6558,7 +6615,7 @@ function renderProjectDetail(){
                 : (p.subtitle? `<span>${esc(p.subtitle)}</span>` : `<span style="color:var(--ink-3);">Not set</span>`)}
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Target Date</span>
-              ${isAdmin? `<input type="date" data-action="set-project-due" data-id="${p.id}" value="${p.dueDate||''}" style="padding:5px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;"/>`
+              ${isAdmin? `<input type="date" data-action="set-project-due" data-id="${p.id}" value="${esc(p.dueDate||'')}" style="padding:5px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;"/>`
                 : (p.dueDate? `<span style="color:${isPast(p.dueDate)?'var(--crit)':'var(--ink-2)'};">${fmtDateShort(p.dueDate)}</span>` : `<span style="color:var(--ink-3);">Not set</span>`)}
             </div>
             ${recordingEvent? `<div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Recording Day</span>
@@ -6579,8 +6636,8 @@ function renderProjectDetail(){
             <div data-form="person" style="display:flex;gap:6px;flex-wrap:wrap;">
               <select class="person-refid-select" style="flex:1;min-width:140px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;color:var(--ink);">
                 <option value="">Pick a person…</option>
-                <optgroup label="ASP Office">${ADMIN_USERS.map(u=>`<option value="${u.id}" ${S.newPersonForm.refId===u.id?'selected':''}>${esc(u.name)}</option>`).join('')}</optgroup>
-                <optgroup label="Artists">${ARTISTS.map(a=>`<option value="${a.id}" ${S.newPersonForm.refId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</optgroup>
+                <optgroup label="ASP Office">${ADMIN_USERS.map(u=>`<option value="${esc(u.id)}" ${S.newPersonForm.refId===u.id?'selected':''}>${esc(u.name)}</option>`).join('')}</optgroup>
+                <optgroup label="Artists">${ARTISTS.map(a=>`<option value="${esc(a.id)}" ${S.newPersonForm.refId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</optgroup>
               </select>
               <input data-field="role" placeholder="Role (e.g. Point of Contact)" style="flex:1;min-width:110px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.role||'')}"/>
               <button class="btn btn-sm" data-action="add-person" data-id="${p.id}">Add</button>
@@ -6640,7 +6697,7 @@ function renderProjectDetail(){
             <input data-field="newTaskText" placeholder="Add a task…" style="flex:1;min-width:140px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newTaskText||'')}"/>
             <select class="new-task-assignee-select" style="padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;color:var(--ink);">
               <option value="">Unassigned</option>
-              ${(p.people||[]).map(person=>`<option value="${person.id}" ${S.newTaskAssignee===person.id?'selected':''}>${esc(person.name)}</option>`).join('')}
+              ${(p.people||[]).map(person=>`<option value="${esc(person.id)}" ${S.newTaskAssignee===person.id?'selected':''}>${esc(person.name)}</option>`).join('')}
             </select>
             <button class="btn btn-sm" data-action="add-task" data-id="${p.id}">Add</button>
           </div>`:''}
@@ -6749,18 +6806,18 @@ function renderNewProjectModal(){
         </div>
         ${isBatch ? `
         <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 14px;">Book the shared studio day once, then track each guest's episode as its own project with its own release date. <a href="#" data-action="new-project-mode" data-mode="simple" style="color:var(--accent);">Back to a plain project →</a></p>
-        <div class="field"><label>Recording Date</label><input type="date" data-field="recordingDate" value="${f.recordingDate||''}"/></div>
+        <div class="field"><label>Recording Date</label><input type="date" data-field="recordingDate" value="${esc(f.recordingDate||'')}"/></div>
         <div class="field"><label>How many episodes that day?</label>
           <div class="chip-row">${[2,3].map(n=>`<button class="filter-chip ${count===n?'sel':''}" data-action="pick-episode-count" data-count="${n}">${n}</button>`).join('')}</div>
         </div>
         ${Array.from({length:count}).map((_,i)=>`<div class="field"><label>Guest ${i+1}</label><input data-field="guest${i+1}" value="${esc(f['guest'+(i+1)]||'')}" placeholder="Guest name"/></div>`).join('')}
-        <div class="field"><label>First Release Date</label><input type="date" data-field="releaseDate" value="${f.releaseDate||''}"/></div>
-        <div class="field"><label>Days Between Releases</label><input type="number" data-field="releaseCadenceDays" value="${f.releaseCadenceDays||7}"/></div>
+        <div class="field"><label>First Release Date</label><input type="date" data-field="releaseDate" value="${esc(f.releaseDate||'')}"/></div>
+        <div class="field"><label>Days Between Releases</label><input type="number" data-field="releaseCadenceDays" value="${esc(f.releaseCadenceDays||7)}"/></div>
         <button class="btn btn-primary btn-block" data-action="confirm-add-project" style="margin-top:6px;">Book Recording Day + Create Episodes</button>
         ` : `
         <div class="field"><label>Title</label><input data-field="title" value="${esc(f.title||'')}" placeholder="e.g. Fall Tour 2026"/></div>
         <div class="field"><label>Who it's for (optional)</label><input data-field="whoFor" value="${esc(f.whoFor||'')}" placeholder="e.g. client / label / event name"/></div>
-        <div class="field"><label>Target Date (optional)</label><input type="date" data-field="dueDate" value="${f.dueDate||''}"/></div>
+        <div class="field"><label>Target Date (optional)</label><input type="date" data-field="dueDate" value="${esc(f.dueDate||'')}"/></div>
         <button class="btn btn-primary btn-block" data-action="confirm-add-project" style="margin-top:6px;">Create Project</button>
         <a href="#" data-action="new-project-mode" data-mode="recordingday" style="display:block;text-align:center;font-size:12px;color:var(--ink-3);margin-top:10px;">Booking multiple podcast episodes on one recording day? →</a>
         `}
@@ -6902,7 +6959,7 @@ function renderLeadChargesSection(f){
         <select data-lead-charge-preset>${CHARGE_PRESETS.map(p=>`<option ${preset===p?'selected':''}>${p}</option>`).join('')}</select>
       </div>
       ${preset==='Other'? `<div class="field" style="flex:1;min-width:100px;"><label style="font-size:10px;">Label</label><input data-field="chargeCustomLabel" value="${esc(f.chargeCustomLabel||'')}" placeholder="Describe"/></div>`:''}
-      <div class="field" style="width:90px;"><label style="font-size:10px;">Amount</label><input type="number" data-field="chargeAmount" value="${f.chargeAmount||''}" placeholder="250"/></div>
+      <div class="field" style="width:90px;"><label style="font-size:10px;">Amount</label><input type="number" data-field="chargeAmount" value="${esc(f.chargeAmount||'')}" placeholder="250"/></div>
       <button class="btn btn-sm" data-action="add-lead-charge">+ Add</button>
     </div>
   </div>`;
@@ -6944,7 +7001,7 @@ function renderAdditionalArtistsSection(f){
     ${selected.length? `<p style="font-size:11.5px;color:var(--ink-3);margin:6px 0 0;">Each additional artist gets their own fee. Only admin sees another artist's numbers on a shared event.</p>
     ${selected.map(x=>{ const a=artistById(x.artistId); return `<div class="field-row" style="margin-top:4px;">
       <div class="field" style="flex:none;width:90px;"><label style="font-size:10px;">${esc(a?a.name.split(' ')[0]:x.artistId)}</label></div>
-      <div class="field"><label>Fee ($)</label><input type="number" data-lead-artist-fee="${x.artistId}" value="${x.feeAmount||''}" placeholder="0"/></div>
+      <div class="field"><label>Fee ($)</label><input type="number" data-lead-artist-fee="${x.artistId}" value="${esc(x.feeAmount||'')}" placeholder="0"/></div>
     </div>`; }).join('')}` : ''}
   </div>`;
 }
@@ -6982,10 +7039,10 @@ function renderNewLeadModal(){
           <div class="field"><label>Client Email</label><input data-field="clientEmail" value="${esc(f.clientEmail||'')}" placeholder="name@example.com"/></div>
           <div class="field"><label>Client Phone</label><input data-field="clientPhone" value="${esc(f.clientPhone||'')}" placeholder="(555) 555-5555"/></div>
         </div>` : ''}
-        <div class="field"><label>Date</label><input type="date" data-field="date" value="${f.date||''}"/></div>
+        <div class="field"><label>Date</label><input type="date" data-field="date" value="${esc(f.date||'')}"/></div>
         ${f.timeTbd? '' : `<div class="field-row">
-          <div class="field"><label>Start Time</label><input type="time" data-field="time" value="${f.time||LEAD_DEFAULT_START}"/></div>
-          <div class="field"><label>End Time</label><input type="time" data-field="endTime" value="${leadEndTime(f)||''}"/></div>
+          <div class="field"><label>Start Time</label><input type="time" data-field="time" value="${esc(f.time||LEAD_DEFAULT_START)}"/></div>
+          <div class="field"><label>End Time</label><input type="time" data-field="endTime" value="${esc(leadEndTime(f)||'')}"/></div>
         </div>`}
         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-field="timeTbd" ${f.timeTbd?'checked':''} style="width:16px;height:16px;"/> Time TBD</label>
         <div class="field"><label>Venue Name</label><input data-field="venue" list="venueList" autocomplete="off" value="${esc(f.venue||'')}" placeholder="${isInternal?'Studio name':'Start typing — e.g. Ateres Chaya Hall'}"/>${venueDatalistHtml()}</div>
@@ -6995,7 +7052,7 @@ function renderNewLeadModal(){
           <div class="field"><label>State</label><input data-field="state" value="${esc(f.state||'')}" placeholder="NJ"/></div>
         </div>
         <div class="field-row">
-          ${!isInternal? `<div class="field"><label>Price</label><input type="number" data-field="price" value="${f.price||''}" placeholder="4500"/>
+          ${!isInternal? `<div class="field"><label>Price</label><input type="number" data-field="price" value="${esc(f.price||'')}" placeholder="4500"/>
             <button type="button" class="filter-chip ${f.mezumin?'sel':''}" style="margin-top:6px;align-self:flex-start;" data-action="toggle-lead-mezumin">Mezumin (cash)</button></div>` : ''}
           <div class="field" style="justify-content:flex-end;flex-direction:row;align-items:center;gap:8px;padding-top:18px;">
             <input type="checkbox" id="flightck" data-field="flightNeeded" ${f.flightNeeded?'checked':''} style="width:16px;height:16px;"/>
@@ -7022,16 +7079,16 @@ function renderBlockTimeModal(){
       <div class="sheet-body">
         <p style="font-size:12px;color:var(--ink-3);margin:0;">Marks you unavailable — the office will see it and won't book you those dates.</p>
         <div class="field-row">
-          <div class="field"><label>From</label><input type="date" data-field="date" value="${f.date||''}"/></div>
-          <div class="field"><label>To (optional)</label><input type="date" data-field="endDate" value="${f.endDate||''}"/></div>
+          <div class="field"><label>From</label><input type="date" data-field="date" value="${esc(f.date||'')}"/></div>
+          <div class="field"><label>To (optional)</label><input type="date" data-field="endDate" value="${esc(f.endDate||'')}"/></div>
         </div>
         <div class="field" style="flex-direction:row;align-items:center;gap:8px;">
           <input type="checkbox" id="blockAllDay" data-field="allDay" ${allDay?'checked':''} style="width:16px;height:16px;"/>
           <label for="blockAllDay" style="text-transform:none;font-size:13px;color:var(--ink);font-weight:500;">All day</label>
         </div>
         ${!allDay? `<div class="field-row">
-          <div class="field"><label>Start Time</label><input type="time" data-field="startTime" value="${f.startTime||''}"/></div>
-          <div class="field"><label>End Time</label><input type="time" data-field="endTime" value="${f.endTime||''}"/></div>
+          <div class="field"><label>Start Time</label><input type="time" data-field="startTime" value="${esc(f.startTime||'')}"/></div>
+          <div class="field"><label>End Time</label><input type="time" data-field="endTime" value="${esc(f.endTime||'')}"/></div>
         </div>` : ''}
         <div class="field"><label>Note (optional)</label><input data-field="note" value="${esc(f.note||'')}" placeholder="e.g. Family vacation"/></div>
         <button class="btn btn-primary btn-block" data-action="submit-block-time" style="margin-top:6px;">Block Time — Add to Calendar</button>
@@ -7552,7 +7609,7 @@ function renderAddChargeRow(ev){
       <select data-charge-preset>${CHARGE_PRESETS.map(p=>`<option ${f.preset===p?'selected':''}>${p}</option>`).join('')}</select>
     </div>
     ${(f.preset||CHARGE_PRESETS[0])==='Other'? `<div class="field" style="flex:1;min-width:100px;"><label>Label</label><input data-field="customLabel" value="${esc(f.customLabel||'')}" placeholder="Describe charge"/></div>`:''}
-    <div class="field" style="width:100px;"><label>Amount</label><input type="number" data-field="amount" value="${f.amount||''}" placeholder="250"/></div>
+    <div class="field" style="width:100px;"><label>Amount</label><input type="number" data-field="amount" value="${esc(f.amount||'')}" placeholder="250"/></div>
     <button class="btn btn-sm btn-primary" data-action="confirm-add-charge" data-id="${ev.id}">Add</button>
   </div>`;
 }
@@ -7769,7 +7826,7 @@ function renderAdminActions(ev){
       ${standard? `<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;">
         <span>Remind every</span>
         <select data-action="set-reminder-interval" data-id="${ev.id}" style="padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);">
-          ${[3,5,7,10,14].map(n=>`<option value="${n}" ${ev.reminderIntervalDays===n?'selected':''}>${n} days</option>`).join('')}
+          ${[3,5,7,10,14].map(n=>`<option value="${esc(n)}" ${ev.reminderIntervalDays===n?'selected':''}>${n} days</option>`).join('')}
         </select>
       </div>
       <div style="font-size:12px;color:var(--ink-2);">Last sent: ${ev.lastReminderSent? fmtDateShort(ev.lastReminderSent): 'never'}</div>` : `
@@ -7818,13 +7875,13 @@ function renderFlightFormOverlay(){
         <p style="font-size:11px;color:var(--ink-3);margin:-2px 0 4px;">Flight # or confirmation # enables live flight tracking — the artist gets ASP-branded status updates through the app.</p>
         <div class="u-label" style="margin-top:4px;">Departure</div>
         <div class="field-row">
-          <div class="field"><label>Date</label><input type="date" data-field="departDate" value="${f.departDate||''}"/></div>
-          <div class="field"><label>Time</label><input type="time" data-field="departTime" value="${f.departTime||''}"/></div>
+          <div class="field"><label>Date</label><input type="date" data-field="departDate" value="${esc(f.departDate||'')}"/></div>
+          <div class="field"><label>Time</label><input type="time" data-field="departTime" value="${esc(f.departTime||'')}"/></div>
         </div>
         <div class="u-label" style="margin-top:4px;">Arrival</div>
         <div class="field-row">
-          <div class="field"><label>Date</label><input type="date" data-field="arriveDate" value="${f.arriveDate||''}"/></div>
-          <div class="field"><label>Time</label><input type="time" data-field="arriveTime" value="${f.arriveTime||''}"/></div>
+          <div class="field"><label>Date</label><input type="date" data-field="arriveDate" value="${esc(f.arriveDate||'')}"/></div>
+          <div class="field"><label>Time</label><input type="time" data-field="arriveTime" value="${esc(f.arriveTime||'')}"/></div>
         </div>
         <button class="btn btn-primary btn-block" data-action="save-flight" data-id="${ev.id}">Save</button>
       </div>
@@ -7843,14 +7900,14 @@ function renderTransportFormOverlay(){
         <div class="field"><label>Driver Phone</label><input data-field="driverPhone" value="${esc(f.driverPhone||'')}" placeholder="(347) 555-1234"/></div>
         <div class="u-label" style="margin-top:4px;">Pickup</div>
         <div class="field-row">
-          <div class="field"><label>Date</label><input type="date" data-field="pickupDate" value="${f.pickupDate||''}"/></div>
-          <div class="field"><label>Time</label><input type="time" data-field="pickupTime" value="${f.pickupTime||''}"/></div>
+          <div class="field"><label>Date</label><input type="date" data-field="pickupDate" value="${esc(f.pickupDate||'')}"/></div>
+          <div class="field"><label>Time</label><input type="time" data-field="pickupTime" value="${esc(f.pickupTime||'')}"/></div>
         </div>
         <div class="field"><label>Pickup Location</label><input data-field="pickupLocation" value="${esc(f.pickupLocation||'')}" placeholder="Airport / home"/></div>
         <div class="u-label" style="margin-top:4px;">Drop-off</div>
         <div class="field-row">
-          <div class="field"><label>Date</label><input type="date" data-field="dropoffDate" value="${f.dropoffDate||''}"/></div>
-          <div class="field"><label>Time</label><input type="time" data-field="dropoffTime" value="${f.dropoffTime||''}"/></div>
+          <div class="field"><label>Date</label><input type="date" data-field="dropoffDate" value="${esc(f.dropoffDate||'')}"/></div>
+          <div class="field"><label>Time</label><input type="time" data-field="dropoffTime" value="${esc(f.dropoffTime||'')}"/></div>
         </div>
         <div class="field"><label>Drop-off Location</label><input data-field="dropoffLocation" value="${esc(f.dropoffLocation||'')}" placeholder="Venue"/></div>
         <div class="field"><label>Notes</label><input data-field="notes" value="${esc(f.notes||'')}" placeholder="Sedan, one-way"/></div>
@@ -7893,10 +7950,10 @@ function renderEditEventFormOverlay(){
           <div class="field"><label>Client Email</label><input data-field="clientEmail" value="${esc(f.clientEmail!==undefined?f.clientEmail:(ev.clientEmail||''))}"/></div>
           <div class="field"><label>Client Phone</label><input data-field="clientPhone" value="${esc(f.clientPhone!==undefined?f.clientPhone:(ev.clientPhone||''))}"/></div>
         </div>` : ''}
-        <div class="field"><label>Date</label><input type="date" data-field="date" value="${f.date!==undefined?f.date:ev.date}"/></div>
+        <div class="field"><label>Date</label><input type="date" data-field="date" value="${esc(f.date!==undefined?f.date:ev.date)}"/></div>
         <div class="field-row">
-          <div class="field"><label>Start Time</label><input type="time" data-field="time" value="${f.time!==undefined?f.time:ev.time}"/></div>
-          <div class="field"><label>End Time</label><input type="time" data-field="endTime" value="${f.endTime!==undefined?f.endTime:(ev.endTime||'')}"/></div>
+          <div class="field"><label>Start Time</label><input type="time" data-field="time" value="${esc(f.time!==undefined?f.time:ev.time)}"/></div>
+          <div class="field"><label>End Time</label><input type="time" data-field="endTime" value="${esc(f.endTime!==undefined?f.endTime:(ev.endTime||''))}"/></div>
         </div>
         <div class="field"><label>Venue Name</label><input data-field="venue" list="venueList" autocomplete="off" value="${esc(f.venue!==undefined?f.venue:(ev.venue||''))}"/>${venueDatalistHtml()}</div>
         <div class="field"><label>Address</label><input data-field="address" value="${esc(f.address!==undefined?f.address:(ev.address||''))}" placeholder="Street address"/></div>
@@ -7904,16 +7961,16 @@ function renderEditEventFormOverlay(){
           <div class="field"><label>City</label><input data-field="city" value="${esc(f.city!==undefined?f.city:(ev.city||''))}"/></div>
           <div class="field"><label>State</label><input data-field="state" value="${esc(f.state!==undefined?f.state:(ev.state||''))}"/></div>
         </div>
-        ${!ev.unpaid? `<div class="field"><label>Price</label><input type="number" data-field="price" value="${f.price!==undefined?f.price:ev.price}"/>
+        ${!ev.unpaid? `<div class="field"><label>Price</label><input type="number" data-field="price" value="${esc(f.price!==undefined?f.price:ev.price)}"/>
           <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Payout recalculates automatically if you change this. The deposit below stays as set unless you change it too.</p>
         </div>` : ''}
         ${!ev.unpaid? (()=>{
           const paymentMethod = f.paymentMethod!==undefined ? f.paymentMethod : (ev.paymentMethod||'standard');
           return `<div class="field-row">
-          <div class="field"><label>Deposit / Booking Fee</label><input type="number" data-field="commission" value="${f.commission!==undefined?f.commission:ev.commission}"/></div>
-          <div class="field"><label>Payment Method</label><select class="edit-event-payment-select">${PAYMENT_METHODS.map(([k,l])=>`<option value="${k}" ${paymentMethod===k?'selected':''}>${esc(l)}</option>`).join('')}</select></div>
+          <div class="field"><label>Deposit / Booking Fee</label><input type="number" data-field="commission" value="${esc(f.commission!==undefined?f.commission:ev.commission)}"/></div>
+          <div class="field"><label>Payment Method</label><select class="edit-event-payment-select">${PAYMENT_METHODS.map(([k,l])=>`<option value="${esc(k)}" ${paymentMethod===k?'selected':''}>${esc(l)}</option>`).join('')}</select></div>
         </div>
-        ${ev.depositReceived? `<div class="field"><label>Received So Far (optional)</label><input type="number" data-field="depositPaid" value="${f.depositPaid!==undefined?f.depositPaid:(ev.depositPaid||'')}" placeholder="Leave blank if only the deposit came in"/>
+        ${ev.depositReceived? `<div class="field"><label>Received So Far (optional)</label><input type="number" data-field="depositPaid" value="${esc(f.depositPaid!==undefined?f.depositPaid:(ev.depositPaid||''))}" placeholder="Leave blank if only the deposit came in"/>
           <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Everything the client has paid so far. It counts as the deposit, so balance reminders ask only for what's left.</p>
         </div>` : ''}
         ${paymentMethod!=='standard'? `<div class="field"><label>Payment Note (optional)</label><input data-field="paymentMethodNote" value="${esc(f.paymentMethodNote!==undefined?f.paymentMethodNote:(ev.paymentMethodNote||''))}" placeholder="e.g. paying cash at the event"/>
@@ -7944,7 +8001,7 @@ function renderNewInvoiceModal(){
           ${items.length? `<div class="ledger" style="margin-bottom:8px;">${items.map((it,i)=>`<div class="ledger-row"><span>${esc(it.label)} <a href="#" data-action="remove-invoice-item" data-idx="${i}" style="color:var(--crit);text-decoration:none;margin-left:4px;">×</a></span><span class="amt">${money(it.amount)}</span></div>`).join('')}</div>` : ''}
           <div style="display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;">
             <div class="field" style="flex:1;min-width:140px;"><label style="font-size:10px;">Description</label><input data-field="itemLabel" value="${esc(f.itemLabel||'')}" placeholder="e.g. Equipment rental"/></div>
-            <div class="field" style="width:100px;"><label style="font-size:10px;">Amount</label><input type="number" data-field="itemAmount" value="${f.itemAmount||''}" placeholder="250"/></div>
+            <div class="field" style="width:100px;"><label style="font-size:10px;">Amount</label><input type="number" data-field="itemAmount" value="${esc(f.itemAmount||'')}" placeholder="250"/></div>
             <button class="btn btn-sm" data-action="add-invoice-item">+ Add</button>
           </div>
         </div>
@@ -7973,12 +8030,12 @@ function renderNewOutsideBookingModal(){
           <div class="field"><label>Client Email (optional)</label><input data-field="clientEmail" value="${esc(f.clientEmail||'')}" placeholder="name@example.com"/></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Date</label><input type="date" data-field="date" value="${f.date||''}"/></div>
+          <div class="field"><label>Date</label><input type="date" data-field="date" value="${esc(f.date||'')}"/></div>
           <div class="field"><label>Venue (optional)</label><input data-field="venue" value="${esc(f.venue||'')}" placeholder="Venue name"/></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Total Booking Amount</label><input type="number" data-field="totalAmount" value="${f.totalAmount||''}" placeholder="4200"/></div>
-          <div class="field"><label>ASP's Cut</label><input type="number" data-field="aspCut" value="${f.aspCut||''}" placeholder="500"/></div>
+          <div class="field"><label>Total Booking Amount</label><input type="number" data-field="totalAmount" value="${esc(f.totalAmount||'')}" placeholder="4200"/></div>
+          <div class="field"><label>ASP's Cut</label><input type="number" data-field="aspCut" value="${esc(f.aspCut||'')}" placeholder="500"/></div>
         </div>
         <p style="font-size:11.5px;color:var(--ink-3);margin:-4px 0 0;">If ASP collects the full amount and pays the performer out, set the cut to what ASP keeps. If ASP only bills a coordination fee (client pays the performer directly), set the cut equal to the total.</p>
         <div class="field"><label>Notes (optional)</label><input data-field="notes" value="${esc(f.notes||'')}" placeholder="How this booking works"/></div>
@@ -8072,13 +8129,13 @@ function renderDocumentBuilderModal(){
         ${subjectType==='artist'? `<div class="field"><label>Artist</label>
           <select class="document-subject-select">
             <option value="">Pick an artist…</option>
-            ${ARTISTS.map(a=>`<option value="${a.id}" ${subjectId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
+            ${ARTISTS.map(a=>`<option value="${esc(a.id)}" ${subjectId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
           </select>
         </div>` : ''}
         ${subjectType==='outside'? `<div class="field"><label>Other Booking</label>
           <select class="document-subject-select">
             <option value="">Pick a booking…</option>
-            ${OUTSIDE_BOOKINGS.map(b=>`<option value="${b.id}" ${subjectId===b.id?'selected':''}>${esc(b.performerName)} — ${esc(b.clientName)}</option>`).join('')}
+            ${OUTSIDE_BOOKINGS.map(b=>`<option value="${esc(b.id)}" ${subjectId===b.id?'selected':''}>${esc(b.performerName)} — ${esc(b.clientName)}</option>`).join('')}
           </select>
         </div>` : ''}
         ` : `<p style="font-size:12px;color:var(--ink-3);margin:0;">For: <strong style="color:var(--ink);">${esc(documentSubjectLabel(existing))}</strong></p>`}
@@ -8266,12 +8323,12 @@ function renderTravelRequestDetailSheet(){
           <div class="field"><label>Destination</label><input data-travel-field="details.destination" value="${esc(d.destination||'')}" placeholder="e.g. MIA" ${busy?'disabled':''}/></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Arrive By</label><input type="datetime-local" data-travel-field="details.arriveBy" value="${d.arriveBy||''}" ${busy?'disabled':''}/></div>
-          <div class="field"><label>Depart After</label><input type="datetime-local" data-travel-field="details.departAfter" value="${d.departAfter||''}" ${busy?'disabled':''}/></div>
+          <div class="field"><label>Arrive By</label><input type="datetime-local" data-travel-field="details.arriveBy" value="${esc(d.arriveBy||'')}" ${busy?'disabled':''}/></div>
+          <div class="field"><label>Depart After</label><input type="datetime-local" data-travel-field="details.departAfter" value="${esc(d.departAfter||'')}" ${busy?'disabled':''}/></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Flight Class</label><select data-travel-field="details.flightClass" ${busy?'disabled':''}>${['economy','premium_economy','business','first'].map(c=>`<option value="${c}" ${d.flightClass===c?'selected':''}>${c.replace('_',' ')}</option>`).join('')}</select></div>
-          <div class="field"><label>Flight Qty</label><input type="number" data-travel-field="details.flightQty" value="${d.flightQty||1}" ${busy?'disabled':''}/></div>
+          <div class="field"><label>Flight Class</label><select data-travel-field="details.flightClass" ${busy?'disabled':''}>${['economy','premium_economy','business','first'].map(c=>`<option value="${esc(c)}" ${d.flightClass===c?'selected':''}>${c.replace('_',' ')}</option>`).join('')}</select></div>
+          <div class="field"><label>Flight Qty</label><input type="number" data-travel-field="details.flightQty" value="${esc(d.flightQty||1)}" ${busy?'disabled':''}/></div>
         </div>
         <div class="field" style="flex-direction:row;align-items:center;gap:8px;">
           <input type="checkbox" id="trHotel" data-travel-field="details.hotelNeeded" ${d.hotelNeeded?'checked':''} ${busy?'disabled':''}/>
@@ -8422,7 +8479,7 @@ function renderContractBuilderModal(){
         </div>
         <div class="field-row">
           <div class="field"><label>Client Phone</label><input data-contract-field="snapshot.clientPhone" value="${esc(c.snapshot.clientPhone||'')}"/></div>
-          <div class="field"><label>Event Date</label><input type="date" data-contract-field="snapshot.eventDate" value="${c.snapshot.eventDate||''}"/></div>
+          <div class="field"><label>Event Date</label><input type="date" data-contract-field="snapshot.eventDate" value="${esc(c.snapshot.eventDate||'')}"/></div>
         </div>
         ${isCreative? `<div class="field"><label>Project Name</label><input data-contract-field="creative.projectName" value="${esc(c.creative.projectName||'')}" placeholder="e.g. SAR Academy Dinner Video"/></div>
         <div class="field"><label>Event Name</label><input data-contract-field="snapshot.eventName" value="${esc(c.snapshot.eventName||'')}" placeholder="e.g. SAR Academy Annual Dinner"/></div>` : ''}
@@ -8460,7 +8517,7 @@ function renderContractPerformerSection(c){
     <div class="field"><label>Performer (Artist Roster)</label>
       <select class="contract-performer-select" data-id="${c.id}">
         <option value="" ${!c.performerArtistId?'selected':''}>— Type manually below —</option>
-        ${ARTISTS.map(a=>`<option value="${a.id}" ${c.performerArtistId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
+        ${ARTISTS.map(a=>`<option value="${esc(a.id)}" ${c.performerArtistId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
       </select>
     </div>
     ${!c.performerArtistId ? `<div class="field"><label>Performer Label</label><input data-contract-field="performerLabel" value="${esc(c.performerLabel||'')}" placeholder="e.g. Eli Marcus with OMb and sound"/></div>` : ''}
@@ -8471,7 +8528,7 @@ function renderCreativeFieldsSection(c){
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     <h3 style="font-size:13.5px;margin:0;">Project Details</h3>
     <div class="field-row">
-      <div class="field" style="width:160px;"><label>On-Site Filming Days</label><input type="number" min="0" data-contract-field="creative.filmingDays" value="${c.creative.filmingDays!==undefined?c.creative.filmingDays:3}"/></div>
+      <div class="field" style="width:160px;"><label>On-Site Filming Days</label><input type="number" min="0" data-contract-field="creative.filmingDays" value="${esc(c.creative.filmingDays!==undefined?c.creative.filmingDays:3)}"/></div>
       <div class="field"><label>Revision Rounds</label><input data-contract-field="creative.revisionRounds" value="${esc(c.creative.revisionRounds||'')}"/></div>
     </div>
     <p style="font-size:11px;color:var(--ink-3);margin:0;">Standing clauses always included: "Once the Client considers the project complete, no further revisions, additions, or changes will be made."</p>
@@ -8499,14 +8556,14 @@ function renderTravelClauseSection(c){
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     <h3 style="font-size:13.5px;margin:0;">Travel (Optional)</h3>
     <div class="field-row">
-      <div class="field" style="width:100px;"><label>Flights</label><input type="number" min="0" data-contract-field="travel.flightsCount" data-focus-key="travel.flightsCount" data-live value="${tc.flightsCount||0}"/></div>
+      <div class="field" style="width:100px;"><label>Flights</label><input type="number" min="0" data-contract-field="travel.flightsCount" data-focus-key="travel.flightsCount" data-live value="${esc(tc.flightsCount||0)}"/></div>
       <div class="field"><label>Class</label>
-        <div class="chip-row">${['economy','business','first'].map(cl=>`<button class="filter-chip ${tc.flightsClass===cl?'sel':''}" data-action="pick-travel-flight-class" data-value="${cl}">${cl.charAt(0).toUpperCase()+cl.slice(1)}</button>`).join('')}</div>
+        <div class="chip-row">${['economy','business','first'].map(cl=>`<button class="filter-chip ${tc.flightsClass===cl?'sel':''}" data-action="pick-travel-flight-class" data-value="${esc(cl)}">${cl.charAt(0).toUpperCase()+cl.slice(1)}</button>`).join('')}</div>
       </div>
     </div>
     <div class="field-row">
-      <div class="field" style="width:120px;"><label>Hotel Rooms</label><input type="number" min="0" data-contract-field="travel.hotelRooms" data-focus-key="travel.hotelRooms" data-live value="${tc.hotelRooms||0}"/></div>
-      <div class="field" style="width:100px;"><label>Nights</label><input type="number" min="0" data-contract-field="travel.hotelNights" data-focus-key="travel.hotelNights" data-live value="${tc.hotelNights||0}"/></div>
+      <div class="field" style="width:120px;"><label>Hotel Rooms</label><input type="number" min="0" data-contract-field="travel.hotelRooms" data-focus-key="travel.hotelRooms" data-live value="${esc(tc.hotelRooms||0)}"/></div>
+      <div class="field" style="width:100px;"><label>Nights</label><input type="number" min="0" data-contract-field="travel.hotelNights" data-focus-key="travel.hotelNights" data-live value="${esc(tc.hotelNights||0)}"/></div>
     </div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;">
       <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;"><input type="checkbox" data-contract-field="travel.food" data-live ${tc.food?'checked':''}/> Food</label>
@@ -8522,11 +8579,11 @@ function renderContractFeeSection(c){
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     <h3 style="font-size:13.5px;margin:0;">Fee, Deposit${isCreative?'':' &amp; Overtime'}</h3>
     <div class="field-row">
-      <div class="field"><label>${isCreative?'Creative Fee ($)':'Total Fee ($)'}</label><input type="number" data-contract-field="fee.amount" data-focus-key="fee.amount" data-live value="${c.fee.amount||0}" ${c.template==='multiline'?'readonly title="Auto-summed from line items + add-ons below"':''}/></div>
+      <div class="field"><label>${isCreative?'Creative Fee ($)':'Total Fee ($)'}</label><input type="number" data-contract-field="fee.amount" data-focus-key="fee.amount" data-live value="${esc(c.fee.amount||0)}" ${c.template==='multiline'?'readonly title="Auto-summed from line items + add-ons below"':''}/></div>
       <div class="field"><label>Fee Note (optional)</label><input data-contract-field="fee.note" value="${esc(c.fee.note||'')}" placeholder="e.g. including Travel Expenses, cash only"/></div>
     </div>
     <div class="field-row">
-      <div class="field"><label>Deposit ($)</label><input type="number" data-contract-field="deposit.amount" data-focus-key="deposit.amount" data-live value="${c.deposit.amount||0}"/></div>
+      <div class="field"><label>Deposit ($)</label><input type="number" data-contract-field="deposit.amount" data-focus-key="deposit.amount" data-live value="${esc(c.deposit.amount||0)}"/></div>
       <div class="field"><label>Deposit (% of total, optional)</label><input type="number" data-contract-field="deposit.percent" data-focus-key="deposit.percent" data-live value="${esc(String(c.deposit.percent||0))}" placeholder="0 = use $ amount"/></div>
     </div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-contract-field="deposit.nonRefundable" ${c.deposit.nonRefundable?'checked':''}/> Deposit is non-refundable</label>
@@ -8538,14 +8595,14 @@ function renderContractFeeSection(c){
       </div>
     </div>
     <div class="field-row">
-      <div class="field"><label>Regular Price (optional)</label><input type="number" data-contract-field="discount.originalPrice" value="${c.discount.originalPrice||''}" placeholder="0 = no discount shown"/></div>
+      <div class="field"><label>Regular Price (optional)</label><input type="number" data-contract-field="discount.originalPrice" value="${esc(c.discount.originalPrice||'')}" placeholder="0 = no discount shown"/></div>
       <div class="field"><label>Discount Label</label><input data-contract-field="discount.label" value="${esc(c.discount.label||'')}" placeholder="e.g. repeat customer price"/></div>
     </div>
     ${!isCreative? `<div class="field-row">
       <div class="field"><label>Overtime Rate ($)${c.overtime.manual||c.overtime.interval==='not_applicable'?'':' · auto'}</label><input type="number" data-contract-field="overtime.rate" data-render-on-change value="${c.overtime.manual||Number(c.overtime.rate)? esc(String(c.overtime.rate)) : ''}" placeholder="fee ÷ hours, per half hour" ${c.overtime.interval==='not_applicable'?'disabled':''}/></div>
       <div class="field"><label>Per</label>
         <div class="chip-row">
-          ${['half_hour','15_min','hour','not_applicable'].map(iv=>`<button class="filter-chip ${c.overtime.interval===iv?'sel':''}" data-action="pick-contract-overtime-interval" data-value="${iv}">${iv==='not_applicable'?'Not applicable':overtimeIntervalLabel(iv)}</button>`).join('')}
+          ${['half_hour','15_min','hour','not_applicable'].map(iv=>`<button class="filter-chip ${c.overtime.interval===iv?'sel':''}" data-action="pick-contract-overtime-interval" data-value="${esc(iv)}">${iv==='not_applicable'?'Not applicable':overtimeIntervalLabel(iv)}</button>`).join('')}
         </div>
       </div>
     </div>` : ''}
@@ -8567,13 +8624,13 @@ function renderContractCancellationSection(c){
       <button class="filter-chip ${p.type==='credit_reschedule'?'sel':''}" data-action="pick-cancellation-type" data-value="credit_reschedule">Credit Toward Reschedule</button>
       <button class="filter-chip ${p.type==='full_within_days'?'sel':''}" data-action="pick-cancellation-type" data-value="full_within_days">Full Payment Within N Days</button>
     </div>
-    ${p.type==='flat_percent'? `<div class="field" style="max-width:160px;"><label>Percent Owed</label><input type="number" data-contract-field="cancellation.flatPercent" value="${p.flatPercent||80}"/></div>` : ''}
-    ${p.type==='credit_future'? `<div class="field" style="max-width:200px;"><label>Credit Window (months)</label><input type="number" data-contract-field="cancellation.creditWindowMonths" value="${p.creditWindowMonths||6}"/></div>` : ''}
-    ${p.type==='full_within_days'? `<div class="field" style="max-width:160px;"><label>Within (days)</label><input type="number" data-contract-field="cancellation.withinDays" value="${p.withinDays||40}"/></div>` : ''}
+    ${p.type==='flat_percent'? `<div class="field" style="max-width:160px;"><label>Percent Owed</label><input type="number" data-contract-field="cancellation.flatPercent" value="${esc(p.flatPercent||80)}"/></div>` : ''}
+    ${p.type==='credit_future'? `<div class="field" style="max-width:200px;"><label>Credit Window (months)</label><input type="number" data-contract-field="cancellation.creditWindowMonths" value="${esc(p.creditWindowMonths||6)}"/></div>` : ''}
+    ${p.type==='full_within_days'? `<div class="field" style="max-width:160px;"><label>Within (days)</label><input type="number" data-contract-field="cancellation.withinDays" value="${esc(p.withinDays||40)}"/></div>` : ''}
     ${p.type==='tiered'? `<div style="display:flex;flex-direction:column;gap:6px;">
       ${p.tiers.map(t=>`<div style="display:flex;gap:8px;align-items:center;">
         <span style="font-size:12px;color:var(--ink-3);">Within</span>
-        <input type="number" data-contract-field="tier.${t.id}.withinDays" value="${t.withinDays}" style="width:70px;"/>
+        <input type="number" data-contract-field="tier.${t.id}.withinDays" value="${esc(t.withinDays)}" style="width:70px;"/>
         <span style="font-size:12px;color:var(--ink-3);">days:</span>
         <input type="number" data-contract-field="tier.${t.id}.percent" value="${esc(String(t.percent??''))}" style="width:70px;"/>
         <span style="font-size:12px;color:var(--ink-3);">%</span>
@@ -8594,7 +8651,7 @@ function renderContractBoilerplateSection(c){
       <ul style="margin:0;padding-left:18px;font-size:12.5px;line-height:1.6;color:var(--ink-2);">${standardAgreementTerms(c).map(t=>`<li>${esc(t)}</li>`).join('')}</ul>
       <div class="chip-row" style="align-items:center;">
         ${extras.map(([k,l])=>`<span class="filter-chip sel" style="display:flex;align-items:center;gap:6px;">${esc(l)} <button data-action="remove-contract-term" data-key="${k}" aria-label="Remove ${esc(l)}" style="background:none;border:none;cursor:pointer;color:inherit;padding:0;display:flex;">${ICO.x}</button></span>`).join('')}
-        ${available.length? `<select class="contract-add-term-select" style="width:auto;max-width:100%;min-width:0;"><option value="">+ Add a term…</option>${available.map(([k,l])=>`<option value="${k}">${esc(l)}</option>`).join('')}</select>` : ''}
+        ${available.length? `<select class="contract-add-term-select" style="width:auto;max-width:100%;min-width:0;"><option value="">+ Add a term…</option>${available.map(([k,l])=>`<option value="${esc(k)}">${esc(l)}</option>`).join('')}</select>` : ''}
       </div>
     </div>`;
   }
@@ -8643,23 +8700,23 @@ function renderContractLineItemsSection(c){
     ${c.lineItems.map(li=>{ const tc = li.travelClause||blankTravelClause(); const sentence = contractTravelSentence(tc); return `<div style="display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--surface-2);border-radius:8px;">
       <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
         <div class="field"><label>Label</label><input data-contract-field="lineitem.${li.id}.label" data-focus-key="lineitem.${li.id}.label" value="${esc(li.label||'')}" placeholder="e.g. Eli Marcus - 5hr from performance start"/></div>
-        <div class="field" style="width:130px;"><label>Fee ($)</label><input type="number" data-contract-field="lineitem.${li.id}.fee" data-focus-key="lineitem.${li.id}.fee" data-live value="${li.fee||0}"/></div>
+        <div class="field" style="width:130px;"><label>Fee ($)</label><input type="number" data-contract-field="lineitem.${li.id}.fee" data-focus-key="lineitem.${li.id}.fee" data-live value="${esc(li.fee||0)}"/></div>
         <div class="field" style="width:170px;"><label>Overtime Rate</label><input data-contract-field="lineitem.${li.id}.overtimeRate" value="${esc(li.overtimeRate||'')}" placeholder="e.g. $150/musician/half hr"/></div>
-        <div class="field" style="width:150px;"><label>Date (optional)</label><input type="date" data-contract-field="lineitem.${li.id}.date" value="${li.date||''}"/></div>
+        <div class="field" style="width:150px;"><label>Date (optional)</label><input type="date" data-contract-field="lineitem.${li.id}.date" value="${esc(li.date||'')}"/></div>
         <button class="icon-btn" data-action="remove-line-item" data-id="${li.id}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
       </div>
       <textarea data-contract-field="lineitem.${li.id}.notes" rows="2" placeholder="Notes for this night/set (e.g. who opens, set length, timing)" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(li.notes||'')}</textarea>
       <details>
         <summary style="cursor:pointer;font-size:11.5px;color:var(--ink-3);">Travel for this line item</summary>
         <div class="field-row" style="margin-top:6px;">
-          <div class="field" style="width:90px;"><label>Flights</label><input type="number" min="0" data-contract-field="lineitemtravel.${li.id}.flightsCount" data-focus-key="lineitemtravel.${li.id}.flightsCount" data-live value="${tc.flightsCount||0}"/></div>
+          <div class="field" style="width:90px;"><label>Flights</label><input type="number" min="0" data-contract-field="lineitemtravel.${li.id}.flightsCount" data-focus-key="lineitemtravel.${li.id}.flightsCount" data-live value="${esc(tc.flightsCount||0)}"/></div>
           <div class="field"><label>Class</label>
-            <div class="chip-row">${['economy','business','first'].map(cl=>`<button class="filter-chip ${tc.flightsClass===cl?'sel':''}" data-action="pick-lineitem-travel-flight-class" data-id="${li.id}" data-value="${cl}">${cl.charAt(0).toUpperCase()+cl.slice(1)}</button>`).join('')}</div>
+            <div class="chip-row">${['economy','business','first'].map(cl=>`<button class="filter-chip ${tc.flightsClass===cl?'sel':''}" data-action="pick-lineitem-travel-flight-class" data-id="${li.id}" data-value="${esc(cl)}">${cl.charAt(0).toUpperCase()+cl.slice(1)}</button>`).join('')}</div>
           </div>
         </div>
         <div class="field-row">
-          <div class="field" style="width:110px;"><label>Hotel Rooms</label><input type="number" min="0" data-contract-field="lineitemtravel.${li.id}.hotelRooms" data-focus-key="lineitemtravel.${li.id}.hotelRooms" data-live value="${tc.hotelRooms||0}"/></div>
-          <div class="field" style="width:90px;"><label>Nights</label><input type="number" min="0" data-contract-field="lineitemtravel.${li.id}.hotelNights" data-focus-key="lineitemtravel.${li.id}.hotelNights" data-live value="${tc.hotelNights||0}"/></div>
+          <div class="field" style="width:110px;"><label>Hotel Rooms</label><input type="number" min="0" data-contract-field="lineitemtravel.${li.id}.hotelRooms" data-focus-key="lineitemtravel.${li.id}.hotelRooms" data-live value="${esc(tc.hotelRooms||0)}"/></div>
+          <div class="field" style="width:90px;"><label>Nights</label><input type="number" min="0" data-contract-field="lineitemtravel.${li.id}.hotelNights" data-focus-key="lineitemtravel.${li.id}.hotelNights" data-live value="${esc(tc.hotelNights||0)}"/></div>
         </div>
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;">
           <label style="display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" data-contract-field="lineitemtravel.${li.id}.food" data-live ${tc.food?'checked':''}/> Food</label>
@@ -8675,7 +8732,7 @@ function renderContractLineItemsSection(c){
     </div>
     ${c.addOns.map(a=>`<div class="field-row" style="align-items:flex-end;">
       <div class="field"><label>Label</label><input data-contract-field="addon.${a.id}.label" data-focus-key="addon.${a.id}.label" value="${esc(a.label||'')}" placeholder="e.g. Custom Bandstands"/></div>
-      <div class="field" style="width:130px;"><label>Amount ($)</label><input type="number" data-contract-field="addon.${a.id}.amount" data-focus-key="addon.${a.id}.amount" data-live value="${a.amount||0}"/></div>
+      <div class="field" style="width:130px;"><label>Amount ($)</label><input type="number" data-contract-field="addon.${a.id}.amount" data-focus-key="addon.${a.id}.amount" data-live value="${esc(a.amount||0)}"/></div>
       <button class="icon-btn" data-action="remove-add-on" data-id="${a.id}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
     </div>`).join('')}
   </div>`;
@@ -9295,7 +9352,7 @@ function renderGmailMailboxesCard(){
         <select data-field="artistId" data-form="gmailmailbox">
           <option value="">— ASP sending mailbox —</option>
           <option value="__payments" ${f.artistId==='__payments'?'selected':''}>Payments inbox (Zelle / bank alerts)</option>
-          ${ARTISTS.map(a=>`<option value="${a.id}" ${f.artistId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
+          ${ARTISTS.map(a=>`<option value="${esc(a.id)}" ${f.artistId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
         </select>
       </div>
       <div class="field"><label>Mailbox Email</label><input data-field="email" data-form="gmailmailbox" type="email" value="${esc(f.email||'')}" placeholder="name@gmail.com"/></div>
@@ -9457,7 +9514,7 @@ function renderPayeeProfileFormModal(){
         <div class="field"><label>Default Artist (optional — blank = house profile)</label>
           <select data-field="artistId">
             <option value="" ${!f.artistId?'selected':''}>— None (house profile) —</option>
-            ${ARTISTS.map(a=>`<option value="${a.id}" ${f.artistId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
+            ${ARTISTS.map(a=>`<option value="${esc(a.id)}" ${f.artistId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
           </select>
         </div>
         <div class="field-row">
@@ -9487,15 +9544,15 @@ function renderPayeeProfileFormModal(){
           <div class="field"><label>Routing #</label><input data-field="wireRoutingNumber" value="${esc(f.wireRoutingNumber||'')}"/></div>
         </div>
         <div class="field"><label>Default Overtime Interval</label>
-          <div class="chip-row">${['half_hour','15_min','hour'].map(iv=>`<button class="filter-chip ${(f.defaultOvertimeInterval||'half_hour')===iv?'sel':''}" data-action="pick-payee-overtime-interval" data-value="${iv}">${overtimeIntervalLabel(iv)}</button>`).join('')}</div>
+          <div class="chip-row">${['half_hour','15_min','hour'].map(iv=>`<button class="filter-chip ${(f.defaultOvertimeInterval||'half_hour')===iv?'sel':''}" data-action="pick-payee-overtime-interval" data-value="${esc(iv)}">${overtimeIntervalLabel(iv)}</button>`).join('')}</div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Standard Fee ($, optional)</label><input type="number" data-field="defaultFee" value="${f.defaultFee||''}" placeholder="prefills new contracts, never overwrites a known price"/></div>
+          <div class="field"><label>Standard Fee ($, optional)</label><input type="number" data-field="defaultFee" value="${esc(f.defaultFee||'')}" placeholder="prefills new contracts, never overwrites a known price"/></div>
           <div class="field"><label>Standard Hours (optional)</label><input data-field="defaultHours" value="${esc(f.defaultHours||'')}" placeholder="e.g. 5 hours"/></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Standard Deposit ($, optional)</label><input type="number" data-field="defaultDepositAmount" value="${f.defaultDepositAmount||''}" placeholder="flat amount, e.g. 2000"/></div>
-          <div class="field"><label>— or Deposit (% of total)</label><input type="number" data-field="defaultDepositPercent" value="${f.defaultDepositPercent||''}" placeholder="% wins if both are set"/></div>
+          <div class="field"><label>Standard Deposit ($, optional)</label><input type="number" data-field="defaultDepositAmount" value="${esc(f.defaultDepositAmount||'')}" placeholder="flat amount, e.g. 2000"/></div>
+          <div class="field"><label>— or Deposit (% of total)</label><input type="number" data-field="defaultDepositPercent" value="${esc(f.defaultDepositPercent||'')}" placeholder="% wins if both are set"/></div>
         </div>
         <div class="field"><label>Notes</label><textarea data-field="notes" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(f.notes||'')}</textarea></div>
         <button class="btn btn-primary btn-block" data-action="save-payee-profile">Save Profile</button>

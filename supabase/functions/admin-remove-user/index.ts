@@ -26,11 +26,18 @@ Deno.serve(async (req) => {
   if (!table || !body.rosterId) return json({ ok: false, error: "kind (admin|artist) and rosterId are required" }, 400);
 
   const sb = serviceClient();
-  const { data: row, error: rowErr } = await sb.from(table).select("id, name, user_id").eq("id", body.rosterId).maybeSingle();
+  const { data: row, error: rowErr } = await sb.from(table).select(table === "admin_users" ? "id, name, user_id, role" : "id, name, user_id").eq("id", body.rosterId).maybeSingle();
   if (rowErr) return json({ ok: false, error: rowErr.message }, 500);
   if (!row) return json({ ok: false, error: "that person no longer exists" }, 404);
   if (row.user_id && row.user_id === user.id) return json({ ok: false, error: "you can't remove yourself" }, 400);
   if (table === "admin_users") {
+    // Only the CEO / COO can remove a CEO / COO (security audit 2026-11-02; the same rule as migration 0076).
+    const TOP = ["admin_ceo", "admin_coo"];
+    // deno-lint-ignore no-explicit-any
+    if (TOP.includes((row as any).role)) {
+      const { data: me } = await sb.from("admin_users").select("role").eq("user_id", user.id).maybeSingle();
+      if (!TOP.includes(me?.role || "")) return json({ ok: false, error: "only the CEO or COO can remove a CEO or COO" }, 403);
+    }
     const { count } = await sb.from("admin_users").select("id", { count: "exact", head: true });
     if ((count ?? 0) <= 1) return json({ ok: false, error: "can't remove the last office admin" }, 400);
   }
