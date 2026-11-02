@@ -71,14 +71,21 @@ async function sendNow(msg: WaMessage): Promise<{ ok: boolean; error?: string; i
         ...(templateComponents(msg.template).length ? { components: templateComponents(msg.template) } : {}) } }
     : { messaging_product: "whatsapp", to, type: "text", text: { preview_url: true, body: (redirect ? `[TEST → +${realTo}]\n` : "") + String(msg.text).slice(0, 4000) } };
 
-  let resp: Response;
-  try {
-    resp = via360
-      ? await fetch("https://waba-v2.360dialog.io/messages", { method: "POST", headers: { "D360-API-KEY": token, "Content-Type": "application/json" }, body: JSON.stringify(body) })
-      : await fetch(`https://graph.facebook.com/${version}/${phoneId}/messages`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  } catch (err) {
-    return { ok: false, error: "could not reach WhatsApp: " + String(err) };
+  // "429" = too many too fast (2026-10-30: two reminders in a row both failed with it; in test mode every
+  // message goes to the same phone). Wait as asked (or a few seconds) and try again, up to 3 times.
+  let resp: Response | null = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (resp) await new Promise((r) => setTimeout(r, Math.min(20, Number(resp!.headers.get("retry-after")) || 4 * attempt) * 1000));
+    try {
+      resp = via360
+        ? await fetch("https://waba-v2.360dialog.io/messages", { method: "POST", headers: { "D360-API-KEY": token, "Content-Type": "application/json" }, body: JSON.stringify(body) })
+        : await fetch(`https://graph.facebook.com/${version}/${phoneId}/messages`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    } catch (err) {
+      return { ok: false, error: "could not reach WhatsApp: " + String(err) };
+    }
+    if (resp.status !== 429) break;
   }
+  if (!resp) return { ok: false, error: "could not reach WhatsApp" };
   const out = await resp.json().catch(() => ({}));
   if (!resp.ok) return { ok: false, error: `WhatsApp: ${out?.error?.message || resp.status}` };
   return { ok: true, id: out?.messages?.[0]?.id, testRedirect: redirect };
