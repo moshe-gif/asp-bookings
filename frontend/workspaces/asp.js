@@ -1684,7 +1684,7 @@ function renderPayeeStripeSection(profileId){
         <button type="button" class="btn btn-sm btn-primary" data-action="payee-stripe-send" data-id="${esc(p.id)}" ${busy?'disabled':''}>${busy?'Working…':'Email setup link'}</button>
         <button type="button" class="btn btn-sm btn-ghost" data-action="payee-stripe-link" data-id="${esc(p.id)}" ${busy?'disabled':''}>Copy setup link</button>
       </div>`}
-    ${link ? `<input readonly value="${esc(link)}" data-testid="payee-stripe-link" style="margin-top:8px;width:100%;font-size:12px;" onfocus="this.select()"/>` : ''}
+    ${link ? `<input readonly value="${esc(link)}" data-testid="payee-stripe-link" style="margin-top:8px;width:100%;font-size:12px;" data-select-on-focus/>` : ''}
   </div>`;
 }
 function paidOnlineText(r){
@@ -4367,7 +4367,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.49'; // bump on every release so a phone can tell it has updated. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.50'; // bump on every release so a phone can tell it has updated. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -7607,7 +7607,7 @@ function renderBalanceOnlineRow(ev){
   if(balancePayBlocker(ev)) return '';
   const link = (S.payLinks||{})[ev.id];
   return `<div class="ledger-row"><span>Balance online (to the artist)</span><span class="amt"><button class="btn btn-sm btn-ghost" data-action="make-balance-pay-link" data-id="${ev.id}" ${S.payLinkBusy===ev.id?'disabled':''}>${S.payLinkBusy===ev.id?'Making link…':'Balance pay link'}</button></span></div>
-    ${link?`<input readonly value="${esc(link)}" data-testid="balance-pay-link" style="width:100%;font-size:12px;" onfocus="this.select()"/>`:''}`;
+    ${link?`<input readonly value="${esc(link)}" data-testid="balance-pay-link" style="width:100%;font-size:12px;" data-select-on-focus/>`:''}`;
 }
 // The artist's own money on a gig: gig amount, ASP fee at this gig's percentage, what they receive.
 function renderArtistMoneyCard(ev){
@@ -11452,6 +11452,9 @@ function bindGlobal(){
 
 applyHashToState();
 render();
+// Fields that select their text when focused (copy-a-link boxes). Was an inline onfocus="" -- inline code is
+// blocked by the page's Content-Security-Policy (index.html, 2026-11-02).
+document.addEventListener('focusin', e=>{ const t = e.target; if(t && t.matches && t.matches('[data-select-on-focus]') && t.select) t.select(); });
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
 }

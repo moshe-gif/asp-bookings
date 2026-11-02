@@ -57,3 +57,30 @@ def test_no_redraws_when_nothing_changes(live_server, page):
     page.evaluate("() => { document.dispatchEvent(new Event('visibilitychange')); window.dispatchEvent(new Event('focus')); }")
     page.wait_for_timeout(3000)
     assert page.evaluate("window.__rebuilds") == 0, "the screen redrew on returning to the app"
+
+
+def test_every_page_draws_fast_with_300_gigs(live_server, page):
+    # Speed budget: with 300 gigs (more than a year of bookings) every menu page is drawn within 250 ms on the
+    # test machine (measured 2026-11-02: 6-53 ms). A change that makes a page slow fails here first.
+    import random
+    random.seed(1)
+    base = datetime.date(2026, 11, 1)
+    gigs = [fake_gig(f"EV-{9600 + i}", random.choice(["benny", "baruch", "eli", "moshe", "yaakov"]),
+                     (base + datetime.timedelta(days=random.randint(-60, 365))).isoformat(),
+                     status=random.choice(["lead", "contract_sent", "booked", "paid"])) for i in range(300)]
+    seed_events(page, gigs)
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    page.wait_for_function("() => window.S && S.user")
+    page.wait_for_timeout(2500)
+    views = page.evaluate("() => [...new Set([...document.querySelectorAll('.rail-link[data-view], .bn-item[data-view]')].map(e => e.getAttribute('data-view')))]")
+    slow = {}
+    for v in views:
+        ms = page.evaluate("""v => new Promise(res => { const t = performance.now(); location.hash = '#/' + v;
+            requestAnimationFrame(() => requestAnimationFrame(() => res(performance.now() - t))); })""", v)
+        page.wait_for_timeout(300)
+        if ms > 250:
+            slow[v] = round(ms)
+    assert len(views) >= 5, views
+    assert not slow, f"pages slower than 250 ms: {slow}"

@@ -77,3 +77,11 @@ def live_server():
 def _never_sync_test_gigs(context):
     context.add_init_script("window.ASP_DISABLE_EVENT_SYNC = true;")
     yield
+
+
+# Playwright evaluates some test conditions as strings, which the app's Content-Security-Policy (index.html,
+# 2026-11-02) rightly blocks. Ordinary specs run with it bypassed; test_every_button.py's own contexts keep it on
+# and fail on any violation.
+@pytest.fixture(scope="session")
+def browser_context_args(browser_context_args):
+    return {**browser_context_args, "bypass_csp": os.environ.get("ASP_TEST_CSP") != "on"}

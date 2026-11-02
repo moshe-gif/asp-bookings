@@ -12,9 +12,11 @@ Deno.serve(async (req) => {
   // deno-lint-ignore no-explicit-any
   const b = await readJson<any>(req);
   // The owner's WhatsApp tab (0071): point 360dialog's incoming messages at whatsapp-webhook.
+  // Everything here -- sending included -- is for people with WhatsApp access (the owner's tab, 0071); any other
+  // admin could otherwise text any number from the office line (security audit 2026-11-02).
+  const { data: allowed } = await auth.caller.rpc("can_use_whatsapp");
+  if (!allowed) return json({ ok: false, error: "not authorized" }, 403);
   if (b?.action === "setup-webhook" || b?.action === "status" || b?.action === "create-templates" || b?.action === "media") {
-    const { data: allowed } = await auth.caller.rpc("can_use_whatsapp");
-    if (!allowed) return json({ ok: false, error: "not authorized" }, 403);
     const t = whatsappTestMode();
     if (b.action === "status") return json({ ok: true, connected: !!Deno.env.get("WHATSAPP_TOKEN"), incoming: !!Deno.env.get("WHATSAPP_WEBHOOK_SECRET"), testMode: t.on, testTo: t.to, templates: await templateStatus360() });
     if (b.action === "create-templates") return json({ ok: true, templates: await createTemplates360() });
