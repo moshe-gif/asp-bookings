@@ -155,3 +155,62 @@ def test_every_button_in_the_gig_sheet(live_server, page):
             page.keyboard.press("Escape")
     assert pressed > 40, pressed
     assert not problems, "\n".join(problems)
+
+
+def test_every_popup_closes_with_its_x(live_server, page):
+    # Owner 2026-11-02: "this button is not working" -- the X on the print views (gig info, itinerary, invoice,
+    # contract) did nothing. Open every view/pop-up reachable from a gig sheet and press its close button: it must go.
+    from helpers import fake_gig, seed_events
+    seed_events(page, [fake_gig("EV-9511", "benny", "2099-07-01", status="booked", depositReceived=True,
+                                flightNeeded=True, flight={"airline": "Test Air", "flightNumber": "TA1"})])
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    page.wait_for_function("() => window.S && S.user", timeout=20000)
+    _block_writes(page)
+    page.on("dialog", lambda d: d.dismiss())
+    page.on("popup", lambda p: p.close())
+
+    def open_sheet():
+        _fresh(page, "leads")
+        page.evaluate("""() => { const b = document.createElement('button'); b.setAttribute('data-action', 'open-event'); b.setAttribute('data-id', 'EV-9511');
+          document.querySelector('#app .content').appendChild(b); b.click(); }""")
+        page.locator(".sheet").first.wait_for(state="visible", timeout=5000)
+
+    open_sheet()
+    openers = page.evaluate("""() => [...new Set([...document.querySelectorAll('.sheet [data-action^="view-"], .sheet [data-action^="open-"]')]
+        .filter(el => el.getBoundingClientRect().width).map(el => el.getAttribute('data-action')))]""")
+    stuck, checked = [], 0
+    for action in openers:
+        open_sheet()
+        page.locator(f'.sheet [data-action="{action}"]').first.click(timeout=3000)
+        page.wait_for_timeout(250)
+        host = page.locator('body > [id$="Host"]')
+        if not host.count():
+            continue  # this one opens inside the sheet / app, not a pop-up
+        close = host.locator('[data-action^="close"], [aria-label="Close"]').first
+        if not close.count():
+            stuck.append(f"{action}: no close button")
+            continue
+        checked += 1
+        close.click(timeout=3000)
+        page.wait_for_timeout(250)
+        if page.locator('body > [id$="Host"]').count():
+            stuck.append(f"{action}: still open after pressing its X")
+    # The print views (the ones in the owner's screenshot), opened the way their buttons do.
+    for action in ("view-giginfo", "view-itinerary"):
+        open_sheet()
+        page.evaluate("""a => { const b = document.createElement('button'); b.setAttribute('data-action', a); b.setAttribute('data-id', 'EV-9511');
+          document.querySelector('.sheet').appendChild(b); b.click(); }""", action)
+        page.wait_for_timeout(250)
+        host = page.locator('body > [id$="PrintHost"]')
+        if not host.count():
+            stuck.append(f"{action}: did not open")
+            continue
+        checked += 1
+        host.locator('[data-action^="close"]').first.click(timeout=3000)
+        page.wait_for_timeout(250)
+        if page.locator('body > [id$="Host"]').count():
+            stuck.append(f"{action}: still open after pressing its X")
+    assert checked >= 3, openers
+    assert not stuck, stuck

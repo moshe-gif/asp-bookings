@@ -10,7 +10,30 @@ import pathlib
 import pytest
 
 FRONTEND_DIR = pathlib.Path(__file__).parent.parent / "frontend"
-PORT = 8791
+import socket
+
+
+def _free_port(start=8791, tries=40):
+    """The first port from 8791 that nothing listens on -- over IPv4 or IPv6. "localhost" can resolve to either, and
+    another project's server on the same port (2026-11-02: a SET Tickets `http.server 8791` on IPv6) made the
+    browser load the wrong site mid-run and 50 specs fail."""
+    for port in range(start, start + tries):
+        busy = False
+        for fam, addr in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
+            s = socket.socket(fam, socket.SOCK_STREAM)
+            s.settimeout(0.2)
+            try:
+                busy = busy or s.connect_ex((addr, port)) == 0
+            except OSError:
+                pass
+            finally:
+                s.close()
+        if not busy:
+            return port
+    raise RuntimeError("no free port for the test server")
+
+
+PORT = int(os.environ.get("ASP_TEST_PORT") or _free_port())
 
 
 def _load_dotenv():
