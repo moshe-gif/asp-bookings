@@ -10,7 +10,7 @@ from helpers import login_as, collect_console_errors
 
 def _new_lead(page, artist_id, client, price):
     page.locator('[data-action="open-new-lead"]').click()
-    page.locator(f'[data-action="pick-artist"][data-id="{artist_id}"]').click()
+    page.locator('select[data-action="pick-artist"]').select_option(f"{artist_id}")
     page.locator('input[data-field="clientName"]').fill(client)
     page.locator('input[data-field="date"]').fill("2099-07-07")
     page.locator('[data-form="lead"] input[data-field="price"]').fill(str(price))

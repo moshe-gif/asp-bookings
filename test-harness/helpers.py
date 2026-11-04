@@ -264,7 +264,7 @@ def create_lead(page, client_name, date, artist_id="benny", event_type=None):
     """New Lead modal → pick artist → client name + date → submit. Leaves the new lead's event sheet open.
     The default type is Wedding (first in the list); pass event_type for anything else."""
     page.locator('[data-action="open-new-lead"]').click()
-    page.locator(f'[data-action="pick-artist"][data-id="{artist_id}"]').click()
+    page.locator('select[data-action="pick-artist"]').select_option(f"{artist_id}")
     if event_type:
         page.locator('select[data-action="pick-event-type"]').select_option(event_type)
     page.locator('input[data-field="clientName"]').fill(client_name)

@@ -31,7 +31,7 @@ def test_band_fields_saved_and_shown_on_new_lead(live_server, page):
     login_as(page, "admin_bookings")
 
     page.locator('[data-action="open-new-lead"]').click()
-    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
+    page.locator('select[data-action="pick-artist"]').select_option("benny")
     page.locator('input[data-field="clientName"]').fill("Wedding Band Test Client")
     page.locator('input[data-field="date"]').fill("2027-06-15")
     page.locator('[data-action="pick-event-type"]').select_option("Wedding")
@@ -56,7 +56,7 @@ def test_band_fields_editable_and_hidden_for_other_types(live_server, page):
     # Create as a non-Wedding type first, then edit into Wedding -- confirms Edit Details reacts
     # to a type change the same way New Lead does, not just at creation time.
     page.locator('[data-action="open-new-lead"]').click()
-    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
+    page.locator('select[data-action="pick-artist"]').select_option("benny")
     page.locator('input[data-field="clientName"]').fill("Concert To Wedding Client")
     page.locator('input[data-field="date"]').fill("2027-07-01")
     page.locator('[data-action="pick-event-type"]').select_option("Concert")

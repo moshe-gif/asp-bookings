@@ -172,7 +172,7 @@ def _wedding_lead_variant(page, problems, width):
     _goto_view(page, "dashboard")
     _click_action(page, "open-new-lead")
     modal = page.locator('[data-form="lead"]')
-    modal.locator('[data-action="pick-artist"]').first.click()
+    modal.locator('select[data-action="pick-artist"]').select_option(index=1)
     modal.locator('input[data-field="clientName"]').fill(LONG_NAME)
     page.locator('[data-form="lead"] select[data-action="pick-event-type"]').select_option("Wedding")
     page.wait_for_timeout(200)

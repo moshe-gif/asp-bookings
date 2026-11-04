@@ -64,7 +64,7 @@ def test_multi_artist_lead_roster_and_multiline_contract_prefill(live_server, pa
 
     page.locator('[data-action="open-new-lead"]').click()
     modal = page.locator('.modal').last
-    modal.locator('[data-action="pick-artist"][data-id="baruch"]').click()
+    modal.locator('select[data-action="pick-artist"]').select_option("baruch")
     modal.locator('input[data-field="showAdditionalArtists"]').check()
     modal.locator('[data-action="toggle-additional-artist"][data-id="eli"]').click()
     modal.locator('input[data-lead-artist-fee="eli"]').fill("1500")
@@ -108,7 +108,7 @@ def test_travel_request_send_gated_on_rivky_email(live_server, page):
 
     page.locator('[data-action="open-new-lead"]').click()
     modal = page.locator('.modal').last
-    modal.locator('[data-action="pick-artist"][data-id="moshe"]').click()
+    modal.locator('select[data-action="pick-artist"]').select_option("moshe")
     modal.locator('input[data-field="clientName"]').fill("Travel Test Client")
     modal.locator('input[data-field="date"]').fill("2027-07-01")
     modal.locator('input[data-field="price"]').fill("4000")

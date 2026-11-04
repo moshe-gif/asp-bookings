@@ -61,7 +61,7 @@ def test_new_lead_end_time_autofills_and_time_tbd(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
     page.locator('[data-action="open-new-lead"]').click()
-    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
+    page.locator('select[data-action="pick-artist"]').select_option("benny")
     end = page.locator('input[data-field="endTime"]')
     assert end.input_value(), "end time not prefilled"
     first = end.input_value()
@@ -95,7 +95,7 @@ def test_paste_message_fills_new_lead(live_server, page):
     page.wait_for_function("() => document.querySelector('input[data-field=\"clientName\"]')?.value === 'Paste Test Client'", timeout=10000)
     assert page.locator('input[data-field="venue"]').input_value() == "Test Paste Hall"
     assert page.locator('input[data-field="date"]').input_value() == "2027-12-15"
-    assert page.locator('[data-action="pick-artist"][data-id="benny"]').get_attribute("class").count("sel") == 1
+    assert page.locator('select[data-action="pick-artist"]').input_value() == "benny"
     page.locator('[data-action="submit-lead"]').click()
     assert "From the pasted message: Band is TBD" in page.locator(".sheet").inner_text()
     assert not errors, f"console errors: {errors}"
@@ -215,7 +215,7 @@ def test_new_lead_mezumin_marks_cash(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
     page.locator('[data-action="open-new-lead"]').click()
-    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
+    page.locator('select[data-action="pick-artist"]').select_option("benny")
     page.locator('input[data-field="clientName"]').fill("Mezumin Client")
     page.locator('input[data-field="date"]').fill("2027-08-08")
     page.locator('[data-action="toggle-lead-mezumin"]').click()
@@ -354,7 +354,7 @@ def test_venue_pick_fills_address(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
     page.locator('[data-action="open-new-lead"]').click()
-    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
+    page.locator('select[data-action="pick-artist"]').select_option("benny")
     page.locator('input[data-field="clientName"]').fill("Venue Pick Client")
     page.locator('input[data-field="date"]').fill("2027-06-06")
     page.locator('input[data-field="venue"]').fill("Test Venue Hall")
@@ -392,7 +392,7 @@ def test_built_in_venues_fill_on_a_fresh_browser(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
     page.locator('[data-action="open-new-lead"]').click()
-    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
+    page.locator('select[data-action="pick-artist"]').select_option("benny")
     options = page.evaluate("() => [...document.querySelectorAll('#venueList option')].map(o => o.value)")
     missing = [v["name"] for v in built_in if v["name"] not in options]
     assert not missing, f"missing from the venue suggestions: {missing}"
@@ -419,7 +419,7 @@ def test_shorter_saved_venue_list_never_shrinks_it(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
     page.locator('[data-action="open-new-lead"]').click()
-    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
+    page.locator('select[data-action="pick-artist"]').select_option("benny")
     options = page.evaluate("() => [...document.querySelectorAll('#venueList option')].map(o => o.value)")
     assert len(options) == len(_built_in_venues()) + 1, len(options)
     assert _fill_and_read(page, "Browser Only Hall") == ["9 Local Rd", "Monsey", "NY"]

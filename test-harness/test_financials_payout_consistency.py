@@ -17,7 +17,7 @@ def test_all_jobs_and_artist_payouts_tables_agree_with_a_post_signing_charge(liv
     login_as(page, "admin_bookings")
 
     page.locator('[data-action="open-new-lead"]').click()
-    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
+    page.locator('select[data-action="pick-artist"]').select_option("benny")
     page.locator('input[data-field="clientName"]').fill("Test Harness Payout Consistency")
     page.locator('input[data-field="date"]').fill("2027-05-10")
     page.locator('input[data-field="price"]').fill("4000")

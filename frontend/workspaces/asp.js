@@ -7222,7 +7222,10 @@ function renderNewLeadModal(){
           ${f.pasteNotes? `<p style="font-size:11.5px;color:var(--ink-3);margin:6px 0 0;">Also in the message: ${esc(f.pasteNotes)}</p>` : ''}
         </div>` : ''}
         <div class="field"><label>Artist</label>
-          <div class="chip-row">${ARTISTS.map(a=>`<button type="button" class="filter-chip ${f.artistId===a.id?'sel':''}" data-action="pick-artist" data-id="${a.id}"><span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${esc(a.initials)}</span>${esc(a.name.split(' ')[0])}</button>`).join('')}</div>
+          <select data-action="pick-artist" data-testid="lead-artist" style="max-width:100%;">
+            <option value="" ${!f.artistId?'selected':''} disabled>Pick the singer…</option>
+            ${ARTISTS.map(a=>`<option value="${esc(a.id)}" ${f.artistId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
+          </select>
         </div>
         ${!isInternal? renderAdditionalArtistsSection(f) : ''}
         <div class="field-row">
@@ -11140,7 +11143,7 @@ function bindGlobal(){
       case 'submit-ask-ai': doAskAI(); break;
       case 'ask-ai-suggestion': S.askAIForm={query:t.getAttribute('data-q')}; doAskAI(); break;
       case 'close-sheet': closeSheet(); break;
-      case 'pick-artist': S.newLeadForm.artistId = id; applyStandardPricing(); render(); break;
+      case 'pick-artist': if(t.tagName==='SELECT') break; S.newLeadForm.artistId = id; applyStandardPricing(); render(); break;   // the dropdown saves on change
       case 'toggle-additional-artist': {
         S.newLeadForm.additionalArtists = S.newLeadForm.additionalArtists||[];
         const idx = S.newLeadForm.additionalArtists.findIndex(x=>x.artistId===id);
@@ -11505,6 +11508,10 @@ function bindGlobal(){
   });
   document.querySelectorAll('[data-lead-charge-preset]').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.newLeadForm.chargePreset = sel.value; render(); });
+  });
+  // New Lead's singer is a dropdown (owner 2026-11-04: "in new lead i want the artists to be in a dropdown").
+  document.querySelectorAll('select[data-action="pick-artist"]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.newLeadForm.artistId = sel.value; applyStandardPricing(); render(); });
   });
   document.querySelectorAll('[data-action="pick-event-type"]').forEach(sel=>{
     sel.addEventListener('change', ()=>{ S.newLeadForm.type = sel.value; applyStandardPricing(); render(); });
