@@ -21,8 +21,11 @@ export type WaMessage =
   | { to: string; template: { name: string; lang?: string; params?: string[]; headerImage?: string; button?: string }; text?: undefined }
   | { to: string; text: string; template?: undefined };
 
-export function whatsappTestMode(): { on: boolean; to: string } {
-  return { on: Deno.env.get("WHATSAPP_LIVE") !== "yes", to: Deno.env.get("TEST_WHATSAPP_TO") || "+14755595075" };
+// TEST_WHATSAPP_ALLOW (comma list of numbers): staff the owner asked to reach during test mode (owner
+// 2026-11-04: Ilan gets the test contract's WhatsApps on his own phone) -- like TEST_EMAIL_ALLOW in mail.ts.
+export function whatsappTestMode(): { on: boolean; to: string; allow: string[] } {
+  const allow = (Deno.env.get("TEST_WHATSAPP_ALLOW") || "").split(",").map((x) => waNumber(x)).filter((x) => x.length >= 10);
+  return { on: Deno.env.get("WHATSAPP_LIVE") !== "yes", to: Deno.env.get("TEST_WHATSAPP_TO") || "+14755595075", allow };
 }
 
 // Digits only, US numbers get the leading 1 (Meta wants E.164 without the "+").
@@ -36,7 +39,7 @@ export async function sendWhatsApp(msg: WaMessage, sentBy?: string): Promise<{ o
   const out = await sendNow(msg);
   try {
     const test = whatsappTestMode(), realTo = waNumber(msg.to);
-    const redirected = test.on && realTo !== waNumber(test.to);
+    const redirected = test.on && realTo !== waNumber(test.to) && !test.allow.includes(realTo);
     await serviceClient().from("whatsapp_messages").insert({
       wa_id: out.id || null, direction: "out", contact: redirected ? waNumber(test.to) : realTo, real_to: redirected ? realTo : null,
       body: msg.template ? `[${msg.template.name}] ${(msg.template.params || []).join(" · ")}` : msg.text, kind: msg.template ? "template" : "text",
@@ -63,7 +66,7 @@ async function sendNow(msg: WaMessage): Promise<{ ok: boolean; error?: string; i
   const test = whatsappTestMode();
   const realTo = waNumber(msg.to);
   if (!realTo || realTo.length < 8) return { ok: false, error: "invalid WhatsApp number" };
-  const redirect = test.on && realTo !== waNumber(test.to);
+  const redirect = test.on && realTo !== waNumber(test.to) && !test.allow.includes(realTo);
   const to = redirect ? waNumber(test.to) : realTo;
 
   const body = msg.template
@@ -141,24 +144,48 @@ export const WA_BRANDED: Record<string, Branded> = {
   asp_balance_reminder_nolink: { text: "Hi {{1}}, thanks again for booking with us!\n\nJust a reminder that the balance of *{{2}}* for *{{3}}* is due before the event. Reply here anytime and we'll help with payment.\n\nThank you!",
     example: ["Sarah", "$4,500", "Sunday, November 22, 2026"],
     from: (p) => linkToken(String(p[3] || "").replace(/^Pay online: /, ""), "/pay/") ? null : { params: p.slice(0, 3) } },
+  // 2026-11-04 (owner: "all" of contract sent, balance paid, singer reminders, office alerts).
+  asp_contract_sent: { text: "Hi {{1}}! 🎶\n\nYour agreement for *{{2}}* on *{{3}}* is ready. You can review it, sign and pay the deposit right from your phone with the button below.\n\nThe date is held once the deposit comes in. Any questions? Just reply here.",
+    example: ["Sarah", "Benny Friedman", "Sunday, November 22, 2026"], button: { text: "Review & sign", url: "/sign/?t={{1}}", example: "sample" },
+    from: (p) => { const t = linkToken(p[3], "/sign/"); return t ? { params: p.slice(0, 3), button: t } : null; } },
+  asp_balance_paid: { text: "Hi {{1}}, we received your balance for *{{2}}* on *{{3}}*, so you're all paid up. Thank you!\n\nWe're looking forward to it. If anything comes up, just reply here.",
+    example: ["Sarah", "Benny Friedman", "Sunday, November 22, 2026"], from: (p) => ({ params: p.slice(0, 3) }) },
+  asp_gig_reminder: { text: "Hi {{1}}, a reminder about your gig: *{{2}}* on *{{3}}* at {{4}}.\n\nThe full gig sheet is in the app. Have a great one!",
+    example: ["Benny", "Applegrad wedding", "Sunday, November 22, 2026, 6:00 PM", "Lake Terrace, 1690 Oak St, Lakewood"], button: { text: "Open the gig sheet", url: "/" },
+    from: (p) => ({ params: p.slice(0, 4) }) },
+  asp_flight_reminder: { text: "Hi {{1}}, time to get ready ✈️ Your flight *{{2}}* leaves *{{3}}*, for {{4}}.\n\nYour itinerary is in the app. Safe travels!",
+    example: ["Benny", "LY26 (El Al)", "Saturday, October 31, 9:50 PM", "the Tarj FZCO event in Tel Aviv"], button: { text: "Open my itinerary", url: "/" },
+    from: (p) => ({ params: p.slice(0, 4) }) },
+  asp_office_alert: { text: "ASP Bookings update: {{1}}\n\nOpen the app for the details.",
+    example: ["Brian Pergament signed the contract for Benny Friedman on Monday, November 9, 2026."], button: { text: "Open ASP Bookings", url: "/" },
+    from: (p) => ({ params: p.slice(0, 1) }) },
   asp_crew_request: { text: "Hi {{1}}! 🎥 Can you film *{{2}}* on *{{3}}* at {{4}}?\n\nTap below to confirm in the app. Thanks!",
     example: ["Aharon", "Benny Friedman", "Sun, Nov 2, 7:30 PM", "Lake Terrace, Lakewood"], button: { text: "Confirm in the app", url: "/" },
     from: (p) => ({ params: p.slice(0, 4) }) },
 };
 const BRANDED_FOR: Record<string, string[]> = { deposit_received: ["asp_deposit_received"], deposit_reminder: ["asp_deposit_reminder"],
-  balance_reminder: ["asp_balance_reminder", "asp_balance_reminder_nolink"], crew_request: ["asp_crew_request"] };
+  balance_reminder: ["asp_balance_reminder", "asp_balance_reminder_nolink"], crew_request: ["asp_crew_request"],
+  contract_sent: ["asp_contract_sent"], balance_paid: ["asp_balance_paid"], gig_reminder: ["asp_gig_reminder"],
+  flight_reminder: ["asp_flight_reminder"], office_alert: ["asp_office_alert"] };
 export const waLogoUrl = () => `${appUrl()}/assets/brand/asp-whatsapp-header.jpg`;
 
 // A template message: the branded one if Meta approved it, else the plain approved one, else the same words as
 // plain text (which WhatsApp delivers only inside the person's 24-hour reply window).
 export async function sendTemplate(to: string, name: string, params: string[], sentBy?: string) {
   const t = WA_TEMPLATES[name];
+  const brandedOnly = !t ? WA_BRANDED[(BRANDED_FOR[name] || [])[0]] : null;   // newer kinds have only a branded template
   const approved = await templateStatus360().catch(() => ({} as Record<string, string>));
   for (const b of BRANDED_FOR[name] || []) {
     const spec = WA_BRANDED[b], built = spec.from(params);
     if (!built || approved[b] !== "approved") continue;
     const sent = await sendWhatsApp({ to, template: { name: b, params: built.params, headerImage: waLogoUrl(), button: built.button } }, sentBy);
     if (sent.ok) return sent;
+  }
+  if (brandedOnly) {
+    // Not approved by Meta yet: hold it (owner 2026-11-04: "we cant have the client need to send a text first"
+    // -- plain text only reaches someone who wrote in the last 24 hours). The caller logs it as not sent, so
+    // the next run tries again and it goes out once Meta approves the template.
+    return { ok: false, error: "waiting for Meta to approve the message template" };
   }
   const viaTemplate = await sendWhatsApp({ to, template: { name, params } }, sentBy);
   if (viaTemplate.ok || !t) return viaTemplate;

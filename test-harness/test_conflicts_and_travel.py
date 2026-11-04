@@ -367,6 +367,66 @@ def test_venue_pick_fills_address(live_server, page):
     assert not errors, f"console errors: {errors}"
 
 
+
+def _built_in_venues():
+    """The venue list built into asp.js (read from the source, the way the app ships it)."""
+    import os, re
+    src = open(os.path.join(os.path.dirname(__file__), "..", "frontend", "workspaces", "asp.js")).read()
+    block = src[src.index("const VENUES_BUILT_IN = ["):]
+    block = block[:block.index("\n];")]
+    rows = re.findall(r'name:"(.*?)", address:"(.*?)", city:"(.*?)", state:"(.*?)"', block)
+    return [dict(zip(("name", "address", "city", "state"), r)) for r in rows]
+
+
+def _fill_and_read(page, name):
+    page.locator('input[data-field="venue"]').fill(name)
+    return [page.locator(f'input[data-field="{k}"]').input_value() for k in ("address", "city", "state")]
+
+
+def test_built_in_venues_fill_on_a_fresh_browser(live_server, page):
+    """Built-in venue list (owner 2026-11-04: "make sure the list is hardcoded"): a browser with no saved venues
+    still knows every hall; picking one fills address/city/state and the gig keeps them."""
+    errors = collect_console_errors(page)
+    built_in = _built_in_venues()
+    assert len(built_in) >= 39, len(built_in)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    page.locator('[data-action="open-new-lead"]').click()
+    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
+    options = page.evaluate("() => [...document.querySelectorAll('#venueList option')].map(o => o.value)")
+    missing = [v["name"] for v in built_in if v["name"] not in options]
+    assert not missing, f"missing from the venue suggestions: {missing}"
+    for v in built_in:   # every hall fills its own address
+        assert _fill_and_read(page, v["name"]) == [v["address"], v["city"], v["state"]], v["name"]
+    assert _fill_and_read(page, "lake terrace")[0] == "1690 Oak St"   # any capitalization
+    page.locator('input[data-field="clientName"]').fill("Built In Venue Client")
+    page.locator('input[data-field="date"]').fill("2027-06-07")
+    page.locator('input[data-field="venue"]').fill("Cipriani Wall Street")
+    page.locator('[data-action="submit-lead"]').click()
+    ev = page.evaluate("() => JSON.parse(localStorage.getItem('asp_mock_state_v3')||'[]').find(e => e.clientName === 'Built In Venue Client')")
+    assert ev and ev["address"] == "55 Wall St" and ev["city"] == "New York" and ev["state"] == "NY", ev
+    assert not errors, f"console errors: {errors}"
+
+
+def test_shorter_saved_venue_list_never_shrinks_it(live_server, page):
+    """The venue list was wiped twice by a browser holding a shorter list (2026-10-21, 2026-11-02). A browser
+    whose saved list has one hall still offers every built-in venue, keeps its own hall, and its own
+    corrected address wins for a hall the built-in list also has."""
+    errors = collect_console_errors(page)
+    page.context.add_init_script("localStorage.setItem('asp_mock_venues_v1', JSON.stringify(["
+                                 "{name:'Browser Only Hall', address:'9 Local Rd', city:'Monsey', state:'NY', zip:''},"
+                                 "{name:'Venetian', address:'546 River Drive', city:'Garfield', state:'NJ', zip:''}]));")
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    page.locator('[data-action="open-new-lead"]').click()
+    page.locator('[data-action="pick-artist"][data-id="benny"]').click()
+    options = page.evaluate("() => [...document.querySelectorAll('#venueList option')].map(o => o.value)")
+    assert len(options) == len(_built_in_venues()) + 1, len(options)
+    assert _fill_and_read(page, "Browser Only Hall") == ["9 Local Rd", "Monsey", "NY"]
+    assert _fill_and_read(page, "Venetian")[0] == "546 River Drive"
+    assert _fill_and_read(page, "Bell Works") == ["101 Crawfords Corner Rd", "Holmdel", "NJ"]
+    assert not errors, f"console errors: {errors}"
+
 DROP_PDF_JS = """(sel) => {
     const dt = new DataTransfer();
     dt.items.add(new File(['%PDF-1.4 test'], 'confirmation.pdf', { type: 'application/pdf' }));

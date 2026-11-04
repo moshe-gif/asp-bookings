@@ -2002,7 +2002,57 @@ const ORG_SETTINGS_LS_KEY = 'asp_mock_org_settings_v1';
 // shared copy (app_records settings 'venues') wins at sign-in; this browser keeps a cache. New venues typed
 // on a lead are added, so the list grows with use.
 const VENUES_LS_KEY = 'asp_mock_venues_v1';
-let VENUES = (()=>{ try{ return JSON.parse(localStorage.getItem(VENUES_LS_KEY)||'[]') || []; }catch(e){ return []; } })();
+// Built into the app (owner 2026-11-04: "make sure the list is hardcoded") -- the shared copy was wiped twice
+// (2026-10-21, 2026-11-02) by a browser saving a shorter list. These are always merged back in, so the
+// list can only grow. Addresses checked against public listings 2026-11-04; edit here to correct one.
+const VENUES_BUILT_IN = [
+  { name:"Armon Hotel & Conference Center", address:"2701 Summer St", city:"Stamford", state:"CT", zip:"06905" },
+  { name:"Ateres Ayala", address:"3412 W Touhy Ave", city:"Skokie", state:"IL", zip:"60076" },
+  { name:"Ateres Charna Wedding Hall", address:"790 N Main St", city:"Spring Valley", state:"NY", zip:"10977" },
+  { name:"Ateres Chaya Hall", address:"1415 54th St", city:"Brooklyn", state:"NY", zip:"11219" },
+  { name:"Ateres Chynka", address:"129 Elmwood Ave", city:"Brooklyn", state:"NY", zip:"11230" },
+  { name:"Atrium (Kosher Catering / Ballroom)", address:"401 W Route 59 (NY-59)", city:"Monsey", state:"NY", zip:"10952" },
+  { name:"Bell Works", address:"101 Crawfords Corner Rd", city:"Holmdel", state:"NJ", zip:"07733" },
+  { name:"Brightstone Hall", address:"201 Randolph St", city:"Passaic", state:"NJ", zip:"07055" },
+  { name:"Cipriani Wall Street", address:"55 Wall St", city:"New York", state:"NY", zip:"10005" },
+  { name:"Congregation Keter Torah", address:"600 Roemer Ave", city:"Teaneck", state:"NJ", zip:"07666" },
+  { name:"Crest Hollow Country Club", address:"8325 Jericho Tpke", city:"Woodbury", state:"NY", zip:"11797" },
+  { name:"El Caribe Country Club", address:"5945 Strickland Ave", city:"Brooklyn", state:"NY", zip:"11234" },
+  { name:"Eminence Ballroom", address:"4315 16th Ave", city:"Brooklyn", state:"NY", zip:"11204" },
+  { name:"Greentree Country Club", address:"538 Davenport Ave", city:"New Rochelle", state:"NY", zip:"10805" },
+  { name:"Heitner Hall (Bobov Cheder)", address:"1360 36th St", city:"Brooklyn", state:"NY", zip:"11218" },
+  { name:"Hilton Hasbrouck Heights", address:"650 Terrace Ave", city:"Hasbrouck Heights", state:"NJ", zip:"07604" },
+  { name:"Hilton Meadowlands / World of Blue", address:"2 Meadowlands Plaza", city:"East Rutherford", state:"NJ", zip:"07073" },
+  { name:"Hilton Pearl River", address:"500 Veterans Memorial Dr", city:"Pearl River", state:"NY", zip:"10965" },
+  { name:"Kesser Moshe Yehuda", address:"725 Vassar Ave", city:"Lakewood", state:"NJ", zip:"08701" },
+  { name:"Lake Terrace", address:"1690 Oak St", city:"Lakewood", state:"NJ", zip:"08701" },
+  { name:"Marina Del Rey", address:"1 Marina Dr", city:"Bronx", state:"NY", zip:"10465" },
+  { name:"N'eemas Hachaim Hall", address:"555 Oak St", city:"Lakewood", state:"NJ", zip:"08701" },
+  { name:"Oholei Torah Ballroom", address:"667 Eastern Pkwy", city:"Brooklyn", state:"NY", zip:"11213" },
+  { name:"Old Westbury Hebrew Congregation", address:"21 Old Westbury Rd", city:"Old Westbury", state:"NY", zip:"11568" },
+  { name:"Riverview Ballroom", address:"700 Palisadium Dr", city:"Cliffside Park", state:"NJ", zip:"07010" },
+  { name:"Rockleigh Country Club", address:"26 Paris Ave", city:"Rockleigh", state:"NJ", zip:"07647" },
+  { name:"Terrace on the Park", address:"52-11 111th St", city:"Queens", state:"NY", zip:"11368" },
+  { name:"The Addison Park", address:"150 NJ-35", city:"Keyport", state:"NJ", zip:"07735" },
+  { name:"The Glasshouse", address:"660 12th Ave", city:"New York", state:"NY", zip:"10019" },
+  { name:"The Legacy Castle", address:"141 NJ-23", city:"Pompton Plains", state:"NJ", zip:"07444" },
+  { name:"The Palace", address:"780 McDonald Ave", city:"Brooklyn", state:"NY", zip:"11218" },
+  { name:"The Sands Atlantic Beach", address:"1395 Beech St", city:"Atlantic Beach", state:"NY", zip:"11509" },
+  { name:"The Seawane Club", address:"1300 Club Dr", city:"Hewlett", state:"NY", zip:"11557" },
+  { name:"The Surf Club on the Sound", address:"280 Davenport Ave", city:"New Rochelle", state:"NY", zip:"10805" },
+  { name:"Venetian", address:"546 River Dr", city:"Garfield", state:"NJ", zip:"07026" },
+  { name:"Villa Roma Resort", address:"356 Villa Roma Rd", city:"Callicoon", state:"NY", zip:"12723" },
+  { name:"VIP Country Club", address:"600 Davenport Ave", city:"New Rochelle", state:"NY", zip:"10805" },
+  { name:"Westmount Country Club", address:"728 Rifle Camp Rd", city:"Woodland Park", state:"NJ", zip:"07424" },
+  { name:"Woodbury Jewish Center", address:"200 S Woods Rd", city:"Woodbury", state:"NY", zip:"11797" }
+];
+// One list from several: the first list's entry wins for a name (case-insensitive); nothing is ever dropped.
+function mergeVenues(...lists){
+  const by = new Map();
+  lists.forEach(l=>(Array.isArray(l)?l:[]).forEach(v=>{ const k = String(v&&v.name||'').trim().toLowerCase(); if(k && !by.has(k)) by.set(k, { ...v }); }));
+  return [...by.values()].sort((a,b)=>a.name.localeCompare(b.name));
+}
+let VENUES = mergeVenues((()=>{ try{ return JSON.parse(localStorage.getItem(VENUES_LS_KEY)||'[]') || []; }catch(e){ return []; } })(), VENUES_BUILT_IN);
 function saveVenues(){ const r = persist(VENUES_LS_KEY, VENUES, 'venues'); if(typeof SHARED!=='undefined' && SHARED) SHARED.settings.schedule(); return r; }
 function findVenue(name){ const n = String(name||'').trim().toLowerCase(); return n ? VENUES.find(v=>v.name.toLowerCase()===n) : null; }
 // Remember a venue the office typed with its address (case-insensitive by name; never overwrites a known one).
@@ -3030,7 +3080,9 @@ function adoptSettingsDocs(list){
   const by = new Map(list.map(d=>[d.id, d]));
   if(by.get('org') && by.get('org').value) ORG_SETTINGS = by.get('org').value;
   if(by.get('pricing') && by.get('pricing').value) PRICING = by.get('pricing').value;
-  if(by.get('venues') && Array.isArray(by.get('venues').value)) VENUES = by.get('venues').value;
+  // Venues only ever grow: the office's copy, then this browser's, then the built-in list (a shorter
+  // shared copy is healed on the next save instead of shrinking everyone's list).
+  if(by.get('venues') && Array.isArray(by.get('venues').value)){ VENUES = mergeVenues(by.get('venues').value, VENUES, VENUES_BUILT_IN); by.get('venues').value = VENUES; }
   SETTINGS_DOCS = list.filter(d=>d.id==='org' || d.id==='pricing' || d.id==='venues');
   settingsDocs().forEach(d=>{ if(!by.has(d.id)) SETTINGS_DOCS.push(d); });
 }
@@ -3504,7 +3556,7 @@ function doEditRealUser(){
   if(f.kind!=='admin' && (f.commissionPct==='' || Number.isNaN(pct) || pct<0 || pct>100)){ toast('Enter a commission between 0 and 100%.', 'system'); return; }
   const patch = f.kind==='admin'
     ? { name, email, initials, role: f.adminRole }
-    : { name, email, initials, role: f.artistRole, commission_pct: pct };
+    : { name, email, initials, role: f.artistRole, commission_pct: pct, whatsapp: String(f.whatsapp||'').trim() || null };
   supabaseClient.from(table).update(patch).eq('id', f.id).then(({error})=>{
     if(error){ toast('Could not save that account: ' + error.message, 'system'); return; }
     toast(`${name} updated.`, 'success');
@@ -4369,7 +4421,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.51'; // bump on every release so a phone can tell it has updated. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.52'; // bump on every release so a phone can tell it has updated. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4586,7 +4638,9 @@ function renderEditRealUserModal(){
           <div class="chip-row">${ARTIST_ROLES.map(r=>`<button class="filter-chip ${artistRole===r?'sel':''}" data-action="pick-edit-artist-role" data-role="${r}">${r}</button>`).join('')}</div>
         </div>
         <div class="field"><label>ASP Commission (%)</label><input type="number" min="0" max="100" step="0.5" data-field="commissionPct" value="${esc(String(f.commissionPct ?? ''))}"/>
-          <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Prefills the commission on this artist's new gigs. Existing gigs keep theirs.</p></div>` : `<div class="field"><label>Desk</label>
+          <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Prefills the commission on this artist's new gigs. Existing gigs keep theirs.</p></div>
+        <div class="field"><label>WhatsApp number</label><input type="tel" data-field="whatsapp" value="${esc(f.whatsapp||'')}" placeholder="+1 718 555 0123"/>
+          <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Gets a gig reminder 3 days before each gig and "prepare for your flight" 3 days before a flight.</p></div>` : `<div class="field"><label>Desk</label>
           <div class="chip-row">${Object.entries(ADMIN_ROLE_LABELS).map(([k,l])=>`<button class="filter-chip ${adminRole===k?'sel':''}" data-action="pick-edit-admin-role" data-role="${k}">${l}</button>`).join('')}</div>
         </div>`}
         ${f.email!==f.originalEmail? `<p style="font-size:11px;color:var(--ink-3);margin:0;">Changing the email does not move their existing sign-in -- they'll still sign in with the old address until this one is updated to match a real account.</p>` : ''}
@@ -4637,6 +4691,7 @@ function renderSettingsPage(){
   ${isAdmin ? renderDataMigrationCard() : ''}
 
   ${isAdmin ? renderTravelSettingsCard() : ''}
+  ${isAdmin ? renderOfficeAlertsCard() : ''}
 
 
   ${crewUser() ? '' : `<div class="card card-pad" style="margin-bottom:20px;">
@@ -5288,7 +5343,6 @@ function renderMessagesPage(){
   return `
   <div class="section-head"><h2>Inbox${items.length?` (${items.length})`:''}</h2>
     <button class="btn btn-sm" data-action="inbox-check-now" ${S.inboxScanBusy?'disabled':''}>${S.inboxScanBusy?'Checking…':'Check now'}</button></div>
-  ${renderMercuryTransfers()}
   <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Every connected mailbox (Settings → Gmail Mailboxes) is read every 10 minutes. Each email is matched to its gig with a suggested next step. Payments come first: a bank's own alert for exactly what's due is recorded automatically; anything else waits for your click.</p>
   ${S.inboxItems==null? `<div class="card card-pad" style="font-size:13px;color:var(--ink-2);">Loading…</div>`
   : !items.length? `<div class="card empty">Nothing waiting — you're all caught up.</div>`
@@ -6176,6 +6230,124 @@ function renderPricingPage(){
   <p style="font-size:11px;color:var(--ink-3);margin-top:10px;">Editing ${esc(artist.name)}'s rates — changes save automatically.</p>
   `;
 }
+/* ---- Monthly payouts (0078; owner 2026-11-04: "i dont want each gig to have a payout, i want the payouts to
+   be in the financials page on a monthly basis ... monthly i want to payout artists amount and send the
+   commission to ilan chase account") ----
+   The mercury function saves every client payment that reached ASP with its split (money_ledger + parts).
+   A month's payout = every unpaid part that landed by the month's end: one transfer per singer to their own
+   Mercury account and one payment of the commission. Read here from S.mercuryStatus; sent by the server. */
+const MONEY_ROLES = ['admin_ceo','admin_coo','admin_bookkeeping'];
+const canSendPayouts = ()=>MONEY_ROLES.includes(adminRoleOf(S.user));
+function payeeLabel(key, fallback){
+  if(key==='commission') return 'ASP commission';
+  const p = PAYEE_PROFILES.find(x=>x.id===key); const a = p && p.artistId && artistById(p.artistId);
+  return (a && a.name) || (p && p.entityName) || fallback || 'Singer';
+}
+function monthLabel(m){ const [y,mo] = m.split('-').map(Number); return new Date(y, mo-1, 1).toLocaleDateString('en-US',{ month:'long', year:'numeric' }); }
+function monthEndISO(m){ const [y,mo] = m.split('-').map(Number); return new Date(Date.UTC(y, mo, 0)).toISOString().slice(0,10); }
+function payoutMonths(){
+  const st = S.mercuryStatus || {};
+  const set = new Set([todayISO().slice(0,7), ...(st.ledger||[]).map(l=>String(l.received_on).slice(0,7)), ...(st.payouts||[]).map(p=>p.month)]);
+  return [...set].filter(Boolean).sort().reverse();
+}
+// What a month's payout is: what was already sent for it, and what pressing Send would send now.
+function monthPayoutPlan(month){
+  const st = S.mercuryStatus || {};
+  const ledger = st.ledger || [], end = monthEndISO(month);
+  const payouts = (st.payouts || []).filter(p=>p.month===month && p.status!=='voided');
+  const lineOf = (l, part)=>({ date:l.received_on, gig:l.event_legacy_id, kind:l.kind, cents:Number(part.cents)||0 });
+  const made = payouts.map(p=>({ id:p.id, key:p.payee_key, name:payeeLabel(p.payee_key, p.payee_name), cents:Number(p.amount_cents)||0, status:p.status, to:p.destination, error:p.error, sentAt:p.sent_at, createdAt:p.created_at,
+    lines: ledger.flatMap(l=>(l.parts||[]).filter(x=>x.payout_id===p.id).map(x=>lineOf(l, x))) }));
+  const byKey = new Map();
+  ledger.filter(l=>!l.needs_review && String(l.received_on) <= end).forEach(l=>(l.parts||[]).filter(x=>!x.payout_id).forEach(x=>{
+    if(payouts.some(p=>p.payee_key===x.payee_key)) return;   // already paid this month: rolls into next month
+    if(x.kind==='share' && (getEvent(l.event_legacy_id)||{}).artistPaidOut) return;   // marked Paid Out by hand: the server skips it too
+    const g = byKey.get(x.payee_key) || { key:x.payee_key, name:payeeLabel(x.payee_key, x.payee_name), cents:0, lines:[] };
+    g.cents += Number(x.cents)||0; g.lines.push(lineOf(l, x)); byKey.set(x.payee_key, g);
+  }));
+  const accounts = st.accounts || [];
+  const toSend = [...byKey.values()].filter(g=>g.cents>0).map(g=>({ ...g,
+    to: g.key==='commission' ? ((st.commission||{}).name || null) : ((accounts.find(a=>a.role==='payee' && a.payee_profile_id===g.key)||{}).name || null) }))
+    .sort((a,b)=>(a.key==='commission') - (b.key==='commission') || a.name.localeCompare(b.name));
+  return { made, toSend, review: ledger.filter(l=>l.needs_review && String(l.received_on) <= end) };
+}
+async function loadMercuryRecipients(){
+  if(S.mercuryBusy) return;
+  S.mercuryBusy = true; render();
+  try{
+    const res = await callEdgeFunction('mercury', { action:'recipients' });
+    if(res && res.ok) S.mercuryRecipients = res.recipients || []; else toast((res && res.error) || 'Could not read Mercury recipients.', 'system');
+  } finally { S.mercuryBusy = false; render(); }
+}
+async function doPayMonth(month){
+  if(S.mercuryBusy) return;
+  S.mercuryBusy = true; S.payoutConfirm = null; render();
+  try{
+    const res = await callEdgeFunction('mercury', { action:'pay_month', month });
+    if(res && res.test){
+      const list = (res.wouldSend||[]).map(x=>`${moneyCents(x.cents/100)} → ${x.to}`).join(', ');
+      toast(`Test mode -- nothing moved. Would send: ${list || 'nothing'}.${(res.missing||[]).length ? ' ' + res.missing.join(' ') : ''}`, 'system');
+    } else if(res && res.ok) toast(`Sent ${res.sent} payout${res.sent===1?'':'s'} to Mercury -- approve them in Mercury.${(res.missing||[]).length ? ' ' + res.missing.join(' ') : ''}`, 'success');
+    else toast((res && res.error) || 'Mercury did not accept that.', 'system');
+  } finally { S.mercuryBusy = false; await refreshMercuryStatus(); }
+}
+function renderMonthlyPayouts(){
+  const st = S.mercuryStatus;
+  if(!st) return `<div class="card card-pad" style="margin-bottom:22px;font-size:13px;color:var(--ink-2);">Loading payouts…</div>`;
+  if(!st.configured) return `<div class="card empty" style="margin-bottom:22px;">Monthly payouts start once Mercury is connected (Settings → Bank).</div>`;
+  const months = payoutMonths();
+  const lastMonth = (()=>{ const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })();
+  const month = months.includes(S.payoutMonth) ? S.payoutMonth : (months.find(m=>m<=lastMonth) || months[0]);
+  const monthOver = month < todayISO().slice(0,7);
+  const plan = monthPayoutPlan(month);
+  const staleCut = Date.now() - 5*60000;
+  const retry = plan.made.filter(g=>g.status==='failed' || (g.status==='sending' && Date.parse(g.createdAt) < staleCut));
+  const sendTotal = plan.toSend.filter(g=>g.to).reduce((t,g)=>t+g.cents, 0) + retry.reduce((t,g)=>t+g.cents, 0);
+  const singers = plan.toSend.filter(g=>g.to && g.key!=='commission');
+  const comm = plan.toSend.find(g=>g.key==='commission' && g.to);
+  const gigName = id=>{ const ev = getEvent(id); return ev ? `${(artistById(ev.artistId)||{}).name||''} · ${ev.clientName||''}` : id; };
+  const lines = (g, rowId)=> S.payoutOpen===rowId ? `<div style="flex-basis:100%;font-size:12px;color:var(--ink-2);padding:4px 0 2px;">${g.lines.sort((a,b)=>a.date.localeCompare(b.date)).map(x=>
+      `<div class="kv-row"><span style="overflow-wrap:anywhere;">${esc(fmtDateShort(x.date))} · ${esc(gigName(x.gig))} · ${x.kind==='deposit'?'deposit':'balance'}</span><span class="u-mono">${moneyCents(x.cents/100)}</span></div>`).join('')}</div>` : '';
+  const row = (g, pill, rowId)=>`<div class="settings-row" style="flex-wrap:wrap;gap:8px;">
+      <div style="min-width:0;flex:1 1 200px;"><h4 style="overflow-wrap:anywhere;">${esc(g.name)}</h4>
+        <p style="overflow-wrap:anywhere;">${g.lines.length} payment${g.lines.length===1?'':'s'}${g.to ? ` → ${esc(g.to)}` : ''}${g.error ? ` · <span style="color:var(--warn-ink);">${esc(g.error)}</span>` : ''}</p></div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><strong class="u-mono">${moneyCents(g.cents/100)}</strong>${pill}
+        <button class="btn btn-sm btn-ghost" data-action="payout-details" data-id="${esc(rowId)}">${S.payoutOpen===rowId?'Hide':'Gigs'}</button></div>
+      ${lines(g, rowId)}</div>`;
+  const statusPill = g=>(g.status==='sent' ? `<span class="pill pill-good">Sent to Mercury${g.sentAt?` ${esc(fmtDateShort(nyDateOf(g.sentAt)))}`:''}</span>`
+    : g.status==='failed' ? `<span class="pill pill-warn">Failed -- send again</span>` : `<span class="pill pill-neutral">${esc(g.status==='sending'?'Sending':g.status)}</span>`)
+    + (canSendPayouts() && g.status!=='voided' ? ` <button class="btn btn-sm btn-ghost" data-action="payout-void" data-id="${esc(g.id)}" title="Rejected or cancelled in Mercury? Put the money back into the next payout." ${S.mercuryBusy?'disabled':''}>${S.payoutVoidConfirm===g.id?'Confirm void':'Void'}</button>` : '');
+  const ledgerRows = (st.ledger||[]).filter(l=>String(l.received_on).slice(0,7)===month).sort((a,b)=>String(b.received_on).localeCompare(String(a.received_on)));
+  const where = { main:'ASP main (Mercury)', stripe:'ASP Stripe', singer:"Singer's own account", singer_stripe:"Singer's own Stripe" };
+  return `<div class="section-head" style="flex-wrap:wrap;gap:8px;"><h2>Monthly Payouts</h2>
+      <select data-action="payout-month" style="max-width:100%;">${months.map(m=>`<option value="${esc(m)}" ${m===month?'selected':''}>${esc(monthLabel(m))}</option>`).join('')}</select></div>
+    <div class="card card-pad" style="margin-bottom:14px;" data-testid="monthly-payouts">
+      ${plan.made.map(g=>row(g, statusPill(g), 'made:'+g.key)).join('')}
+      ${plan.toSend.map(g=>row(g, g.to ? `<span class="pill pill-warn">To send</span>` : `<span class="pill pill-warn">${g.key==='commission'?'Pick the commission account':'No Mercury account'}</span>`, 'send:'+g.key)).join('')}
+      ${!plan.made.length && !plan.toSend.length ? `<p style="font-size:13px;color:var(--ink-2);margin:0;">Nothing to pay out for ${esc(monthLabel(month))}.</p>` : ''}
+      ${plan.review.length ? `<p style="font-size:12px;color:var(--warn-ink);margin:10px 0 0;">${plan.review.length} payment${plan.review.length===1?' needs':'s need'} a look before it can be paid out -- see Money In below.</p>` : ''}
+      ${sendTotal && !monthOver ? `<p style="font-size:11.5px;color:var(--ink-3);margin:10px 0 0;">${esc(monthLabel(month))} can be paid out once it's over.</p>` : ''}
+      ${sendTotal && monthOver && canSendPayouts() ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+          <button class="btn btn-primary" data-action="payout-send" data-id="${esc(month)}" ${S.mercuryBusy?'disabled':''}>${S.payoutConfirm===month
+            ? `Confirm: send ${moneyCents(sendTotal/100)}`
+            : `Send ${esc(monthLabel(month))} payouts`}</button>
+          ${S.payoutConfirm===month ? `<button class="btn btn-ghost" data-action="payout-cancel-confirm">Not now</button>` : ''}</div>
+        <p style="font-size:11.5px;color:var(--ink-3);margin:6px 0 0;">${singers.length} singer${singers.length===1?'':'s'}${comm ? ` and ${moneyCents(comm.cents/100)} commission to ${esc(comm.to)}` : ''}. Each goes to Mercury to be approved there; a gig is marked Paid Out once its singers' whole share is sent. Rejected one in Mercury? Press Void and it goes into the next payout.${st.canMoveMoney ? '' : ' <strong>Test mode</strong>: shows what it would send, moves nothing.'}</p>` : ''}
+    </div>
+    <h3 style="margin:0 0 8px;font-size:1rem;">Money In -- ${esc(monthLabel(month))}</h3>
+    ${ledgerRows.length ? `<div class="card table-cards" style="margin-bottom:22px;"><table>
+      <thead><tr><th>Date</th><th>Gig</th><th>Payment</th><th>Amount</th><th>Went to</th><th>Split</th></tr></thead>
+      <tbody>${ledgerRows.map(l=>`<tr>
+        <td data-label="Date" class="u-mono">${esc(fmtDateShort(l.received_on))}</td>
+        <td data-label="Gig">${getEvent(l.event_legacy_id) ? `<a href="#" data-action="open-event" data-id="${esc(l.event_legacy_id)}" style="color:var(--accent);">${esc(gigName(l.event_legacy_id))}</a>` : esc(l.event_legacy_id)}</td>
+        <td data-label="Payment">${l.kind==='deposit'?'Deposit':'Balance'}</td>
+        <td data-label="Amount" class="u-mono">${moneyCents(l.amount_cents/100)}</td>
+        <td data-label="Went to">${esc(where[l.went_to]||l.went_to)}</td>
+        <td data-label="Split" style="overflow-wrap:anywhere;">${l.needs_review ? `<span style="color:var(--warn-ink);">${esc(l.needs_review)}</span> ${canSendPayouts()?`<button class="btn btn-sm" data-action="ledger-resplit" data-id="${esc(l.id)}" ${S.mercuryBusy?'disabled':''}>Re-split</button>`:''}`
+          : (l.parts||[]).length ? (l.parts||[]).map(x=>`${esc(payeeLabel(x.payee_key, x.payee_name))} ${moneyCents(x.cents/100)}${x.payout_id?' ✓':''}`).join(' · ') : esc(l.note||'--')}</td>
+      </tr>`).join('')}</tbody></table></div>` : `<div class="card empty" style="margin-bottom:22px;">No client payments recorded in ${esc(monthLabel(month))} yet.</div>`}`;
+}
+function nyDateOf(iso){ return new Intl.DateTimeFormat('en-CA', { timeZone:'America/New_York' }).format(new Date(iso)); }
 function renderFinancialsPage(){
   const filt = S.finArtistFilter==='all' ? S.events : S.events.filter(e=>e.artistId===S.finArtistFilter);
   const booked = filt.filter(e=>isConfirmed(e));
@@ -6213,6 +6385,8 @@ function renderFinancialsPage(){
     <div class="card stat-tile"><span class="u-label">Owed to Artists</span><span class="val">${money(owedTotal)}</span><span class="sub">${owedToArtists.length} gig${owedToArtists.length===1?'':'s'} paid by client, not yet paid out</span></div>
     <div class="card stat-tile"><span class="u-label">Paid Out</span><span class="val">${money(paidOutTotal)}</span><span class="sub">Settled with artists</span></div>
   </div>
+
+  ${renderMonthlyPayouts()}
 
   <div class="section-head"><h2>Artist Payouts — Gig Breakdown (${payoutEligible.length})</h2></div>
   ${payoutEligible.length? `<div class="card table-cards" style="margin-bottom:22px;"><table>
@@ -9224,9 +9398,10 @@ function renderOnlinePaymentsCard(){
 /* ---- Mercury (0067, owner 2026-10-27: "create sub accounts that the money can automatically get split up so
    my payouts are easier") ----
    ASP's main Mercury account plus one account per singer. The mercury function reads the bank's incoming
-   money into the Inbox (bank-verified, so exact matches record themselves) and, once a gig's balance paid
-   into ASP's main account or ASP's own Stripe is recorded, proposes each artist's share as a transfer to
-   their own account. Nothing moves until someone with a money role approves it. */
+   money into the Inbox (bank-verified, so exact matches record themselves) and saves every recorded payment
+   with its split (each singer's share, ASP's commission) in the money ledger. Payouts are monthly
+   (owner 2026-11-04): Financials → Monthly Payouts sends one transfer per singer and the commission to the
+   account picked here. */
 async function refreshMercuryStatus(){
   const data = await callEdgeFunction('mercury', { action:'status' });
   S.mercuryStatus = data && data.ok ? data : { configured:false, accounts:[], transfers:[], error:(data && data.error) || 'Could not check Mercury.' };
@@ -9242,23 +9417,6 @@ async function doMercuryCall(body, okMsg){
     if(res.ok && body.action==='sync') loadInbox();
   } finally { S.mercuryBusy = false; await refreshMercuryStatus(); }
 }
-const MERCURY_WAITING = ['proposed','failed'];
-function mercuryTransfersWaiting(){ return ((S.mercuryStatus && S.mercuryStatus.transfers) || []).filter(t=>MERCURY_WAITING.includes(t.status)); }
-function renderMercuryTransfers(){
-  const list = mercuryTransfersWaiting(); if(!list.length) return '';
-  const st = S.mercuryStatus;
-  return `<div class="card card-pad" style="margin-bottom:14px;" data-testid="mercury-transfers">
-    <h3 style="margin:0 0 4px;">Singers' shares to move (${list.length})</h3>
-    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 10px;">Balances paid into ASP's main Mercury account: each artist's share (fee less commission, plus charges) goes to their own Mercury account.${st.canMoveMoney ? '' : ' <strong>Test mode</strong>: approving records it but moves no money.'}</p>
-    ${list.map(t=>{ const ev = getEvent(t.event_legacy_id); return `<div class="settings-row" style="flex-wrap:wrap;gap:8px;">
-      <div style="min-width:0;flex:1 1 220px;"><h4 style="overflow-wrap:anywhere;">${moneyCents(t.amount_cents/100)} → ${esc(t.payee_name||'artist')}</h4>
-        <p style="overflow-wrap:anywhere;">${ev ? `<a href="#" data-action="open-event" data-id="${esc(ev.id)}" style="color:var(--accent);">${esc((artistById(ev.artistId)||{}).name||'')} · ${esc(fmtDateShort(ev.date))} · ${esc(ev.clientName||'')}</a>` : esc(t.event_legacy_id)}${t.source==='stripe'?' · paid online':''}</p>
-        ${t.error ? `<p style="color:var(--warn-ink);overflow-wrap:anywhere;">${esc(t.error)}</p>` : ''}</div>
-      <div style="display:flex;gap:6px;"><button class="btn btn-sm btn-primary" data-action="mercury-approve" data-id="${esc(t.id)}" ${S.mercuryBusy?'disabled':''}>${t.status==='failed'?'Try again':'Approve'}</button>
-        <button class="btn btn-sm btn-ghost" data-action="mercury-cancel" data-id="${esc(t.id)}" ${S.mercuryBusy?'disabled':''}>Not this one</button></div>
-    </div>`; }).join('')}
-  </div>`;
-}
 function renderMercuryCard(){
   const st = S.mercuryStatus;
   const status = !st ? `<span class="pill pill-neutral">Checking…</span>`
@@ -9266,14 +9424,14 @@ function renderMercuryCard(){
     : `<span class="pill pill-neutral">Not set up</span>`;
   const payees = PAYEE_PROFILES.filter(p=>p.artistId);
   const accounts = (st && st.accounts) || [];
-  const recent = ((st && st.transfers) || []).filter(t=>!MERCURY_WAITING.includes(t.status)).slice(0, 5);
+  const comm = (st && st.commission) || {};
   return `<div class="card card-pad" style="margin-bottom:20px;" data-testid="mercury-card">
     <h3 style="margin-bottom:12px;">Bank (Mercury) — singers' accounts</h3>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">${status}
       ${st && st.configured ? `<button class="btn btn-sm" data-action="mercury-sync" ${S.mercuryBusy?'disabled':''}>${S.mercuryBusy?'Working…':'Check the bank now'}</button>` : ''}
       ${st && st.lastRunAt ? `<span style="font-size:11.5px;color:var(--ink-3);">Last checked ${esc(new Date(st.lastRunAt).toLocaleString('en-US',{ month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }))}</span>` : ''}</div>
     ${st && st.lastError ? `<p style="font-size:11.5px;color:var(--warn-ink);margin:0 0 6px;overflow-wrap:anywhere;">${esc(st.lastError)}</p>` : ''}
-    <p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">Money coming into Mercury shows in the Inbox and is matched to its gig. When a gig's balance lands in ASP's main account, each singer's share is moved into their own Mercury account after you approve it.${st && st.configured ? '' : ' Setup: <code>ops/MERCURY_SETUP.md</code>.'}</p>
+    <p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">Money coming into Mercury shows in the Inbox and is matched to its gig. Each payment is saved with its split in Financials, and once a month Financials → Monthly Payouts sends each singer their total and the commission to the account below.${st && st.configured ? '' : ' Setup: <code>ops/MERCURY_SETUP.md</code>.'}</p>
     <div class="field" style="max-width:420px;"><label>Balances paid online (Stripe) go to</label>
       <select data-field="payoutVia" data-form="orgsettings">
         <option value="" ${ORG_SETTINGS.payoutVia!=='mercury'?'selected':''}>Each artist's own Stripe account</option>
@@ -9287,7 +9445,13 @@ function renderMercuryCard(){
           ${payees.map(p=>`<option value="payee:${esc(p.id)}" ${a.role==='payee'&&a.payee_profile_id===p.id?'selected':''}>${esc(p.entityName)}${p.artistId && artistById(p.artistId) ? ` (${esc(artistById(p.artistId).name)})` : ''}</option>`).join('')}
           <option value="ignore" ${a.role==='ignore'?'selected':''}>Ignore (not gig money)</option>
         </select></div>`).join('')}` : ''}
-    ${recent.length ? `<h4 style="margin:14px 0 6px;font-size:.95rem;">Recent transfers</h4>${recent.map(t=>`<p style="font-size:12px;margin:0 0 4px;overflow-wrap:anywhere;">${esc(t.status==='sent'?'Sent to Mercury':t.status==='test'?'Test':'Cancelled')}: ${moneyCents(t.amount_cents/100)} to ${esc(t.payee_name||'')} for ${esc(t.event_legacy_id)}${t.note && t.status!=='cancelled' ? ` — ${esc(t.note)}` : ''}</p>`).join('')}` : ''}
+    ${st && st.configured ? `<h4 style="margin:14px 0 6px;font-size:.95rem;">Commission goes to</h4>
+      <p style="font-size:12.5px;margin:0 0 6px;" data-testid="commission-destination">${comm.name ? `<strong>${esc(comm.name)}</strong>` : '<span style="color:var(--warn-ink);">Not picked yet</span>'}</p>
+      ${S.mercuryRecipients ? (S.mercuryRecipients.length
+        ? `<select data-action="mercury-commission" style="max-width:100%;" ${S.mercuryBusy?'disabled':''}><option value="">Pick a recipient…</option>${S.mercuryRecipients.map(r=>`<option value="${esc(r.id)}" ${r.id===comm.recipientId?'selected':''}>${esc(r.name)}</option>`).join('')}</select>`
+        : `<p style="font-size:11.5px;color:var(--warn-ink);margin:0;">Mercury has no outside recipients yet.</p>`)
+        : `<button class="btn btn-sm" data-action="mercury-load-recipients" ${S.mercuryBusy?'disabled':''}>Choose from Mercury recipients</button>`}
+      <p style="font-size:11.5px;color:var(--ink-3);margin:6px 0 0;">The monthly commission is paid here by ACH. Add the account (e.g. Ilan's Chase) once in Mercury under Payments → Recipients, then pick it.</p>` : ''}
   </div>`;
 }
 // Shown only once QuickBooks is set up (QBO_CLIENT_ID); owner 2026-10-29 asked for the "not set up" card gone.
@@ -9308,6 +9472,15 @@ function renderQuickBooksCard(){
       <p style="font-size:11.5px;color:var(--ink-3);margin:8px 0 0;">Sending a contract can also create and email a QuickBooks invoice for the deposit, payable by credit card.</p>`
     : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">Not connected yet. Connecting lets Send Contract also create and email a real QuickBooks invoice for the deposit.</p>
       <button class="btn btn-sm btn-primary" data-action="oauth-connect" data-provider="qbo">Connect QuickBooks</button>`}
+  </div>`;
+}
+// Office alerts on WhatsApp (owner 2026-11-04): client-followups messages this number when a contract is
+// signed, a deposit comes in or a balance is paid (once each, within 10 minutes).
+function renderOfficeAlertsCard(){
+  return `<div class="card card-pad" style="margin-bottom:20px;" data-testid="office-alerts-card">
+    <h3 style="margin-bottom:6px;">Office alerts on WhatsApp</h3>
+    <p style="font-size:11.5px;color:var(--ink-3);margin:0 0 12px;">A WhatsApp to this number when a contract is signed, a deposit comes in or a balance is paid. Leave empty for none.</p>
+    <div class="field" style="max-width:320px;"><label>Send alerts to</label><input type="tel" data-field="alertsWhatsApp" data-form="orgsettings" value="${esc(ORG_SETTINGS.alertsWhatsApp||'')}" placeholder="+1 917 555 0123"/></div>
   </div>`;
 }
 function renderTravelSettingsCard(){
@@ -11226,8 +11399,12 @@ function bindGlobal(){
       case 'lib-add-tag': libAddTag(id); break;
       case 'lib-delete-tag': libDeleteTag(id); break;
       case 'mercury-sync': doMercuryCall({ action:'sync' }, 'Checked the bank.'); break;
-      case 'mercury-approve': doMercuryCall({ action:'approve', id }, 'Moved.'); break;
-      case 'mercury-cancel': doMercuryCall({ action:'cancel', id }, 'Dropped -- nothing moved.'); break;
+      case 'mercury-load-recipients': loadMercuryRecipients(); break;
+      case 'payout-details': S.payoutOpen = S.payoutOpen===id ? null : id; render(); break;
+      case 'payout-send': if(S.payoutConfirm!==id){ S.payoutConfirm = id; render(); } else doPayMonth(id); break;
+      case 'payout-cancel-confirm': S.payoutConfirm = null; render(); break;
+      case 'payout-void': if(S.payoutVoidConfirm!==id){ S.payoutVoidConfirm = id; render(); } else { S.payoutVoidConfirm = null; doMercuryCall({ action:'void_payout', id }, 'Voided -- that money goes into the next payout.'); } break;
+      case 'ledger-resplit': doMercuryCall({ action:'resplit', id }, 'Split again.'); break;
       case 'toggle-artist-paidout': doToggleArtistPaidOut(id); break;
       case 'gcal': window.open(gcalUrl(getEvent(id)), '_blank'); break;
       case 'ics': downloadIcs(getEvent(id)); break;
@@ -11291,7 +11468,7 @@ function bindGlobal(){
         const row = (kind==='admin'? S.realRoster.admins : S.realRoster.artists).find(r=>r.id===id);
         if(!row) break;
         S.editRealUserForm = { kind, id: row.id, name: row.name, email: row.email, originalEmail: row.email, adminRole: row.role, artistRole: row.role,
-          commissionPct: row.commission_pct ?? Math.round(COMMISSION_RATE*100) };
+          commissionPct: row.commission_pct ?? Math.round(COMMISSION_RATE*100), whatsapp: row.whatsapp || '' };
         S.showEditRealUser = true; render(); break;
       }
       case 'close-edit-real-user': S.showEditRealUser=false; render(); break;
@@ -11310,6 +11487,12 @@ function bindGlobal(){
   bindVideoLibrary();
   bindVenueLookup();
   bindWhatsApp();
+  document.querySelectorAll('select[data-action="mercury-commission"]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ if(sel.value) doMercuryCall({ action:'set_commission', recipientId: sel.value }, 'Commission account saved.'); });
+  });
+  document.querySelectorAll('select[data-action="payout-month"]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ S.payoutMonth = sel.value; S.payoutConfirm = null; S.payoutOpen = null; render(); });
+  });
   document.querySelectorAll('select[data-action="mercury-assign"]').forEach(sel=>{
     sel.addEventListener('change', ()=>{ const v = sel.value;
       doMercuryCall({ action:'assign', accountId: sel.getAttribute('data-id'), role: v.startsWith('payee:') ? 'payee' : (v || null), payeeProfileId: v.startsWith('payee:') ? v.slice(6) : null }, 'Saved.'); });

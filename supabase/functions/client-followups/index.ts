@@ -10,6 +10,13 @@
 // want to send a auto whatsapp to the client saying we received the deposit and booking is confirmed" -- once
 // per gig (kind deposit_confirmed). Gigs whose deposit was in before this shipped were marked done by SQL.
 // Test mode applies to both (mail.ts / whatsapp.ts).
+// More WhatsApps (owner 2026-11-04, "all" of them), each sent once and logged here (0080):
+//  - every 10 minutes with the deposit confirmations: contract sent (the client gets the sign link), balance
+//    paid (a thank-you), and office alerts (contract signed, deposit in, balance paid) to the number in
+//    Settings → Office alerts on WhatsApp;
+//  - on the daily run: each singer's gig reminder 3 days before the gig, and "prepare for your flight" 3 days
+//    before the gig's flight -- to the singer's WhatsApp number (Settings → accounts). The daily run also
+//    submits any message template Meta doesn't have yet.
 //
 // Auth: the cron call sends header x-cron-secret = CRON_SECRET; an admin can also call it (dryRun:true
 // lists what would go out without sending). Deployed with JWT verification off for the cron call.
@@ -20,7 +27,7 @@ import { brandLogoHtml } from "../_shared/config.ts";
 import { mintContractLink, mintBalanceLink } from "../_shared/paylinks.ts";
 import { clientOwedCentsOf, gigContracts } from "../_shared/connect.ts";
 import { paymentOptionsHtml, depositZelle, balanceZelle, officePhone } from "../_shared/payblock.ts";
-import { sendTemplate, waNumber } from "../_shared/whatsapp.ts";
+import { createTemplates360, sendTemplate, waNumber } from "../_shared/whatsapp.ts";
 
 const DAY = 86_400_000;
 const EVERY_DAYS = 7;
@@ -31,6 +38,11 @@ type Row = Record<string, any>;
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 const money = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
 const fmtDate = (iso: string) => new Date(iso + "T00:00:00Z").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+const nyToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+const plusDays = (iso: string, n: number) => new Date(Date.parse(iso + "T12:00:00Z") + n * DAY).toISOString().slice(0, 10);
+// "18:00" -> "6:00 PM"
+const fmtTime = (t: string) => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t || "")); if (!m) return ""; const h = Number(m[1]); return `${(h % 12) || 12}:${m[2]} ${h < 12 ? "AM" : "PM"}`; };
+const firstName = (s: unknown) => String(s || "").trim().split(/\s+/)[0] || "there";
 
 function emailHtml(o: { greeting: string; lines: string[]; button?: { label: string; url: string }; payment?: string; phone: string }) {
   return `<!doctype html><html><body style="margin:0;padding:24px;background:#F5F4EF;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17171A;">
@@ -71,25 +83,96 @@ Deno.serve(async (req) => {
     .in("status", ["contract_sent", "booked", "paid"]).gte("date", today);
   if (error) return json({ ok: false, error: error.message }, 500);
 
+  // Submit any message template Meta doesn't have yet (also done by the daily run).
+  if (body.only === "submit_templates") return json({ ok: true, templates: await createTemplates360() });
+
+  // Who's who, and what was already sent once (kind|gig|ref).
+  const { data: artists } = await sb.from("artists").select("id, legacy_id, name, whatsapp");
+  const artistOf = (ref: string) => (artists || []).find((a: Row) => a.id === ref || a.legacy_id === ref);
+  const nameOf = (ref: string) => artistOf(ref)?.name;
+  const singersOf = (e: Row) => [e.artist_id || e.app_doc?.artistId, ...(((e.app_doc || {}).additionalArtists || []).map((x: Row) => x?.artistId))].filter(Boolean).map(String);
+  const singerNames = (e: Row) => singersOf(e).map((r) => nameOf(r)).filter(Boolean).join(" & ") || "your event";
+  const onceKinds = ["deposit_confirmed", "contract_sent", "balance_paid", "gig_reminder", "flight_reminder", "office_signed", "office_deposit", "office_balance"];
+  const { data: doneRows } = await sb.from("client_followups").select("event_legacy_id, kind, ref").in("kind", onceKinds).eq("ok", true).limit(20000);
+  const done = new Set((doneRows || []).map((d: Row) => `${d.kind}|${d.event_legacy_id}|${d.ref || ""}`));
+  const results: Row[] = [];
+  const once = async (kind: string, gig: string, ref: string, to: string, template: string, params: string[]) => {
+    if (done.has(`${kind}|${gig}|${ref}`) || results.length >= MAX_SENDS_PER_RUN) return;
+    done.add(`${kind}|${gig}|${ref}`);
+    if (dryRun) { results.push({ kind, gig, to, dryRun: true, ok: true }); return; }
+    const wa = await sendTemplate(to, template, params);
+    // Held until Meta approves the template: not logged, so the next run tries again.
+    if (!wa.ok && /waiting for Meta/.test(String(wa.error))) { done.delete(`${kind}|${gig}|${ref}`); results.push({ kind, gig, ok: false, held: true }); return; }
+    await sb.from("client_followups").insert({ event_legacy_id: gig, kind, ref: ref || null, sent_to: "whatsapp:" + waNumber(to), ok: wa.ok, error: wa.ok ? null : wa.error, provider_id: wa.id || null });
+    results.push({ kind, gig, ok: wa.ok, error: wa.error });
+  };
+  const { data: orgRow } = await sb.from("app_records").select("app_doc").eq("collection", "settings").eq("legacy_id", "org").maybeSingle();
+  const officeTo = waNumber(orgRow?.app_doc?.value?.alertsWhatsApp || "").length >= 10 ? String(orgRow.app_doc.value.alertsWhatsApp) : "";
+  const hasPhone = (x: unknown) => waNumber(String(x || "")).length >= 10;
+
   if (body.only === "deposit_confirmations") {
-    const { data: done } = await sb.from("client_followups").select("event_legacy_id").eq("kind", "deposit_confirmed").eq("ok", true).limit(10000);
-    const sent = new Set((done || []).map((d) => d.event_legacy_id));
-    const { data: artists } = await sb.from("artists").select("id, legacy_id, name");
-    // deno-lint-ignore no-explicit-any
-    const nameOf = (ref: string) => (artists || []).find((a: any) => a.id === ref || a.legacy_id === ref)?.name;
-    const due = (events || []).filter((e) => { const ev: Row = e.app_doc || {}; return ev.depositReceived && !ev.unpaid && waNumber(ev.clientPhone || "").length >= 10 && !sent.has(e.legacy_id); });
-    const results: Row[] = [];
-    for (const e of due.slice(0, MAX_SENDS_PER_RUN)) {
+    for (const e of events || []) {
       const ev: Row = e.app_doc || {};
-      const who = String(ev.clientName || "").trim().split(/\s+/)[0] || "there";
-      const singers = [e.artist_id, ...((ev.additionalArtists || []).map((x: Row) => x?.artistId))].map((r) => r && nameOf(String(r))).filter(Boolean).join(" & ") || "your event";
-      if (dryRun) { results.push({ gig: e.legacy_id, to: ev.clientPhone, ok: true, dryRun: true }); continue; }
-      const wa = await sendTemplate(ev.clientPhone, "deposit_received", [who, singers, fmtDate(e.date)]);
-      await sb.from("client_followups").insert({ event_legacy_id: e.legacy_id, kind: "deposit_confirmed", sent_to: "whatsapp:" + waNumber(ev.clientPhone), ok: wa.ok, error: wa.ok ? null : wa.error, provider_id: wa.id || null });
-      results.push({ gig: e.legacy_id, ok: wa.ok, error: wa.error });
+      if (ev.unpaid) continue;
+      const who = firstName(ev.clientName), when = fmtDate(e.date), singers = singerNames(e);
+      if (ev.depositReceived) {
+        if (hasPhone(ev.clientPhone)) await once("deposit_confirmed", e.legacy_id, "", ev.clientPhone, "deposit_received", [who, singers, when]);
+        if (officeTo) await once("office_deposit", e.legacy_id, "", officeTo, "office_alert", [`deposit in from ${ev.clientName || "a client"}, ${singers} on ${when}.`]);
+      }
+      if (ev.balanceReceived) {
+        if (hasPhone(ev.clientPhone)) await once("balance_paid", e.legacy_id, "", ev.clientPhone, "balance_paid", [who, singers, when]);
+        if (officeTo) await once("office_balance", e.legacy_id, "", officeTo, "office_alert", [`balance paid by ${ev.clientName || "a client"}, ${singers} on ${when}.`]);
+      }
     }
-    return json({ ok: true, sent: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results });
+    // Contracts sent in the last 3 days (one notice per contract version) and contracts signed.
+    const byGig = new Map((events || []).map((e: Row) => [e.legacy_id, e]));
+    const { data: reqs } = await sb.from("contract_sign_requests").select("id, event_legacy_id, contract_legacy_id, contract_created_at, created_at, revoked_at, signed_at, signer_name")
+      .not("event_legacy_id", "is", null).gte("created_at", new Date(now - 3 * DAY).toISOString()).order("created_at", { ascending: false }).limit(500);
+    const { data: signed } = await sb.from("contract_sign_requests").select("id, event_legacy_id, contract_legacy_id, signed_at, signer_name")
+      .not("event_legacy_id", "is", null).not("signed_at", "is", null).gte("signed_at", new Date(now - 3 * DAY).toISOString()).limit(500);
+    for (const r of reqs || []) {
+      const e = byGig.get(r.event_legacy_id), ev: Row = e?.app_doc || {};
+      if (!e || r.revoked_at || r.signed_at || ev.depositReceived || ev.unpaid || !hasPhone(ev.clientPhone) || String(r.contract_legacy_id).startsWith("CT-TEST-")) continue;
+      const ref = `${r.contract_legacy_id}@${r.contract_created_at}`;
+      if (done.has(`contract_sent|${e.legacy_id}|${ref}`)) continue;
+      const link = dryRun ? { ok: true, url: "" } : await mintContractLink(sb, r.contract_legacy_id, r.contract_created_at);
+      if (!link.ok) continue;
+      await once("contract_sent", e.legacy_id, ref, ev.clientPhone, "contract_sent", [firstName(ev.clientName), singerNames(e), fmtDate(e.date), link.url || ""]);
+    }
+    for (const r of signed || []) {
+      const e = byGig.get(r.event_legacy_id);
+      if (!e || !officeTo || String(r.contract_legacy_id).startsWith("CT-TEST-")) continue;
+      await once("office_signed", e.legacy_id, String(r.id), officeTo, "office_alert", [`${r.signer_name || "the client"} signed the contract for ${singerNames(e)} on ${fmtDate(e.date)}.`]);
+    }
+    return json({ ok: true, sent: results.filter((r) => r.ok && !r.dryRun).length, failed: results.filter((r) => !r.ok).length, results });
   }
+
+  // Daily: singers' gig reminders and flight reminders, 3 days ahead (New York dates).
+  const inThree = plusDays(nyToday(), 3);
+  for (const e of previewTo ? [] : events || []) {
+    const ev: Row = e.app_doc || {};
+    if (e.status !== "booked" && e.status !== "paid") continue;
+    const title = String(ev.clientName || ev.type || "your gig").trim();
+    const place = [ev.venue, ev.address, ev.city].filter(Boolean).join(", ") || "the venue (in the app)";
+    if (e.date === inThree) {
+      for (const ref of singersOf(e)) {
+        const a = artistOf(ref);
+        if (a && hasPhone(a.whatsapp)) await once("gig_reminder", e.legacy_id, String(a.id), a.whatsapp, "gig_reminder",
+          [firstName(a.name), title, `${fmtDate(e.date)}${fmtTime(ev.time) ? `, ${fmtTime(ev.time)}` : ""}`, place]);
+      }
+    }
+    const f = ev.flight || {};
+    const departDay = String(f.depart || "").slice(0, 10);
+    if (departDay === inThree && (f.flightNumber || f.airline)) {
+      const a = artistOf(String(e.artist_id || ev.artistId || ""));
+      const hm = String(f.depart).slice(11, 16);
+      if (a && hasPhone(a.whatsapp)) await once("flight_reminder", e.legacy_id, String(a.id), a.whatsapp, "flight_reminder",
+        [firstName(a.name), [f.flightNumber, f.airline ? `(${f.airline})` : ""].filter(Boolean).join(" "), `${fmtDate(departDay)}${fmtTime(hm) ? `, ${fmtTime(hm)}` : ""}`,
+         `the ${title} event${ev.city ? ` in ${ev.city}` : ""}`]);
+    }
+  }
+  const notices = results.splice(0);
+  if (!dryRun && fromCron) await createTemplates360().catch(() => null);   // submit any template Meta doesn't have yet
 
   const { data: logs } = await sb.from("client_followups").select("event_legacy_id, kind, sent_at").eq("ok", true)
     .order("sent_at", { ascending: false }).limit(5000);
@@ -132,9 +215,8 @@ Deno.serve(async (req) => {
     }
   }
 
-  if (dryRun) return json({ ok: true, dryRun: true, wouldSend: planned.map((p) => ({ kind: p.kind, gig: p.gig, to: p.to, whatsapp: p.waTo || null, balance: p.balance ?? null, client: p.ev.clientName || '', price: p.ev.price, commission: p.ev.commission })) });
+  if (dryRun) return json({ ok: true, dryRun: true, notices, wouldSend: planned.map((p) => ({ kind: p.kind, gig: p.gig, to: p.to, whatsapp: p.waTo || null, balance: p.balance ?? null, client: p.ev.clientName || '', price: p.ev.price, commission: p.ev.commission })) });
 
-  const results: Row[] = [];
   const batch = previewTo
     ? ["deposit_reminder", "balance_reminder"].map((k) => planned.find((p) => p.kind === k)).filter(Boolean).map((p) => ({ ...p, to: previewTo }))
     : planned.slice(0, MAX_SENDS_PER_RUN);
@@ -185,5 +267,6 @@ Deno.serve(async (req) => {
       results.push({ kind: p.kind, gig: p.gig, ok: false, error: msg });
     }
   }
+  results.push(...notices);
   return json({ ok: true, sent: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results });
 });

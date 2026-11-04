@@ -12,7 +12,7 @@ In live mode the payment steps are skipped (the harness never moves real money).
 Harness rows use "CT-TEST-…" ids, send no email and write no ledger or gig log. Clean up after a run
 (ops/STRIPE_SETUP.md → Testing).
 """
-from helpers import login_as, collect_console_errors, create_lead, pick_template, goto_nav
+from helpers import login_as, collect_console_errors, create_lead, pick_template, goto_nav, seed_events, fake_gig
 
 
 def _stripe_status(page):
@@ -73,6 +73,14 @@ def test_client_signs_then_pays_deposit(live_server, page, browser):
     client = client_ctx.new_page()
     client_errors = collect_console_errors(client)
     client.goto(url)
+
+    if st.get('mode') == 'live':
+        # Stripe is live (switched 2026-11): harness links never take real money, so the pay panel says closed.
+        panel = client.locator('[data-testid="pay-panel"]')
+        panel.wait_for(state='visible', timeout=20000)
+        assert 'Online payment closed' in panel.inner_text()
+        client_ctx.close()
+        return
 
     if not st.get('connected'):
         _sign(client, "Pay Tester")
@@ -206,3 +214,64 @@ def test_settings_shows_the_mercury_bank_card(live_server, page):
     assert 'mercury' in text and ('not set up' in text or 'connected' in text)
     assert card.locator('select[data-field="payoutVia"]').count() == 1
     assert not errors, f"console errors in the app: {errors}"
+
+
+def test_monthly_payouts_in_financials(live_server, page):
+    """Monthly payouts (owner 2026-11-04): Financials shows each payment's split and, per month, one payout
+    per singer plus the commission; Send asks once to confirm, then asks the server for that month.
+    The mercury function is stubbed (fake ledger) -- no money, no real rows."""
+    import json as _json
+    errors = collect_console_errors(page)
+    status = {"ok": True, "configured": True, "sandbox": False, "canMoveMoney": False,
+              "accounts": [{"account_id": "acc-main", "name": "Mercury Checking", "role": "main"},
+                           {"account_id": "acc-b", "name": "Benny Friedman", "role": "payee", "payee_profile_id": "PP-8"}],
+              "commission": {"recipientId": "rec-1", "name": "Ilan Chase"},
+              "payouts": [], "lastRunAt": None, "lastError": None,
+              "ledger": [
+                  {"id": "L1", "source": "mercury", "event_legacy_id": "EV-9701", "kind": "deposit", "received_on": "2026-10-05", "amount_cents": 300000,
+                   "went_to": "main", "needs_review": None, "note": None,
+                   "parts": [{"payee_key": "PP-8", "payee_name": "Airschnitz Productions LLC", "kind": "share", "cents": 150000, "payout_id": None},
+                             {"payee_key": "commission", "payee_name": "ASP commission", "kind": "commission", "cents": 150000, "payout_id": None}]},
+                  {"id": "L2", "source": "mercury", "event_legacy_id": "EV-9701", "kind": "balance", "received_on": "2026-11-03", "amount_cents": 750000,
+                   "went_to": "main", "needs_review": None, "note": None,
+                   "parts": [{"payee_key": "PP-8", "payee_name": "Airschnitz Productions LLC", "kind": "share", "cents": 750000, "payout_id": None}]},
+                  {"id": "L3", "source": "stripe", "event_legacy_id": "EV-9702", "kind": "balance", "received_on": "2026-11-04", "amount_cents": 100000,
+                   "went_to": "stripe", "needs_review": "No payee profile for a singer on this gig -- add it, then press Re-split.", "note": None, "parts": []}]}
+    calls = []
+    def handle(route):
+        body = _json.loads(route.request.post_data or "{}")
+        calls.append(body)
+        if body.get("action") == "pay_month":
+            out = {"ok": True, "test": True, "missing": [], "wouldSend": [{"name": "Benny", "cents": 900000, "to": "Benny Friedman"}]}
+        else:
+            out = status
+        route.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=_json.dumps(out))
+    page.route("**/functions/v1/mercury", handle)
+    seed_events(page, [fake_gig("EV-9701", "benny", "2026-10-20", clientName="Monthly Payout Client", status="paid", depositReceived=True, balanceReceived=True),
+                       fake_gig("EV-9702", "benny", "2026-10-25", clientName="Review Client", status="paid", depositReceived=True, balanceReceived=True)])
+    page.goto(live_server)
+    login_as(page, "admin_ceo")
+    goto_nav(page, "financials")
+    card = page.locator('[data-testid="monthly-payouts"]')
+    card.wait_for(state="visible", timeout=20000)
+    page.locator('select[data-action="payout-month"]').select_option("2026-11")
+    text = card.inner_text()
+    # November takes October's unpaid share too: Benny $1,500 + $7,500, commission $1,500.
+    assert "Benny" in text and "$9,000.00" in text, text
+    assert "ASP commission" in text and "$1,500.00" in text and "Ilan Chase" in text, text
+    assert "needs a look" in text, text
+    money_in = page.locator("table").filter(has_text="Went to").first.inner_text()
+    assert "Re-split" in money_in and "$7,500.00" in money_in, money_in
+    page.locator('[data-action="payout-details"][data-id="send:PP-8"]').click()
+    assert "deposit" in card.inner_text() and "balance" in card.inner_text()
+    # Only a finished month can be paid out: October.
+    page.locator('select[data-action="payout-month"]').select_option("2026-10")
+    assert "$1,500.00" in card.inner_text()
+    send = page.locator('[data-action="payout-send"]')
+    send.click()                       # first press only asks
+    assert "Confirm: send $3,000.00" in send.inner_text()
+    assert not any(c.get("action") == "pay_month" for c in calls)
+    send.click()
+    page.wait_for_function("() => document.body.innerText.includes('Test mode -- nothing moved')", timeout=10000)
+    assert {"action": "pay_month", "month": "2026-10"} in calls
+    assert not errors, f"console errors: {errors}"
