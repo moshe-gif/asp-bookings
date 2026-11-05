@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8" />
+<title>Event Details</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex" />
+<meta name="referrer" content="no-referrer" />
+<link rel="icon" type="image/png" href="../icon-glass-192.png" />
+<!-- The client's event details form (migration 0081, Edge Function gig-form). Standalone like sign/: clients aren't
+     ASP users, so no app, no sign-in, no supabase-js. The questions come from the server (_shared/gigform.ts, one
+     set per kind of gig), so this page only draws them. The token is after the "#", sent only in the POST body.
+     A draft is kept in this browser while typing, so a closed tab doesn't lose answers. -->
+<style>
+  :root{
+    --page:#F5F4EF; --surface:#FFFFFF; --ink:#17171A; --ink-2:#67676D; --ink-3:#9A9AA1;
+    --border:#E1E1E6; --border-strong:#D1D1D8; --accent:#4C6FA5; --accent-hover:#3D5C8C; --accent-wash:#EAF0F8;
+    --good:#2F7D5B; --good-wash:#E3F1EA; --bad:#A4473B;
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--page); color:var(--ink); font:15px/1.5 Inter,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap{ max-width:720px; margin:0 auto; padding:24px 16px calc(110px + env(safe-area-inset-bottom)); }
+  .logo{ display:block; width:200px; max-width:60%; height:auto; margin-bottom:18px; }
+  .label{ font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-3); font-weight:700; }
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 1px 2px rgba(23,23,26,.04),0 4px 14px rgba(23,23,26,.04); }
+  .hero{ padding:20px; margin-bottom:16px; }
+  .hero h1{ margin:4px 0 6px; font-size:1.4rem; font-weight:650; letter-spacing:-.01em; }
+  .hero .gig{ font-weight:600; margin:0 0 10px; }
+  .hero p{ margin:0; color:var(--ink-2); font-size:14px; }
+  .sec{ padding:18px 20px 8px; margin-bottom:14px; }
+  .sec h2{ margin:0 0 4px; font-size:1.02rem; font-weight:650; }
+  .sec .intro{ margin:0 0 12px; color:var(--ink-2); font-size:13.5px; }
+  .grid{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0 14px; }
+  .f{ grid-column:1 / -1; margin-bottom:14px; min-width:0; }
+  .f.half{ grid-column:auto; }
+  .f > span{ display:block; font-size:13px; font-weight:600; margin-bottom:5px; }
+  .f .hint{ display:block; font-size:12.5px; color:var(--ink-3); margin-top:4px; }
+  input, textarea{ width:100%; padding:10px 12px; border:1px solid var(--border-strong); border-radius:8px; font:inherit; background:#fff; color:var(--ink); min-width:0; }
+  textarea{ min-height:76px; resize:vertical; }
+  input:focus, textarea:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  .yn{ display:flex; gap:8px; flex-wrap:wrap; }
+  .yn button{ flex:0 0 auto; padding:8px 16px; border-radius:999px; border:1px solid var(--border-strong); background:#fff; font:inherit; font-size:14px; cursor:pointer; color:var(--ink); transition:background .15s, border-color .15s; }
+  .yn button[aria-pressed="true"]{ background:var(--accent-wash); border-color:var(--accent); color:var(--accent-hover); font-weight:600; }
+  .bar{ position:fixed; left:0; right:0; bottom:0; background:rgba(245,244,239,.94); backdrop-filter:blur(8px); border-top:1px solid var(--border); padding:12px 16px calc(12px + env(safe-area-inset-bottom)); }
+  .bar .in{ max-width:720px; margin:0 auto; display:flex; align-items:center; gap:12px; }
+  .bar .status{ flex:1; min-width:0; font-size:13px; color:var(--ink-2); }
+  .bar .status.err{ color:var(--bad); }
+  .bar .status.ok{ color:var(--good); }
+  .btn{ display:inline-flex; align-items:center; justify-content:center; padding:11px 20px; border-radius:8px; border:1px solid transparent; font:inherit; font-weight:600; cursor:pointer; background:var(--accent); color:#fff; transition:background .15s; white-space:nowrap; }
+  .btn:hover{ background:var(--accent-hover); }
+  .btn:disabled{ opacity:.55; cursor:default; }
+  .done{ padding:14px 18px; margin-bottom:14px; background:var(--good-wash); border-color:transparent; color:var(--good); font-size:14px; }
+  .msg{ padding:32px 20px; text-align:center; }
+  .msg h1{ font-size:1.25rem; margin:0 0 6px; }
+  .muted{ color:var(--ink-2); font-size:13.5px; }
+  .ro .value{ white-space:pre-wrap; padding:2px 0 0; }
+  @media (max-width:560px){ .grid{ grid-template-columns:minmax(0,1fr); } .f.half{ grid-column:1 / -1; } }
+</style>
+
+<div class="wrap" id="root"><img class="logo" src="../assets/brand/asp-horizontal-dark.png" alt="ASP Management" width="200" height="26"/><div class="card msg"><p class="muted">Loading…</p></div></div>
+
+<script>
+(function(){
+  const FN = 'https://psgpxbkncuavlnpplykf.supabase.co/functions/v1/gig-form';
+  const root = document.getElementById('root');
+  let token = '';
+  // A WhatsApp button can't carry a #, so it opens ?t=<token>; move it back into the #.
+  try{ const t = new URLSearchParams(location.search).get('t'); if (t && !location.hash) history.replaceState(null, '', location.pathname + '#' + encodeURIComponent(t)); }catch(e){}
+  try{ token = decodeURIComponent((location.hash||'').replace(/^#/, '')); }catch(e){}
+  const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const LOGO = '<img class="logo" src="../assets/brand/asp-horizontal-dark.png" alt="ASP Management" width="200" height="26"/>';
+  const MESSAGES = {
+    not_found: ['This link doesn’t work', 'Check that you opened the whole link, or ask us to send it again.'],
+    expired:   ['This link has expired', 'Ask us and we’ll send a fresh link.'],
+    server:    ['Something went wrong', 'Please try again in a minute.'],
+    network:   ['No connection', 'Check your internet connection and reload this page.'],
+  };
+  const DRAFT = 'asp_gig_form_draft_' + token.slice(0, 12);
+  const draftGet = ()=>{ try{ return JSON.parse(localStorage.getItem(DRAFT) || 'null'); }catch(e){ return null; } };
+  const draftSet = v=>{ try{ localStorage.setItem(DRAFT, JSON.stringify(v)); }catch(e){} };
+  const draftClear = ()=>{ try{ localStorage.removeItem(DRAFT); }catch(e){} };
+
+  async function call(body){
+    try{
+      const r = await fetch(FN, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(Object.assign({ token }, body)) });
+      return await r.json().catch(()=>({ ok:false, error:'server' }));
+    }catch(e){ return { ok:false, error:'network' }; }
+  }
+  function showMessage(code){
+    const [h, p] = MESSAGES[code] || MESSAGES.server;
+    root.innerHTML = `${LOGO}<div class="card msg"><h1>${esc(h)}</h1><p class="muted" style="margin:0;">${esc(p)}</p></div>`;
+  }
+  const fmtWhen = iso => new Date(iso).toLocaleString(undefined, { dateStyle:'medium', timeStyle:'short' });
+
+  let D = null, answers = {}, dirty = false;
+
+  function field(f){
+    const v = answers[f.k] || '';
+    const cls = 'f' + (f.half ? ' half' : '');
+    if (D.closed) return v ? `<div class="${cls} ro"><span>${esc(f.label)}</span><div class="value">${esc(v)}</div></div>` : '';
+    const hint = f.hint ? `<span class="hint">${esc(f.hint)}</span>` : '';
+    const ph = f.ph ? ` placeholder="${esc(f.ph)}"` : '';
+    const id = 'q_' + f.k;
+    if (f.t === 'yesno') return `<div class="${cls}" role="group" aria-labelledby="${id}"><span id="${id}">${esc(f.label)}</span><div class="yn">${['Yes','No','Not sure'].map(o=>`<button type="button" data-yn="${esc(f.k)}" data-v="${o}" aria-pressed="${v===o}">${o}</button>`).join('')}</div>${hint}</div>`;
+    if (f.t === 'textarea') return `<label class="${cls}"><span>${esc(f.label)}</span><textarea data-k="${esc(f.k)}" rows="3"${ph} maxlength="4000">${esc(v)}</textarea>${hint}</label>`;
+    const type = { time:'time', tel:'tel', email:'email' }[f.t] || 'text';
+    const ac = { tel:' autocomplete="tel"', email:' autocomplete="email"' }[f.t] || '';
+    return `<label class="${cls}"><span>${esc(f.label)}</span><input type="${type}" data-k="${esc(f.k)}" value="${esc(v)}"${ph}${ac} maxlength="300"/>${hint}</label>`;
+  }
+
+  function render(){
+    const g = D.gig, form = D.form;
+    const gigLine = [g.singers, g.when, g.venue].filter(Boolean).join(' · ');
+    const sections = form.sections.map(s=>{
+      const body = s.fields.map(field).join('');
+      if (D.closed && !body) return '';
+      return `<section class="card sec"><h2>${esc(s.title)}</h2>${s.intro && !D.closed ? `<p class="intro">${esc(s.intro)}</p>` : ''}<div class="grid">${body}</div></section>`;
+    }).join('');
+    root.innerHTML = `${LOGO}
+      <div class="card hero"><div class="label">${esc(form.title)}</div>
+        <h1>${g.clientFirst ? `Hi ${esc(g.clientFirst)}!` : 'Hi!'}</h1>
+        <p class="gig">${esc(gigLine)}</p>
+        <p>${D.closed ? 'This event has passed. Here is what you sent us.' : esc(form.intro)}</p></div>
+      ${D.submittedAt && !D.closed ? `<div class="card done" data-testid="form-saved">Saved ${esc(fmtWhen(D.submittedAt))}. Thank you! You can change anything below and save again.</div>` : ''}
+      <form id="f" novalidate>${sections || (D.closed ? '<div class="card msg"><p class="muted" style="margin:0;">No details were filled in.</p></div>' : '')}</form>
+      ${D.closed ? '' : `<div class="bar"><div class="in"><div class="status" id="status" role="status">${D.submittedAt ? '' : 'Fill in what you know; you can come back later.'}</div><button class="btn" id="save" type="button" data-testid="form-save">${D.submittedAt ? 'Save changes' : 'Send details'}</button></div></div>`}`;
+    if (D.closed) return;
+    const status = document.getElementById('status');
+    const touch = ()=>{ dirty = true; draftSet(answers); status.className = 'status'; status.textContent = 'Not saved yet'; };
+    root.querySelectorAll('[data-k]').forEach(el=>el.addEventListener('input', ()=>{ answers[el.dataset.k] = el.value; touch(); }));
+    root.querySelectorAll('[data-yn]').forEach(b=>b.addEventListener('click', ()=>{
+      const k = b.dataset.yn, v = answers[k] === b.dataset.v ? '' : b.dataset.v;
+      answers[k] = v;
+      root.querySelectorAll(`[data-yn="${CSS.escape(k)}"]`).forEach(x=>x.setAttribute('aria-pressed', String(x.dataset.v === v)));
+      touch();
+    }));
+    document.getElementById('save').addEventListener('click', save);
+  }
+
+  async function save(){
+    const btn = document.getElementById('save'), status = document.getElementById('status');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    const res = await call({ action:'submit', answers });
+    if (!res.ok){
+      btn.disabled = false; btn.textContent = D.submittedAt ? 'Save changes' : 'Send details';
+      status.className = 'status err';
+      status.textContent = res.error === 'network' ? 'No connection. Your answers are kept on this device; try again.' : res.error === 'closed' ? 'This event has passed, so the details can’t be changed.' : 'Something went wrong. Please try again.';
+      return;
+    }
+    dirty = false; draftClear();
+    D.submittedAt = res.submittedAt;
+    render();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const s = document.getElementById('status'); if (s){ s.className = 'status ok'; s.textContent = 'Saved. Thank you!'; }
+  }
+
+  window.addEventListener('beforeunload', e=>{ if (dirty){ e.preventDefault(); e.returnValue = ''; } });
+
+  async function load(){
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)){ showMessage('not_found'); return; }
+    const d = await call({ action:'view' });
+    if (!d.ok){ showMessage(d.error); return; }
+    D = d;
+    answers = Object.assign({}, d.answers || {});
+    const draft = !d.closed && draftGet();
+    if (draft && typeof draft === 'object'){ Object.assign(answers, draft); dirty = true; }
+    render();
+    if (dirty){ const s = document.getElementById('status'); if (s) s.textContent = 'Unsaved answers from before were brought back.'; }
+  }
+  load();
+})();
+</script>
+</html>

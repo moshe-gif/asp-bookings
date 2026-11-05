@@ -159,6 +159,10 @@ export const WA_BRANDED: Record<string, Branded> = {
   asp_office_alert: { text: "ASP Bookings update: {{1}}\n\nOpen the app for the details.",
     example: ["Brian Pergament signed the contract for Benny Friedman on Monday, November 9, 2026."], button: { text: "Open ASP Bookings", url: "/" },
     from: (p) => ({ params: p.slice(0, 1) }) },
+  // 2026-11-05: the gig-info form link, sent once after the deposit.
+  asp_gig_form: { text: "Hi {{1}}! 🎶\n\nTo get everything ready for *{{2}}* on *{{3}}*, please fill in the event details: times, song choices and who to call on the day.\n\nFill in what you know now and come back anytime to add more.",
+    example: ["Sarah", "Benny Friedman", "Sunday, November 22, 2026"], button: { text: "Fill in the details", url: "/form/?t={{1}}", example: "sample" },
+    from: (p) => { const t = linkToken(p[3], "/form/"); return t ? { params: p.slice(0, 3), button: t } : null; } },
   asp_crew_request: { text: "Hi {{1}}! 🎥 Can you film *{{2}}* on *{{3}}* at {{4}}?\n\nTap below to confirm in the app. Thanks!",
     example: ["Aharon", "Benny Friedman", "Sun, Nov 2, 7:30 PM", "Lake Terrace, Lakewood"], button: { text: "Confirm in the app", url: "/" },
     from: (p) => ({ params: p.slice(0, 4) }) },
@@ -166,7 +170,7 @@ export const WA_BRANDED: Record<string, Branded> = {
 const BRANDED_FOR: Record<string, string[]> = { deposit_received: ["asp_deposit_received"], deposit_reminder: ["asp_deposit_reminder"],
   balance_reminder: ["asp_balance_reminder", "asp_balance_reminder_nolink"], crew_request: ["asp_crew_request"],
   contract_sent: ["asp_contract_sent"], balance_paid: ["asp_balance_paid"], gig_reminder: ["asp_gig_reminder"],
-  flight_reminder: ["asp_flight_reminder"], office_alert: ["asp_office_alert"] };
+  flight_reminder: ["asp_flight_reminder"], office_alert: ["asp_office_alert"], gig_form: ["asp_gig_form"] };
 export const waLogoUrl = () => `${appUrl()}/assets/brand/asp-whatsapp-header.jpg`;
 
 // A template message: the branded one if Meta approved it, else the plain approved one, else the same words as

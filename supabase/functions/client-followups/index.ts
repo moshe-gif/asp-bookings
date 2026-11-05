@@ -28,6 +28,7 @@ import { mintContractLink, mintBalanceLink } from "../_shared/paylinks.ts";
 import { clientOwedCentsOf, gigContracts } from "../_shared/connect.ts";
 import { paymentOptionsHtml, depositZelle, balanceZelle, officePhone } from "../_shared/payblock.ts";
 import { createTemplates360, sendTemplate, waNumber } from "../_shared/whatsapp.ts";
+import { formKindFor, sendGigForm } from "../_shared/gigform.ts";
 
 const DAY = 86_400_000;
 const EVERY_DAYS = 7;
@@ -87,12 +88,12 @@ Deno.serve(async (req) => {
   if (body.only === "submit_templates") return json({ ok: true, templates: await createTemplates360() });
 
   // Who's who, and what was already sent once (kind|gig|ref).
-  const { data: artists } = await sb.from("artists").select("id, legacy_id, name, whatsapp");
+  const { data: artists } = await sb.from("artists").select("id, legacy_id, name, whatsapp, role");
   const artistOf = (ref: string) => (artists || []).find((a: Row) => a.id === ref || a.legacy_id === ref);
   const nameOf = (ref: string) => artistOf(ref)?.name;
   const singersOf = (e: Row) => [e.artist_id || e.app_doc?.artistId, ...(((e.app_doc || {}).additionalArtists || []).map((x: Row) => x?.artistId))].filter(Boolean).map(String);
   const singerNames = (e: Row) => singersOf(e).map((r) => nameOf(r)).filter(Boolean).join(" & ") || "your event";
-  const onceKinds = ["deposit_confirmed", "contract_sent", "balance_paid", "gig_reminder", "flight_reminder", "office_signed", "office_deposit", "office_balance"];
+  const onceKinds = ["deposit_confirmed", "contract_sent", "balance_paid", "gig_reminder", "flight_reminder", "office_signed", "office_deposit", "office_balance", "gig_form", "gig_form_wa"];
   const { data: doneRows } = await sb.from("client_followups").select("event_legacy_id, kind, ref").in("kind", onceKinds).eq("ok", true).limit(20000);
   const done = new Set((doneRows || []).map((d: Row) => `${d.kind}|${d.event_legacy_id}|${d.ref || ""}`));
   const results: Row[] = [];
@@ -118,6 +119,20 @@ Deno.serve(async (req) => {
       if (ev.depositReceived) {
         if (hasPhone(ev.clientPhone)) await once("deposit_confirmed", e.legacy_id, "", ev.clientPhone, "deposit_received", [who, singers, when]);
         if (officeTo) await once("office_deposit", e.legacy_id, "", officeTo, "office_alert", [`deposit in from ${ev.clientName || "a client"}, ${singers} on ${when}.`]);
+      }
+      // The event details form (0081, owner 2026-11-05), once the deposit is in -- not for concerts. Email and
+      // WhatsApp are logged separately; a WhatsApp still waiting for Meta's approval goes on a later run.
+      if (ev.depositReceived && !ev.needsReview && formKindFor(ev, artistOf(String(e.artist_id || ev.artistId || ""))?.role)
+          && results.length < MAX_SENDS_PER_RUN && (!done.has(`gig_form|${e.legacy_id}|`) || !done.has(`gig_form_wa|${e.legacy_id}|`))) {
+        const wantEmail = !done.has(`gig_form|${e.legacy_id}|`), wantWa = !done.has(`gig_form_wa|${e.legacy_id}|`);
+        if (dryRun) results.push({ kind: "gig_form", gig: e.legacy_id, dryRun: true, ok: true });
+        else {
+          const out = await sendGigForm(sb, { gig: e.legacy_id, ev, singers, when, email: wantEmail, whatsapp: wantWa });
+          // No email address / phone: mark that channel done so it isn't retried every 10 minutes.
+          if (wantEmail) { done.add(`gig_form|${e.legacy_id}|`); await sb.from("client_followups").insert({ event_legacy_id: e.legacy_id, kind: "gig_form", sent_to: out.email?.to || "no email", ok: out.email ? out.email.ok : true, error: out.email ? (out.email.ok ? null : out.email.error) : "no client email" }); }
+          if (wantWa && !out.whatsapp?.held) { done.add(`gig_form_wa|${e.legacy_id}|`); await sb.from("client_followups").insert({ event_legacy_id: e.legacy_id, kind: "gig_form_wa", sent_to: out.whatsapp ? "whatsapp:" + waNumber(out.whatsapp.to) : "no phone", ok: out.whatsapp ? out.whatsapp.ok : true, error: out.whatsapp ? (out.whatsapp.ok ? null : out.whatsapp.error) : "no client phone" }); }
+          results.push({ kind: "gig_form", gig: e.legacy_id, ok: !out.email || out.email.ok, email: out.email || null, whatsapp: out.whatsapp || null });
+        }
       }
       if (ev.balanceReceived) {
         if (hasPhone(ev.clientPhone)) await once("balance_paid", e.legacy_id, "", ev.clientPhone, "balance_paid", [who, singers, when]);

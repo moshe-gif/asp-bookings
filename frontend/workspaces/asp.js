@@ -4421,7 +4421,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.52'; // bump on every release so a phone can tell it has updated. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.53'; // bump on every release so a phone can tell it has updated. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -7880,6 +7880,48 @@ function renderContactCopyRow(c, ev){
     </span>
   </div>`;
 }
+// The client's event details form (0081, owner 2026-11-05): sent by itself after the deposit (client-followups),
+// filled in at app.aspmgmt.com/form/. The server (gig-form) pours the answers into this gig's Gig Info and keeps
+// all of them on ev.clientForm; the questions per kind of gig live in supabase/functions/_shared/gigform.ts.
+// Concerts get no form.
+const gigHasClientForm = ev=>!!ev && ev.type!=='Concert' && !ev.unpaid;
+function renderClientFormBlock(ev, isAdmin){
+  if(!gigHasClientForm(ev)) return '';
+  const cf = ev.clientForm;
+  const open = S.clientFormOpenId===ev.id;
+  const busy = S.gigFormBusy===ev.id;
+  const status = cf && cf.submittedAt
+    ? `<strong style="color:var(--good);">Filled in by the client</strong> <span style="color:var(--ink-3);">${esc(fmtDateShort(cf.submittedAt.slice(0,10)))}</span>`
+    : `<span style="color:var(--ink-2);">${ev.depositReceived? 'Not filled in yet' : 'Goes to the client by itself once the deposit is in'}</span>`;
+  return `<div data-testid="client-form-block" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12.5px;">
+      <span><span class="u-label" style="margin-right:6px;">Client details form</span>${status}</span>
+      <span style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${cf && (cf.sections||[]).length? `<button class="btn btn-sm btn-ghost" data-action="clientform-toggle" data-id="${ev.id}" style="padding:2px 6px;">${open? 'Hide answers' : 'See answers'}</button>` : ''}
+        ${isAdmin? `<button class="btn btn-sm btn-ghost" data-action="gigform-copy" data-id="${ev.id}" style="padding:2px 6px;" ${busy?'disabled':''}>Copy link</button>
+        <button class="btn btn-sm btn-ghost" data-action="gigform-send" data-id="${ev.id}" style="padding:2px 6px;" ${busy?'disabled':''}>${busy? 'Sending…' : 'Send to client'}</button>` : ''}
+      </span>
+    </div>
+    ${open && cf? `<div style="margin-top:8px;font-size:12.5px;">${(cf.sections||[]).map(sec=>`<div class="u-label" style="margin:8px 0 4px;">${esc(sec.title)}</div>${(sec.rows||[]).map(r=>`<div class="kv-row" style="align-items:flex-start;"><span style="color:var(--ink-2);">${esc(r.label)}</span><strong style="text-align:right;white-space:pre-wrap;overflow-wrap:anywhere;">${esc(r.value)}</strong></div>`).join('')}`).join('')}</div>` : ''}
+  </div>`;
+}
+async function doGigFormLink(id, send){
+  const ev = getEvent(id); if(!ev) return;
+  if(send && !confirm(`Send the event details form to ${ev.clientName||'the client'} now, by email and WhatsApp?`)) return;
+  S.gigFormBusy = id; render();
+  const res = await callEdgeFunction('gig-form', { action: send? 'send' : 'link', gig: id });
+  S.gigFormBusy = null; render();
+  if(!res.ok){ toast(res.error || 'Couldn\'t make the form link.', 'system'); return; }
+  if(!send){
+    try{ await navigator.clipboard.writeText(res.url); toast('Form link copied — paste it to the client.', 'success'); }
+    catch(e){ prompt('Copy the form link:', res.url); }
+    return;
+  }
+  const parts = [];
+  if(res.email) parts.push(res.email.ok? 'emailed' : `email failed (${res.email.error||'error'})`);
+  if(res.whatsapp) parts.push(res.whatsapp.ok? 'sent on WhatsApp' : res.whatsapp.held? 'WhatsApp goes out once Meta approves the message' : `WhatsApp failed (${res.whatsapp.error||'error'})`);
+  toast(parts.length? `Form ${parts.join(', ')}.` : 'The client has no email or phone on this gig.', parts.length? 'success' : 'system');
+}
 // One "Gig Info" section (owner 2026-10-13: "gig info and prep sheet is the same thing"): the notes,
 // the contact list and the uploaded files are all the gig's info. Stored as before -- notes/contacts
 // in ev.gigInfoSheet, files in ev.prepSheets[] -- only the presentation is merged.
@@ -7896,6 +7938,7 @@ function renderPrepAndGigInfoCard(ev, isAdmin){
         ? `<button class="btn btn-sm btn-ghost" data-action="open-giginfo-form" data-id="${ev.id}" style="padding:2px 6px;">${hasNotes||files.length?'Edit / upload docs':'+ Upload docs'}</button>`
         : `<label class="btn btn-sm btn-ghost" style="cursor:pointer;display:inline-flex;padding:2px 6px;">+ Upload docs<input type="file" data-action="upload-prep" data-id="${ev.id}" multiple style="display:none;"/></label>`) : ''}
     </div>
+    ${renderClientFormBlock(ev, isAdmin)}
     ${!hasNotes && !files.length? `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No gig info yet.</p>` : ''}
     ${lineup.length? `<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">${lineup.map(([k,v])=>`<div class="kv-row"><span style="color:var(--ink-2);">${esc(k)}</span><strong style="text-align:right;">${esc(v)}</strong></div>`).join('')}</div>` : ''}
     ${(sheet.schedule||[]).length? `<div class="u-label" style="margin:6px 0 4px;">Run of the night</div><div style="font-size:12.5px;margin-bottom:10px;">${sheet.schedule.map(r=>`<div><span class="u-mono" style="color:var(--ink-3);display:inline-block;min-width:62px;">${r.time? esc(fmtTime(r.time)) : ''}</span>${esc(r.item)}</div>`).join('')}</div>` : ''}
@@ -7976,7 +8019,10 @@ function gigSheetDocHtml(ev){
   const cell = 'padding:7px 12px 7px 0;border:none;border-bottom:1px solid #E3E3E8;background:none;font-size:12.5px;vertical-align:top;';
   const where = [ev.venue, ev.address, [ev.city, ev.state].filter(Boolean).join(', ')].filter(Boolean).join(', ');
   const facts = [['Date', ev.date? fmtDate(ev.date) : 'TBD'], ['Time', fmtTimeRange(ev.time, ev.endTime)], ['Venue', where || 'TBD'], ...lineup];
-  const empty = !lineup.length && !(sheet.schedule||[]).length && !(sheet.songs||[]).length && !sheet.text && !(sheet.contacts||[]).length;
+  // The client's form answers that have no place above (yes/no questions, names, notes); songs, times, contacts
+  // and singers are already in their own sections.
+  const clientExtras = ((ev.clientForm||{}).sections||[]).flatMap(sec=>sec.rows||[]).filter(r=>!r.placed);
+  const empty = !lineup.length && !(sheet.schedule||[]).length && !(sheet.songs||[]).length && !sheet.text && !(sheet.contacts||[]).length && !clientExtras.length;
   return `<div style="background:#fff;color:#17171A;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.55;">
     ${aspDocHeaderHtml({ light:true, kicker:'GIG SHEET', title:esc(artist.name), subtitle:[esc(ev.type||''), ev.unpaid? '' : esc(ev.clientName||''), ev.date? esc(fmtDateShort(ev.date)) : ''].filter(Boolean).join(' &middot; ') })}
     <table role="presentation" style="border-collapse:collapse;width:100%;margin-top:6px;border:none;background:none;">
@@ -7985,6 +8031,7 @@ function gigSheetDocHtml(ev){
     ${(sheet.schedule||[]).length? `${label('Run of the night')}<table role="presentation" style="border-collapse:collapse;width:100%;border:none;background:none;">${sheet.schedule.map(r=>`<tr><td style="${cell}color:${mute};white-space:nowrap;width:90px;">${r.time? esc(fmtTime(r.time)) : ''}</td><td style="${cell}">${esc(r.item)}</td></tr>`).join('')}</table>` : ''}
     ${(sheet.songs||[]).length? `${label('Songs')}<table role="presentation" style="border-collapse:collapse;width:100%;border:none;background:none;">${sheet.songs.map(r=>`<tr><td style="${cell}color:${mute};width:180px;">${esc(r.moment||'')}</td><td style="${cell}font-weight:700;">${esc(r.song)}</td></tr>`).join('')}</table>` : ''}
     ${sheet.text? `${label('Notes')}<p style="font-size:12.5px;white-space:pre-wrap;margin:0;">${esc(sheet.text)}</p>` : ''}
+    ${clientExtras.length? `${label("From the client's form")}<table role="presentation" style="border-collapse:collapse;width:100%;border:none;background:none;">${clientExtras.map(r=>`<tr><td style="${cell}color:${mute};width:180px;">${esc(r.label)}</td><td style="${cell}font-weight:700;white-space:pre-wrap;">${esc(r.value)}</td></tr>`).join('')}</table>` : ''}
     ${(sheet.contacts||[]).length? `${label('Contacts')}<table role="presentation" style="border-collapse:collapse;width:100%;border:none;background:none;">${sheet.contacts.map(c=>`<tr><td style="${cell}font-weight:700;">${esc(c.name)}${c.role?` <span style="color:${mute};font-weight:400;">(${esc(c.role)})</span>`:''}</td><td style="${cell}">${esc(c.phone||'')}${c.phone&&c.email?' &middot; ':''}${esc(c.email||'')}</td></tr>`).join('')}</table>` : ''}
     ${empty? `<p style="font-size:13px;color:${mute};margin-top:16px;">No gig info added yet.</p>` : ''}
     <div style="margin-top:22px;padding-top:10px;border-top:1px solid #E3E3E8;font-size:10.5px;color:${mute};">ASP Management${getBrandConfig('asp').phone? ` &middot; ${esc(getBrandConfig('asp').phone)}` : ''}</div>
@@ -11234,6 +11281,9 @@ function bindGlobal(){
       case 'remove-gig-contact': doRemoveGigContact(id, t.getAttribute('data-contactid')); break;
       case 'save-giginfo': doSaveGigInfo(id); break;
       case 'view-giginfo': S.gigInfoDocEventId=id; S.showGigInfoDoc=true; render(); break;
+      case 'clientform-toggle': S.clientFormOpenId = S.clientFormOpenId===id? null : id; render(); break;
+      case 'gigform-copy': doGigFormLink(id, false); break;
+      case 'gigform-send': doGigFormLink(id, true); break;
       case 'close-giginfo-doc': S.showGigInfoDoc=false; S.gigInfoDocEventId=null; render(); break;
       case 'giginfo-doc-overlay-close': if(e.target===t) { S.showGigInfoDoc=false; S.gigInfoDocEventId=null; render(); } break;
       case 'print-giginfo': window.print(); break;
