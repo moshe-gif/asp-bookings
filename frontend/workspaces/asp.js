@@ -801,7 +801,8 @@ function contractPaymentFigures(c){
   const total = Number(c.fee.amount)||0;
   let deposit = Number(c.deposit.amount)||0;
   // Number(): the builder stores input values as strings, and "0" is truthy -- it means "use the $ amount".
-  if(Number(c.deposit.percent) > 0){ deposit = Math.round(total * Number(c.deposit.percent) / 100); }
+  // To the cent (owner 2026-11-05 "do exact amount": 15% of $10 is $1.50, not $2).
+  if(Number(c.deposit.percent) > 0){ deposit = Math.round(total * Number(c.deposit.percent)) / 100; }
   const balance = Math.max(0, total - deposit);
   return { total, deposit, balance };
 }
@@ -862,7 +863,7 @@ function contractAcceptanceText(c){
 }
 function contractBalanceDueText(c, figures){
   const timing = c.balanceDueTiming==='at_event' ? 'at the event' : c.balanceDueTiming==='on_completion' ? 'when the project is complete' : 'prior to the engagement';
-  return `The remaining balance of ${money(figures.balance)} shall be paid ${timing}.`;
+  return `The remaining balance of ${moneyExact(figures.balance)} shall be paid ${timing}.`;
 }
 function contractClientContactLine(c){
   const parts = [];
@@ -2525,6 +2526,8 @@ function fmtISO(d){ return d.toISOString().slice(0,10); }
 function localISO(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function todayISO(){ return localISO(new Date()); }
 function money(n){ return '$'+Math.round(n).toLocaleString('en-US'); }
+// Whole dollars as usual, cents only when there are some (a contract's deposit/balance must be exact).
+function moneyExact(n){ n = Number(n)||0; return Math.round(n*100)%100 ? moneyCents(n) : money(n); }
 function chargesTotal(ev){ return (ev.charges||[]).reduce((s,c)=>s+c.amount,0); }
 // Navigation/data-layer refactor (PR 12): ev.balance used to be a stored field, set once at
 // creation and only recomputed inside the edit-event save handler -- every other balance/payout
@@ -4421,7 +4424,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.53'; // bump on every release so a phone can tell it has updated. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.54'; // bump on every release so a phone can tell it has updated. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -6359,9 +6362,6 @@ function renderFinancialsPage(){
   const openInvoices = CUSTOM_INVOICES.filter(i=>i.status==='open');
   const openInvoiceTotal = openInvoices.reduce((s,i)=>s+invoiceTotal(i),0);
   const payoutEligible = filt.filter(e=>e.balanceReceived);
-  const owedToArtists = payoutEligible.filter(e=>!e.artistPaidOut);
-  const owedTotal = owedToArtists.reduce((s,e)=>s+artistPayout(e),0);
-  const paidOutTotal = payoutEligible.filter(e=>e.artistPaidOut).reduce((s,e)=>s+artistPayout(e),0);
 
   const months = lastNMonths(6);
   const monthlyGross = sumByMonth(booked, months, e=>e.price).map((val,i)=>({label: months[i].toLocaleDateString('en-US',{month:'short'}), val}));
@@ -6381,24 +6381,18 @@ function renderFinancialsPage(){
     <div class="card stat-tile" style="cursor:pointer;" data-action="nav" data-view="financials"><span class="u-label">Open Invoice Total</span><span class="val">${money(openInvoiceTotal)}</span><span class="sub">Across ${openInvoices.length} open invoice${openInvoices.length===1?'':'s'}</span></div>
   </div>
 
-  <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
-    <div class="card stat-tile"><span class="u-label">Owed to Artists</span><span class="val">${money(owedTotal)}</span><span class="sub">${owedToArtists.length} gig${owedToArtists.length===1?'':'s'} paid by client, not yet paid out</span></div>
-    <div class="card stat-tile"><span class="u-label">Paid Out</span><span class="val">${money(paidOutTotal)}</span><span class="sub">Settled with artists</span></div>
-  </div>
-
   ${renderMonthlyPayouts()}
 
   <div class="section-head"><h2>Artist Payouts — Gig Breakdown (${payoutEligible.length})</h2></div>
   ${payoutEligible.length? `<div class="card table-cards" style="margin-bottom:22px;"><table>
-    <thead><tr><th>Artist</th><th>Client</th><th>Date</th><th>Fee</th><th>ASP Cut</th><th>Charges</th><th>Payout</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Artist</th><th>Client</th><th>Date</th><th>Fee</th><th>ASP Cut</th><th>Charges</th><th>Payout</th><th>Status</th></tr></thead>
     <tbody>${payoutEligible.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const a=artistById(e.artistId); const amt=artistPayout(e);
       return `<tr>
         <td data-label="Artist">${esc(a.name)}</td><td data-label="Client">${esc(e.clientName)}</td>
         <td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
         <td data-label="Fee" class="u-mono">${money(e.price)}</td><td data-label="ASP Cut" class="u-mono">${money(e.commission)}</td>
         <td data-label="Charges" class="u-mono">${money(chargesTotal(e))}</td><td data-label="Payout" class="u-mono"><strong>${money(amt)}</strong></td>
-        <td data-label="Status"><span class="pill ${e.artistPaidOut?'pill-good':'pill-warn'}">${e.artistPaidOut? 'Paid Out':'Owed'}</span></td>
-        <td data-label=""><button class="btn btn-sm ${e.artistPaidOut?'btn-ghost':'btn-primary'}" data-action="toggle-artist-paidout" data-id="${e.id}">${e.artistPaidOut? 'Unmark':'Mark Paid Out'}</button></td>
+        <td data-label="Status"><span class="pill ${e.artistPaidOut?'pill-good':'pill-neutral'}">${e.artistPaidOut? 'Paid out':'In a monthly payout'}</span></td>
       </tr>`;}).join('')}
     </tbody></table></div>` : `<div class="card empty" style="margin-bottom:22px;">No completed gigs yet — payouts appear here once a client's balance is received.</div>`}
 
@@ -7356,7 +7350,7 @@ function renderAddArtistModal(){
 // 'standard' everywhere it's read, same convention as the rest of this file's optional fields,
 // so existing saved events never need a migration.
 const PAYMENT_METHODS = [
-  ['standard', 'Standard (QuickBooks + Zelle)'],
+  ['standard', 'Standard (paid via Stripe or Mercury)'],
   ['cash', 'Mezumin (cash)'],
   ['check', 'Check'],
   ['other', 'Other'],
@@ -8062,11 +8056,13 @@ function renderAdminActions(ev){
     // (The contract lives in the Contracts card -- one place to create, view and send it; owner 2026-10-15.)
     // Confirming without the contract / deposit steps (owner 2026-10-29: "a button to confirm a gig that's
     // currently a new lead as an admin"): it becomes Booked; the deposit is still owed and tracked.
-    buttons.push(`<button class="btn btn-primary btn-block" data-action="confirm-lead" data-id="${ev.id}" data-testid="confirm-lead">${ICO.check} Confirm Booking</button>`);
+    // Owner 2026-11-05: the usual next step, Create Contract (in the Contracts card), is the main button; booking
+    // without a contract is this small link.
+    buttons.push(`<button class="btn btn-sm btn-ghost btn-block" data-action="confirm-lead" data-id="${ev.id}" data-testid="confirm-lead" style="color:var(--ink-2);">Book without a contract</button>`);
   }
   if(ev.status==='contract_sent'){
-    buttons.push(`<button class="btn btn-primary btn-block" data-action="mark-deposit" data-id="${ev.id}">${ICO.check} Mark Booking Fee Received — Lock In Booking</button>`);
-    buttons.push(`<button class="btn btn-sm btn-ghost btn-block" data-action="open-verify-deposit" data-id="${ev.id}">${ICO.check} Verify Deposit &amp; Confirm (audited)</button>`);
+    // One way to record a deposit that didn't come in online (owner 2026-11-05): it asks how the money came in.
+    buttons.push(`<button class="btn btn-primary btn-block" data-action="open-verify-deposit" data-id="${ev.id}" data-testid="record-deposit">${ICO.check} Record deposit</button>`);
   }
   if(ev.status==='booked' && !ev.balanceReceived){
     const standard = isStandardPayment(ev);
@@ -8651,25 +8647,22 @@ function renderSendContractConfirmModal(){
 // local booking record yet (no event has a real Supabase row to match a payments row against), so
 // unlike a future version of this modal, there's only one honest path today: the admin records how
 // they verified the deposit, not a silent checkbox.
+const DEPOSIT_METHODS = [['zelle','Zelle'], ['mercury','Bank transfer into Mercury'], ['wire','Wire'], ['check','Check'], ['cash','Cash'], ['other','Other']];
 function renderVerifyDepositModal(){
   const ev = getEvent(S.verifyDepositEventId); if(!ev) return '';
   const f = S.verifyDepositForm||{};
   return `<div class="overlay center" data-action="verifydeposit-overlay-close">
     <div class="modal" data-stop data-form="verifydeposit" style="width:420px;">
-      <div class="sheet-head"><h2 style="font-size:1.2rem;">Verify Deposit &amp; Confirm Booking</h2><button class="icon-btn" data-action="close-verify-deposit" aria-label="Close">${ICO.x}</button></div>
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Record deposit</h2><button class="icon-btn" data-action="close-verify-deposit" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body" style="display:flex;flex-direction:column;gap:10px;">
-        <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Automated payment matching isn't connected to this booking yet — record what you actually verified, so there's a real, queryable audit trail instead of a one-click guess.</p>
-        <div class="field"><label>How was the deposit verified?</label>
+        <p style="font-size:12px;color:var(--ink-2);margin:0;">For a deposit that didn't come in through the online payment link (that one is recorded by itself). The gig becomes Booked and the client gets the confirmation.</p>
+        <div class="field"><label>How did the money come in?</label>
           <select data-field="method">
-            <option value="zelle" ${f.method==='zelle'?'selected':''}>Zelle — confirmed in Gmail/bank</option>
-            <option value="wire" ${f.method==='wire'?'selected':''}>Wire — confirmed by bank statement</option>
-            <option value="check" ${f.method==='check'?'selected':''}>Check — deposited/cleared</option>
-            <option value="quickbooks" ${f.method==='quickbooks'?'selected':''}>QuickBooks — payment recorded</option>
-            <option value="other" ${f.method==='other'?'selected':''}>Other</option>
+            ${DEPOSIT_METHODS.map(([k,l])=>`<option value="${k}" ${f.method===k?'selected':''}>${l}</option>`).join('')}
           </select>
         </div>
-        <div class="field"><label>Evidence / note (required)</label><textarea data-field="note" rows="3" placeholder="e.g. Zelle received 10/6 for $2,500, confirmed against bank statement.">${esc(f.note||'')}</textarea></div>
-        <button class="btn btn-primary btn-block" data-action="confirm-verify-deposit" data-id="${ev.id}">Verify &amp; Confirm Booking</button>
+        <div class="field"><label>Note (optional)</label><textarea data-field="note" rows="2" placeholder="e.g. Zelle 11/5, $2,500">${esc(f.note||'')}</textarea></div>
+        <button class="btn btn-primary btn-block" data-action="confirm-verify-deposit" data-id="${ev.id}" data-testid="confirm-record-deposit">Record deposit &amp; book</button>
       </div>
     </div>
   </div>`;
@@ -8685,7 +8678,8 @@ function renderContractBuilderModal(){
           <h2 style="font-size:1.2rem;margin-bottom:4px;">${esc(contractTemplateLabel(c.template))}</h2>
           <span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span>
         </div>
-        <div style="display:flex;gap:6px;">
+        <div style="display:flex;gap:6px;align-items:center;">
+          ${c.status!=='void' && c.status!=='signed'? `<button class="btn btn-sm btn-primary" data-action="review-and-send-contract" data-id="${c.id}" data-testid="review-and-send">${ICO.mail} Review &amp; send</button>` : ''}
           <button class="icon-btn" data-action="view-contract-builder-doc" title="Preview &amp; Print" aria-label="Preview &amp; Print">${ICO.leads}</button>
           <button class="icon-btn" data-action="delete-contract" title="Delete" aria-label="Delete">${ICO.trash}</button>
           <button class="icon-btn" data-action="close-contract-builder" aria-label="Close">${ICO.x}</button>
@@ -8745,13 +8739,18 @@ function renderContractBuilderModal(){
         ${isCreative? renderCreativeFieldsSection(c) : renderContractPerformerSection(c)}
         ${c.template==='multiline' ? renderContractLineItemsSection(c) : ''}
         ${renderContractFeeSection(c)}
-        ${!isCreative? renderTravelClauseSection(c) : ''}
         ${c.template==='comedian' ? renderComedianFieldsSection(c) : ''}
+        <!-- Owner 2026-11-05 ("a shorter Contract Builder"): the terms that rarely change for a singer fold away;
+             they're already filled from the singer's defaults. -->
+        <button class="btn btn-ghost btn-block" data-action="toggle-contract-more-terms" data-testid="more-terms" aria-expanded="${S.contractMoreTerms?'true':'false'}">${S.contractMoreTerms? 'Hide more terms' : 'More terms'} <span style="font-weight:400;color:var(--ink-3);margin-left:6px;">${esc(contractMoreTermsSummary(c))}</span></button>
+        ${S.contractMoreTerms? `
+        ${renderContractFeeMoreSection(c)}
+        ${!isCreative? renderTravelClauseSection(c) : ''}
         ${!isCreative? renderContractCancellationSection(c) : ''}
         ${!isCreative? renderContractBoilerplateSection(c) : renderCreativeBoilerplateSection(c)}
         ${!isCreative? renderContractProvidesSection(c) : ''}
         ${c.template==='multiline' ? renderBarterSection(c) : ''}
-        ${renderContractCustomClausesSection(c)}
+        ${renderContractCustomClausesSection(c)}` : ''}
         <div class="field"><label>Internal Notes (not printed)</label><textarea data-contract-field="notes" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(c.notes||'')}</textarea></div>
 
         <button class="btn btn-primary btn-block" data-action="close-contract-builder">Done</button>
@@ -8826,7 +8825,7 @@ function renderContractFeeSection(c){
   const figures = contractPaymentFigures(c);
   const isCreative = c.template==='creative';
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
-    <h3 style="font-size:13.5px;margin:0;">Fee, Deposit${isCreative?'':' &amp; Overtime'}</h3>
+    <h3 style="font-size:13.5px;margin:0;">Fee &amp; Deposit</h3>
     <div class="field-row">
       <div class="field"><label>${isCreative?'Creative Fee ($)':'Total Fee ($)'}</label><input type="number" data-contract-field="fee.amount" data-focus-key="fee.amount" data-live value="${esc(c.fee.amount||0)}" ${c.template==='multiline'?'readonly title="Auto-summed from line items + add-ons below"':''}/></div>
       <div class="field"><label>Fee Note (optional)</label><input data-contract-field="fee.note" value="${esc(c.fee.note||'')}" placeholder="e.g. including Travel Expenses, cash only"/></div>
@@ -8836,6 +8835,27 @@ function renderContractFeeSection(c){
       <div class="field"><label>Deposit (% of total, optional)</label><input type="number" data-contract-field="deposit.percent" data-focus-key="deposit.percent" data-live value="${esc(String(c.deposit.percent||0))}" placeholder="0 = use $ amount"/></div>
     </div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;"><input type="checkbox" data-contract-field="deposit.nonRefundable" ${c.deposit.nonRefundable?'checked':''}/> Deposit is non-refundable</label>
+    <div class="ledger" style="margin-top:4px;">
+      <div class="ledger-row"><span>Total</span><span class="amt">${money(figures.total)}</span></div>
+      <div class="ledger-row"><span>Deposit${Number(c.deposit.percent)>0?` (${esc(String(c.deposit.percent))}%)`:''}</span><span class="amt">${moneyExact(figures.deposit)}</span></div>
+      <div class="ledger-row total"><span>Balance</span><span class="amt">${moneyExact(figures.balance)}</span></div>
+    </div>
+  </div>`;
+}
+// The one-line summary on the More terms button.
+function contractMoreTermsSummary(c){
+  const bits = [];
+  bits.push(c.balanceDueTiming==='at_event' ? 'balance at the event' : c.balanceDueTiming==='on_completion' ? 'balance on completion' : 'balance before the event');
+  if(c.template!=='creative') bits.push(c.overtime.interval==='not_applicable' ? 'no overtime' : Number(c.overtime.rate) ? `overtime ${money(Number(c.overtime.rate))}/${overtimeIntervalLabel(c.overtime.interval)}` : 'overtime not set');
+  if(contractTravelSentence(c.travelClause)) bits.push('travel');
+  if((c.customClauses||[]).length) bits.push(`${c.customClauses.length} custom clause${c.customClauses.length===1?'':'s'}`);
+  return bits.join(' · ');
+}
+// The fee section's rarely-changed half (balance timing, discount, overtime), shown under More terms.
+function renderContractFeeMoreSection(c){
+  const isCreative = c.template==='creative';
+  return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
+    <h3 style="font-size:13.5px;margin:0;">Balance${isCreative?'':' &amp; Overtime'}</h3>
     <div class="field"><label>Balance Due</label>
       <div class="chip-row">
         <button class="filter-chip ${c.balanceDueTiming==='prior'?'sel':''}" data-action="pick-balance-due-timing" data-value="prior">Prior to the engagement</button>
@@ -8855,11 +8875,6 @@ function renderContractFeeSection(c){
         </div>
       </div>
     </div>` : ''}
-    <div class="ledger" style="margin-top:4px;">
-      <div class="ledger-row"><span>Total</span><span class="amt">${money(figures.total)}</span></div>
-      <div class="ledger-row"><span>Deposit${Number(c.deposit.percent)>0?` (${esc(String(c.deposit.percent))}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
-      <div class="ledger-row total"><span>Balance</span><span class="amt">${money(figures.balance)}</span></div>
-    </div>
   </div>`;
 }
 function renderContractCancellationSection(c){
@@ -9095,7 +9110,7 @@ function standardAgreementTerms(c){
   const pct = Number(c.deposit.percent)>0 ? `${Number(c.deposit.percent)}%` : (figures.total && figures.deposit ? `${Math.round(figures.deposit/figures.total*100)}%` : '');
   const timing = c.balanceDueTiming==='at_event' ? 'at the event' : c.balanceDueTiming==='on_completion' ? 'when the project is complete' : 'prior to the engagement';
   const terms = ['Contract is not binding until the deposit is received.'];
-  terms.push(`A ${c.deposit.nonRefundable?'non-refundable ':''}deposit of ${money(figures.deposit)}${pct?` (${pct})`:''} is required to confirm the date. The outstanding balance of ${money(figures.balance)}${plusTravel} is to be paid ${timing}.`);
+  terms.push(`A ${c.deposit.nonRefundable?'non-refundable ':''}deposit of ${moneyExact(figures.deposit)}${pct?` (${pct})`:''} is required to confirm the date. The outstanding balance of ${moneyExact(figures.balance)}${plusTravel} is to be paid ${timing}.`);
   if(c.overtime.interval==='not_applicable') terms.push('Overtime: N/A.');
   else if(Number(c.overtime.rate)) terms.push(`If the Artist is asked to stay beyond the agreed upon time, then a ${money(Number(c.overtime.rate))} per ${overtimeIntervalLabel(c.overtime.interval)} charge shall be paid in overtime fees.`);
   if(travel) terms.push(`Travel (${travel.replace(/^plus /,'')}) is booked by ASP Management and invoiced together with the final balance.`);
@@ -9125,7 +9140,7 @@ function standardDocContent(c){
   const travel = contractTravelSentence(c.travelClause);
   const plusTravel = travel ? ' plus travel expenses' : '';
   const pct = Number(c.deposit.percent)>0 ? `${Number(c.deposit.percent)}%` : (figures.total && figures.deposit ? `${Math.round(figures.deposit/figures.total*100)}%` : '');
-  const depositLabel = `${money(figures.deposit)}${pct?` (${pct})`:''}`;
+  const depositLabel = `${moneyExact(figures.deposit)}${pct?` (${pct})`:''}`;
   const dateObj = c.snapshot.eventDate ? new Date(c.snapshot.eventDate+'T00:00:00') : null;
   const dateLong = dateObj ? dateObj.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'}) : 'TBD';
   const dateShort = dateObj ? dateObj.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) : 'Date TBD';
@@ -9207,8 +9222,8 @@ function comedianDocContent(c){
     <div class="doc-section"><h3>1. Compensation</h3>
       <div class="ledger" style="margin-bottom:8px;">
         <div class="ledger-row"><span>Total Fee${c.fee.note?` (${esc(c.fee.note)})`:''}</span><span class="amt">${contractFeeDisplayHtml(c, figures)}${travelSentence?` ${esc(travelSentence)}`:''}</span></div>
-        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${Number(c.deposit.percent)>0?` (${esc(String(c.deposit.percent))}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
-        <div class="ledger-row total"><span>Balance Due</span><span class="amt">${money(figures.balance)}</span></div>
+        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${Number(c.deposit.percent)>0?` (${esc(String(c.deposit.percent))}%)`:''}</span><span class="amt">${moneyExact(figures.deposit)}</span></div>
+        <div class="ledger-row total"><span>Balance Due</span><span class="amt">${moneyExact(figures.balance)}</span></div>
       </div>
       <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
       <p style="font-size:12.5px;margin:4px 0 0;">Additional Expenses: ${esc(c.additionalExpenses||'N/A')}</p>
@@ -9266,8 +9281,8 @@ function multilineDocContent(c){
     <div class="doc-section"><h3>Payment Terms</h3>
       <div class="ledger" style="margin-bottom:8px;">
         <div class="ledger-row"><span>Total Payment</span><span class="amt">${contractFeeDisplayHtml(c, figures)}</span></div>
-        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${Number(c.deposit.percent)>0?` (${esc(String(c.deposit.percent))}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
-        <div class="ledger-row total"><span>Balance Due</span><span class="amt">${money(figures.balance)}</span></div>
+        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${Number(c.deposit.percent)>0?` (${esc(String(c.deposit.percent))}%)`:''}</span><span class="amt">${moneyExact(figures.deposit)}</span></div>
+        <div class="ledger-row total"><span>Balance Due</span><span class="amt">${moneyExact(figures.balance)}</span></div>
       </div>
       <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
       ${contractOvertimeHtml(c)}
@@ -9311,8 +9326,8 @@ function creativeDocContent(c){
     <div class="doc-section"><h3>Payment Terms</h3>
       <div class="ledger" style="margin-bottom:8px;">
         <div class="ledger-row"><span>Total Fee</span><span class="amt">${contractFeeDisplayHtml(c, figures)}</span></div>
-        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${Number(c.deposit.percent)>0?` (${esc(String(c.deposit.percent))}%)`:''}</span><span class="amt">${money(figures.deposit)}</span></div>
-        <div class="ledger-row total"><span>Balance Due</span><span class="amt">${money(figures.balance)}</span></div>
+        <div class="ledger-row"><span>Deposit${c.deposit.nonRefundable?' (non-refundable)':''}${Number(c.deposit.percent)>0?` (${esc(String(c.deposit.percent))}%)`:''}</span><span class="amt">${moneyExact(figures.deposit)}</span></div>
+        <div class="ledger-row total"><span>Balance Due</span><span class="amt">${moneyExact(figures.balance)}</span></div>
       </div>
       <p style="font-size:12.5px;margin:0;">${esc(contractBalanceDueText(c, figures))}</p>
     </div>
@@ -10023,8 +10038,7 @@ function doMarkDeposit(id, extra={}){
    the logged-exception path, never a silently-assumed match. */
 function doMarkDepositVerified(id){
   const ev = getEvent(id); if(!ev) return;
-  const note = (S.verifyDepositForm.note||'').trim();
-  if(!note){ toast('Add a short note on how you verified this before confirming.', 'system'); return; }
+  const note = (S.verifyDepositForm.note||'').trim();   // optional since 2026-11-05 (one Record deposit button)
   const method = S.verifyDepositForm.method||'other';
   S.showVerifyDeposit = false; S.verifyDepositForm = {};
   doConfirmBooking(id, { method, note });
@@ -10036,7 +10050,8 @@ function doConfirmBooking(id, {method, note} = {}){
   // booked, deposit received, activity log, client confirmation email) and the log line together.
   // "Confirmed" is status booked/paid -- the separate ev.bookingStatus field (migration 0020) is no
   // longer written (2026-10-09 audit 3.9: two status fields with no mapping).
-  logEvent(ev, 'system', `Deposit verified (${method||'manual'}): ${note||'—'}.`);
+  const methodLabel = (DEPOSIT_METHODS.find(([k])=>k===method)||[])[1] || method || 'manual';
+  logEvent(ev, 'system', `Deposit recorded (${methodLabel})${note? ': '+note : ''}.`);
   const depositVerification = { method: method||null, note: note||null, loggedBy: S.user, loggedAt: new Date().toISOString() };
   if(!doMarkDeposit(id, { depositVerification })) return;
   // Best-effort structured audit trail (booking_exceptions/booking_status_history, migration 0021)
@@ -11324,6 +11339,9 @@ function bindGlobal(){
       case 'add-custom-clause': doAddCustomClause(S.contractBuilderId); break;
       case 'remove-custom-clause': doRemoveCustomClause(S.contractBuilderId, id); break;
       case 'view-contract-builder-doc': S.showContractBuilderDoc=true; render(); break;
+      case 'toggle-contract-more-terms': S.contractMoreTerms = !S.contractMoreTerms; render(); break;
+      // Owner 2026-11-05: one button -- approves these terms and opens the preview; Send to client is on the preview.
+      case 'review-and-send-contract': { const c=getContract(id); if(c && !isContractApproved(c)) doApproveContractForSending(id); S.showContractBuilderDoc=true; render(); break; }
       case 'close-contract-builder-doc': S.showContractBuilderDoc=false; render(); break;
       case 'contractbuilderdoc-overlay-close': if(e.target===t){ S.showContractBuilderDoc=false; render(); } break;
       case 'print-contract-builder': window.print(); break;

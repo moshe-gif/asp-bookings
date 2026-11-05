@@ -1,12 +1,12 @@
 """
-Durable booking record architecture, PR 6: the audited "Verify Deposit & Confirm" flow
-(doMarkDepositVerified/doConfirmBooking in frontend/workspaces/asp.js), alongside the existing
-blind "Mark Booking Fee Received" button — real clicks only, no state shortcuts, per this
+Recording a deposit that didn't come in online: one Record deposit button (owner 2026-11-05; it replaced
+"Mark Booking Fee Received" and "Verify Deposit & Confirm") -- doMarkDepositVerified/doConfirmBooking in
+frontend/workspaces/asp.js — real clicks only, no state shortcuts, per this
 harness's standing convention.
 
 Runs as admin_bookings (Contract Builder/admin-only actions are not visible to admin_ceo).
 """
-from helpers import login_as, collect_console_errors, mark_contract_sent_from_event_sheet, create_lead
+from helpers import login_as, collect_console_errors, mark_contract_sent_from_event_sheet, create_lead, record_deposit
 
 
 def _create_lead_to_contract_sent(page, client_name):
@@ -21,77 +21,58 @@ def _create_lead_to_contract_sent(page, client_name):
     assert "Contract Sent" in sheet.inner_text(), "lead didn't reach Contract Sent after marking its contract sent"
 
 
-def test_verify_deposit_button_present_alongside_existing_mark_deposit(live_server, page):
+def test_one_record_deposit_button(live_server, page):
+    """Owner 2026-11-05: one Record deposit button replaces "Mark Booking Fee Received" and "Verify Deposit"."""
     errors = collect_console_errors(page)
     page.goto(live_server)
     login_as(page, "admin_bookings")
     _create_lead_to_contract_sent(page, "Test Harness Deposit Gate")
 
     sheet = page.locator(".sheet")
-    assert sheet.locator('[data-action="mark-deposit"]').is_visible(), (
-        "existing blind Mark Booking Fee Received button missing — PR 6 must not replace it"
-    )
-    assert sheet.locator('[data-action="open-verify-deposit"]').is_visible(), (
-        "new Verify Deposit & Confirm (audited) button missing"
-    )
+    assert sheet.locator('[data-testid="record-deposit"]').is_visible(), "Record deposit button missing"
+    assert sheet.locator('[data-action="mark-deposit"]').count() == 0, "the old Mark Booking Fee Received button is still there"
+    assert "isn't connected" not in page.locator("body").inner_text()
     assert not errors, f"console errors after reaching Contract Sent: {errors}"
 
 
-def test_verify_deposit_blocks_empty_note(live_server, page):
+def test_record_deposit_without_note_books_the_gig(live_server, page):
     errors = collect_console_errors(page)
     page.goto(live_server)
     login_as(page, "admin_bookings")
     _create_lead_to_contract_sent(page, "Test Harness Empty Note")
 
-    page.locator('[data-action="open-verify-deposit"]').click()
-    modal = page.locator('[data-form="verifydeposit"]')
-    assert modal.is_visible(), "Verify Deposit modal didn't open"
-
-    page.locator('[data-action="confirm-verify-deposit"]').click()
-    # The gate (doMarkDepositVerified) returns early on an empty note -- modal must still be open,
-    # not silently confirmed.
-    assert modal.is_visible(), "modal closed / booking confirmed despite no verification note"
-    assert not errors, f"console errors during empty-note gate check: {errors}"
+    record_deposit(page, "zelle")
+    assert page.get_by_text("Booking Confirmation").is_visible(), "booking confirmation didn't open"
+    page.locator('[data-action="close-booking-confirmation"]').click()
+    text = page.locator(".sheet").inner_text()
+    assert "Booked" in text and "Deposit recorded (Zelle)." in text, "deposit not recorded without a note"
+    assert not errors, f"console errors: {errors}"
 
 
-def test_verify_deposit_with_note_confirms_booking_and_logs_audit_trail(live_server, page):
+def test_record_deposit_with_method_and_note_logs_it(live_server, page):
     errors = collect_console_errors(page)
     page.goto(live_server)
     login_as(page, "admin_bookings")
     _create_lead_to_contract_sent(page, "Test Harness Verified Deposit")
 
-    page.locator('[data-action="open-verify-deposit"]').click()
-    modal = page.locator('[data-form="verifydeposit"]')
-    modal.locator('select[data-field="method"]').select_option("wire")
-    modal.locator('textarea[data-field="note"]').fill("Wire confirmed by bank statement, test harness.")
-    page.locator('[data-action="confirm-verify-deposit"]').click()
-
-    # doConfirmBooking runs doMarkDeposit's real existing effects -- status flips to Booked and the
-    # booking-confirmation modal opens, exactly like the original blind-click flow.
+    record_deposit(page, "wire", "Wire confirmed by bank statement, test harness.")
     assert page.get_by_text("Booking Confirmation").is_visible(), (
-        "booking confirmation modal didn't open after a verified deposit"
+        "booking confirmation modal didn't open after recording the deposit"
     )
     page.locator('[data-action="close-booking-confirmation"]').click()
 
     sheet = page.locator(".sheet")
-    assert "Booked" in sheet.inner_text(), "event status didn't flip to Booked after verified deposit"
     activity_text = sheet.inner_text()
-    assert "Deposit verified (wire)" in activity_text, (
-        "activity log missing the new structured verification entry"
-    )
-    assert "Wire confirmed by bank statement" in activity_text, (
-        "verification note not recorded in the activity log"
-    )
-    assert not errors, f"console errors during verified-deposit confirm flow: {errors}"
+    assert "Booked" in activity_text, "event status didn't flip to Booked"
+    assert "Deposit recorded (Wire): Wire confirmed by bank statement" in activity_text, "method/note not in the activity log"
+    assert not errors, f"console errors during the record-deposit flow: {errors}"
 
 
-def test_concurrent_mark_deposit_surfaces_conflict_instead_of_silent_overwrite(live_server, page):
+def test_concurrent_record_deposit_surfaces_conflict_instead_of_silent_overwrite(live_server, page):
     """
-    Navigation/data-layer refactor PR 13: doMarkDeposit (the original blind "Mark Booking Fee
-    Received" button) now goes through updateEvent() too. Two real tabs (same browser context,
-    same localStorage) both load the same contract_sent event; tab B marks the deposit received
-    first; tab A, still holding its stale in-memory copy, then tries the same -- this must surface
-    a conflict toast, not silently re-save tab A's stale view over tab B's write.
+    Two real tabs both load the same contract_sent event; tab B records the deposit first; tab A, still
+    holding its stale copy, then tries the same -- this must surface a conflict toast, not silently
+    re-save tab A's stale view over tab B's write (updateEvent()'s concurrency check).
     """
     errors_a = collect_console_errors(page)
     page.goto(live_server)
@@ -103,17 +84,14 @@ def test_concurrent_mark_deposit_surfaces_conflict_instead_of_silent_overwrite(l
     page_b.goto(live_server)
     login_as(page_b, "admin_bookings")
     page_b.get_by_text("Test Harness Concurrent Deposit").first.click()
-    page_b.locator('[data-action="mark-deposit"]').click()
+    record_deposit(page_b)
     assert page_b.get_by_text("Booking Confirmation").is_visible()
     page_b.locator('[data-action="close-booking-confirmation"]').click()
     page_b.close()
 
-    # Tab A never reloaded -- its in-memory copy still says contract_sent with no updatedAt from
-    # tab B's write. Marking the deposit from here must hit updateEvent()'s conflict path.
-    page.locator('[data-action="mark-deposit"]').click()
-
+    record_deposit(page)
     assert page.get_by_text("changed elsewhere since you loaded it").is_visible(), (
-        "stale tab's mark-deposit attempt did not surface the expected conflict toast"
+        "stale tab's record-deposit attempt did not surface the expected conflict toast"
     )
     assert not errors_a, f"console errors in tab A: {errors_a}"
     assert not errors_b, f"console errors in tab B: {errors_b}"

@@ -290,3 +290,21 @@ def pick_template(page, template="standard"):
         option.click()
     else:
         assert template == "standard", f"no template picker (one-artist wedding?) but the test wanted {template!r}"
+
+
+def record_deposit(page, method="zelle", note=""):
+    """The one Record deposit button (owner 2026-11-05): pick how the money came in, optional note, book."""
+    page.locator('.sheet [data-testid="record-deposit"]').click()
+    modal = page.locator('[data-form="verifydeposit"]')
+    modal.locator('select[data-field="method"]').select_option(method)
+    if note:
+        modal.locator('textarea[data-field="note"]').fill(note)
+    page.locator('[data-testid="confirm-record-deposit"]').click()
+
+
+def open_more_terms(page):
+    """Contract Builder: show the terms folded under More terms (stays open for the session)."""
+    btn = page.locator('[data-testid="more-terms"]').first
+    btn.wait_for(state="visible")
+    if btn.get_attribute("aria-expanded") != "true":
+        btn.click()

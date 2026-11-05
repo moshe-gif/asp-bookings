@@ -47,7 +47,8 @@ export function depositCentsOf(ev: Doc, contracts: Doc[]): number {
   const c = live.find((x) => x.status === "signed") || live.find((x) => x.status === "sent") || live[0];
   if (c && c.fee && c.deposit) {
     const total = Number(c.fee.amount) || 0;
-    const dep = Number(c.deposit.percent) > 0 ? Math.round(total * Number(c.deposit.percent) / 100) : Number(c.deposit.amount) || 0;
+    // The exact percent, to the cent (owner 2026-11-05 "do exact amount"; it used to round to whole dollars).
+    const dep = Number(c.deposit.percent) > 0 ? Math.round(total * Number(c.deposit.percent)) / 100 : Number(c.deposit.amount) || 0;
     if (dep > 0) return Math.round(dep * 100);
   }
   return Math.round(((Number(ev.commission) || 0) + extraArtists(ev).reduce((t, x) => t + (Number(x.aspCut) || 0), 0)) * 100);

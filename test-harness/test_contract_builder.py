@@ -8,7 +8,7 @@ Comedian contract with the No-Recording/credit-future cancellation defaults, a M
 with line items + add-ons matching the real Stein package numbers and its tiered cancellation
 schedule, live fee/deposit math, and reload persistence.
 """
-from helpers import login_as, goto_nav, collect_console_errors, create_lead, pick_template
+from helpers import login_as, goto_nav, collect_console_errors, create_lead, pick_template, open_more_terms
 
 
 
@@ -17,6 +17,7 @@ def create_contract_from_lead(page, template):
     pick_template(page, template)
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
+    open_more_terms(page)   # these tests check the folded terms too
     return builder
 
 
@@ -358,6 +359,7 @@ def test_v2_contract_migrates_split_boilerplate_without_data_loss(live_server, p
     page.locator("tr", has_text="Legacy Client").click()
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
+    open_more_terms(page)
 
     for key in ["runOfShowApproval", "bandSoundLightingApproval", "adsGraphicsApproval", "mediaReleaseApproval"]:
         # Standard agreement: an inherited extra term shows as a removable chip (owner 2026-10-15).
@@ -482,4 +484,41 @@ def test_sent_contract_keeps_the_payee_it_was_sent_with(live_server, page):
     c2 = page.evaluate("""() => JSON.parse(localStorage.getItem('asp_mock_contracts_v1')).find(x => x.snapshot.clientName === 'Frozen Payee Client')""")
     assert c2["payeeSnapshot"]["entityName"] == original, "sent contract's payee was rewritten by a later payee edit"
     assert "CHANGED AFTER SENDING LLC" not in text, "sent contract was rewritten by a later payee edit"
+    assert not errors, f"console errors: {errors}"
+
+
+def test_review_and_send_approves_and_shows_the_preview_first(live_server, page):
+    """Owner 2026-11-05: one Review & send button -- approves the terms and opens the preview; Send is on the preview."""
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    create_lead(page, "Review Send Client", "2027-08-02", artist_id="eli")
+    builder = create_contract_from_lead(page, "standard")
+    builder.locator('[data-testid="review-and-send"]').click()
+    doc = page.locator('#contractBuilderPrintHost .doc')
+    doc.wait_for(state='visible')
+    assert doc.locator('[data-action="open-send-contract"]').count() == 1, "no Send to client on the preview"
+    assert page.locator('#sendContractOverlayHost .modal').count() == 0, "the send dialog opened before the preview"
+    page.locator('[data-action="close-contract-builder-doc"]').first.click()
+    assert "Approved for sending" in page.locator('#contractBuilderOverlayHost .sheet').inner_text(), "Review & send didn't approve"
+    assert not errors, f"console errors: {errors}"
+
+
+def test_deposit_is_exact_to_the_cent(live_server, page):
+    """Owner 2026-11-05 "do exact amount": 15% of $10 is $1.50 on the builder and the contract, not $2."""
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    create_lead(page, "Exact Deposit Client", "2027-12-02", artist_id="benny")
+    builder = create_contract_from_lead(page, "standard")
+    fee_input = builder.locator('input[data-contract-field="fee.amount"]')
+    fee_input.fill("10"); fee_input.blur()
+    percent_input = builder.locator('input[data-contract-field="deposit.percent"]')
+    percent_input.fill("15"); percent_input.blur()
+    ledger = builder.locator('.ledger').first.inner_text()
+    assert "$1.50" in ledger and "$8.50" in ledger, ledger
+    builder.locator('[data-action="view-contract-builder-doc"]').click()
+    doc = page.locator('#contractBuilderPrintHost .doc')
+    doc.wait_for(state='visible')
+    assert "$1.50" in doc.inner_text() and "$2 (15%)" not in doc.inner_text()
     assert not errors, f"console errors: {errors}"

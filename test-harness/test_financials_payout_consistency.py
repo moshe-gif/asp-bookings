@@ -8,7 +8,7 @@ through. This reproduces the original bug scenario end to end and confirms both 
 
 Runs as admin_bookings.
 """
-from helpers import login_as, collect_console_errors, mark_contract_sent_from_event_sheet
+from helpers import record_deposit, login_as, collect_console_errors, mark_contract_sent_from_event_sheet
 
 
 def test_all_jobs_and_artist_payouts_tables_agree_with_a_post_signing_charge(live_server, page):
@@ -29,7 +29,7 @@ def test_all_jobs_and_artist_payouts_tables_agree_with_a_post_signing_charge(liv
     # Lead -> contract_sent -> booked (deposit) -> balance received, so the event qualifies for
     # BOTH Financials tables ("All Jobs" = status booked/paid; "Artist Payouts" = balanceReceived).
     mark_contract_sent_from_event_sheet(page)
-    page.locator('[data-action="mark-deposit"]').click()
+    record_deposit(page)
     page.locator('[data-action="close-booking-confirmation"]').click()
     page.locator('[data-action="mark-balance"]').click()
 
@@ -53,4 +53,8 @@ def test_all_jobs_and_artist_payouts_tables_agree_with_a_post_signing_charge(liv
     assert payouts == {"$3,700"}, (
         f"All Jobs and Artist Payouts tables disagree on this event's payout: {payouts}"
     )
+    # One way to pay singers (owner 2026-11-05): the monthly payouts; no per-gig Owed tiles or Mark Paid Out.
+    assert page.locator('[data-action="toggle-artist-paidout"]').count() == 0, "per-gig Mark Paid Out is still there"
+    assert "In a monthly payout" in all_jobs_row.last.inner_text() or "In a monthly payout" in page.locator("#app").inner_text()
+    assert "Owed to Artists" not in page.locator("#app").inner_text()
     assert not errors, f"console errors during the payout-consistency flow: {errors}"
