@@ -2300,27 +2300,11 @@ function travelRequestEmailHtml(tr){
     <div class="doc-foot">Sent from ${esc(brand.label||'ASP')} Bookings.</div>
   </div></body></html>`;
 }
-// Self-contained (no CSS custom properties -- those only exist inside the app's own stylesheet,
-// not in a standalone outbound email) equivalent of renderZelleQrBlock() for real emails. Same
-// zelleProfileForEvent() resolution, so "never cross-send one artist's QR to another" holds here
-// exactly as it does in the in-app preview.
-function zelleQrEmailBlock(ev, artist){
-  const payee = zellePayeeFor(ev);
-  if(!payee) return '';
-  const profile = payee.profile;
-  const usingRealQr = !!profile.zelleQrDataUrl;
-  const label = payee.label;
-  return `<div style="text-align:center;padding:16px;background:#F5F4EF;border-radius:10px;margin:16px 0;">
-    <img src="${usingRealQr? safeDataUrl(profile.zelleQrDataUrl) : esc(zelleQrUrl(ev,artist,profile))}" alt="Zelle QR code" width="180" height="180" style="border-radius:8px;background:#fff;padding:8px;"/>
-    <div style="font-size:11.5px;color:#67676D;margin-top:8px;">${esc(label)}</div>
-    ${profile && profile.zelleInstructions? `<div style="font-size:11px;color:#9A9AA1;margin-top:4px;">${esc(profile.zelleInstructions)}</div>` : ''}
-  </div>`;
-}
 /* ---- The client payment section (owner 2026-10-14; mockup "ASP Payment Mockup") ----
    One look wherever a client is asked to pay (contract, invoice, booking confirmation, reminders):
      1. Pay online (card or bank transfer): the main button, when there's a link;
-     2. Zelle: "Scan here to pay the deposit/balance", with the right account's QR -- ASP's for
-        deposits and invoices (Settings → Online payments), the artist's payee profile for balances;
+     2. Zelle: "Scan here to pay the deposit/balance", with ASP's QR (Settings → Online payments) -- for
+        balances too since 2026-11-09 (ASP collects all the money and pays the singers monthly);
      3. one footnote line: to pay by check or cash, call the office.
    Inline styles and plain blocks only, so it survives email clients. The server's twin for scheduled
    emails is supabase/functions/_shared/payblock.ts -- keep the two in step. */
@@ -2360,17 +2344,9 @@ function depositZelle(){
   if(p && p.zelleActive!==false && (p.zelle || p.zelleQrUrl)) return { qrUrl: p.zelleQrUrl||null, handle: p.zelle||'', label: p.zelleRecipientLabel||p.zelle||'' };
   return null;
 }
-// Zelle for a gig's balance: the artist's payee profile (never another artist's -- zellePayeeFor).
-// A gig with several artists gets none: one Zelle can't split its balance (the client pays online, or calls).
-function balanceZelle(ev){
-  if(gigExtraArtists(ev).length) return null;
-  const payee = zellePayeeFor(ev); if(!payee) return null;
-  const prof = payee.profile;
-  // Only the public copy (https): an email can't show an image embedded as data:, so without one the
-  // client gets the Zelle address instead.
-  const qrUrl = /^https:\/\//.test(prof.zelleQrUrl||'') ? prof.zelleQrUrl : null;
-  return { qrUrl, handle: payee.identifier, label: payee.label, note: prof.zelleInstructions||'' };
-}
+// Zelle for a gig's balance: ASP's, like the deposit (owner 2026-11-09: ASP collects all the money and pays the
+// singers monthly). Same rule as balanceZelle() in supabase/functions/_shared/payblock.ts.
+function balanceZelle(ev){ return depositZelle(); }
 // Puts an image the office uploads (a Zelle QR) in the public "brand-public" store (0059) and returns
 // its https:// address: email clients won't show images embedded in the message itself.
 async function uploadBrandImage(file, prefix){
@@ -2429,7 +2405,9 @@ function sendClientNoticeEmail(ev, subject, html){ return sendEmail({ to: ev.cli
 function balanceHowSentence(ev, payUrl){
   if(!isStandardPayment(ev)) return ` (${esc(paymentMethodLabel(ev))})`;
   if(payUrl) return ` — pay online with the button below${balanceZelle(ev)?', or by Zelle':''}`;
-  return gigExtraArtists(ev).length ? ' — please contact our office for how to pay' : zellePaymentSentence(ev);
+  const z = balanceZelle(ev);
+  if(!z) return ' — please contact our office for how to pay';
+  return z.handle ? ' via Zelle — scan the code below or send it to '+esc(z.handle) : ' via Zelle — scan the code below';
 }
 function bookingConfirmationIntroHtml(ev, artist, balance, payUrl){
   return `<p style="margin:0 0 8px;">Hi ${esc((ev.clientName||'').split(' ')[0])},</p>
@@ -7405,58 +7383,18 @@ function paymentMethodLabel(ev){
 function altPaymentFollowUps(){
   return S.events.filter(e=>!e.unpaid && !isStandardPayment(e) && ['contract_sent','booked'].includes(e.status));
 }
-// Resolves strictly through the event's own artistId -- there is no path here that could hand
-// back a different artist's payee profile, which is what makes "never cross-send one artist's QR
-// to another" (ops automation spec item 5) hold structurally rather than by convention.
-function zelleProfileForEvent(ev, artist){
-  const profile = defaultPayeeProfileForArtist(ev.artistId);
-  return (profile && profile.zelleActive!==false) ? profile : null;
-}
-// Who the client pays by Zelle (2026-10-09 audit 2.4) -- in order:
-//   1. the payee on the lead's latest sent/signed contract (what the client agreed to pay), else
-//   2. the artist's OWN payee profile.
-// Never the artist's app login email (not a Zelle address), and never a silent fallback to the
-// house or another artist's profile. null (→ client is told to contact the office) when that payee
-// has no active Zelle details. zellePayeeReason() explains a null to staff.
+// The gig's balance payee (2026-10-09 audit 2.4): the payee on the lead's latest sent/signed contract, else the
+// artist's OWN payee profile -- never the house's or another artist's. Used for the balance pay link's payee; Zelle
+// itself now always goes to ASP (balanceZelle, 2026-11-09).
 function zellePayeeProfileFor(ev){
   const sent = contractsForLead(ev.id).find(c=>c.status==='sent' || c.status==='signed');
   return (sent && contractPayeeProfile(sent)) || PAYEE_PROFILES.find(p=>p.artistId===ev.artistId) || null;
 }
-function zellePayeeFor(ev){
-  const profile = zellePayeeProfileFor(ev);
-  if(!profile || profile.zelleActive===false || !(profile.zelle || profile.zelleQrDataUrl)) return null;
-  return { identifier: profile.zelle || '', label: profile.zelleRecipientLabel || profile.zelle || '', profile };
-}
-function zellePayeeReason(ev){
-  const profile = zellePayeeProfileFor(ev);
-  if(!profile) return 'has no payee profile yet';
-  if(profile.zelleActive===false) return `has Zelle switched off on the "${profile.entityName||profile.displayName||'payee'}" profile`;
-  return `has no Zelle details on the "${profile.entityName||profile.displayName||'payee'}" profile`;
-}
-function zellePaymentSentence(ev){
-  const payee = zellePayeeFor(ev);
-  if(!payee) return ' via Zelle — please contact the office for the Zelle details';
-  return payee.identifier ? ' via Zelle — scan the code below or send directly to '+esc(payee.identifier) : ' via Zelle — scan the code below';
-}
-function zelleQrUrl(ev, artist, profile){
-  const identifier = profile.zelle;
-  const zelleText = `Zelle payment to ${identifier} — ${money(artistPayout(ev))} for ${artist.name} (${ev.type}, ${fmtDateShort(ev.date)})`;
-  return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(zelleText)}`;
-}
 function renderZelleQrBlock(ev, artist){
-  const payee = zellePayeeFor(ev);
-  if(payee) return `<div style="background:#fff;color:#17171A;border-radius:var(--r-md);padding:4px 12px 12px;">${paymentOptionsEmailBlock({ kind:'balance', amount:clientBalanceDue(ev), memo:gigPaymentMemo(ev), zelle:balanceZelle(ev) })}</div>
-    ${(balanceZelle(ev)||{}).qrUrl || gigExtraArtists(ev).length ? '' : `<p style="font-size:10.5px;color:var(--ink-3);margin:10px 0 0;text-align:center;">No Zelle QR uploaded for this artist yet, so the email shows their Zelle address instead. Upload it in Settings → Payee Profiles.</p>`}`;
-  if(!payee) return `<p style="font-size:12px;color:var(--warn-ink);background:var(--warn-wash);padding:10px 12px;border-radius:var(--r-md);margin:0;">${esc(artist.name)} ${esc(zellePayeeReason(ev))} — the client will be told to contact the office for Zelle details. Fix it in Settings → Payee Profiles.</p>`;
-  const profile = payee.profile;
-  const usingRealQr = !!profile.zelleQrDataUrl;
-  const label = payee.label;
-  return `<div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px;background:var(--surface-2);border-radius:var(--r-md);">
-    <img src="${usingRealQr? safeDataUrl(profile.zelleQrDataUrl) : esc(zelleQrUrl(ev,artist,profile))}" alt="Zelle QR code" width="180" height="180" style="border-radius:8px;background:#fff;padding:8px;"/>
-    <span class="u-mono" style="font-size:11.5px;color:var(--ink-2);">${esc(label)}</span>
-    ${profile && profile.zelleInstructions? `<span style="font-size:11px;color:var(--ink-3);text-align:center;">${esc(profile.zelleInstructions)}</span>` : ''}
-  </div>
-  ${usingRealQr? '' : `<p style="font-size:10.5px;color:var(--ink-3);margin:14px 0 0;text-align:center;">QR points to a mock Zelle reference — upload this artist's real Zelle QR on their Payee Profile once available.</p>`}`;
+  // ASP's Zelle for every balance (owner 2026-11-09: ASP collects all the money, pays singers monthly).
+  const z = balanceZelle(ev);
+  if(!z) return `<p style="font-size:12px;color:var(--warn-ink);background:var(--warn-wash);padding:10px 12px;border-radius:var(--r-md);margin:0;">No ASP Zelle is set, so the client will be told to contact the office. Add it in Settings → Online payments.</p>`;
+  return `<div style="background:#fff;color:#17171A;border-radius:var(--r-md);padding:4px 12px 12px;">${paymentOptionsEmailBlock({ kind:'balance', amount:clientBalanceDue(ev), memo:gigPaymentMemo(ev), zelle:z })}</div>`;
 }
 function renderReminderPreview(){
   const ev = getEvent(S.eventId); if(!ev) return '';

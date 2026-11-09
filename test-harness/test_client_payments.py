@@ -196,8 +196,9 @@ def test_multi_artist_balance_is_the_whole_gig(page):
       return {{ multi: clientOwed(ev, gigAspCuts(ev)), main: artistPayout(ev), usual: clientOwed(one, gigAspCuts(one)), bigDeposit: clientOwed(one, 1125) }};
     }}""")
     assert out == {"multi": 11850, "main": 7600, "usual": 3825, "bigDeposit": 3375}, out
-    # One Zelle can't split the balance: a multi-artist gig gets none.
-    assert "if(gigExtraArtists(ev).length) return null;" in src
+    # Every balance's Zelle is ASP's (owner 2026-11-09: ASP collects all the money, pays singers monthly) --
+    # so a multi-artist gig gets it too.
+    assert "function balanceZelle(ev){ return depositZelle(); }" in src
 
 
 def test_settings_shows_the_mercury_bank_card(live_server, page):

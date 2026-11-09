@@ -64,18 +64,10 @@ export async function depositZelle(sb: Sb): Promise<Zelle | null> {
   return hq || hh ? { qrUrl: hq, handle: hh } : null;
 }
 
-// A gig's balance Zelle: its balance payee (balancePayeeProfile, the same choice as zellePayeeFor()
-// in the app). Never the house's or another artist's.
-// A gig with several artists gets none: one Zelle can't split the balance (they pay online, or call).
-export async function balanceZelle(sb: Sb, eventLegacyId: string): Promise<Zelle | null> {
-  if ((await orgSettings(sb)).zelleOff === true) return null;
-  const { data: evRow } = await sb.from("events").select("app_doc").eq("legacy_id", eventLegacyId).maybeSingle();
-  if (!evRow?.app_doc || isMultiArtist(evRow.app_doc)) return null;
-  const p = await balancePayeeProfile(sb, eventLegacyId, evRow.app_doc);
-  if (!p || p.zelleActive === false) return null;
-  const qrUrl = typeof p.zelleQrUrl === "string" && /^https:\/\//.test(p.zelleQrUrl) ? p.zelleQrUrl : null;
-  const handle = (p.zelle || "").trim();
-  return qrUrl || handle ? { qrUrl, handle, note: p.zelleInstructions || "" } : null;
+// ASP collects all the money and pays the singers monthly (owner 2026-11-09: balance Zelle -> "ASP billing@"), so a
+// balance goes to ASP's Zelle like a deposit -- for one-singer and multi-singer gigs alike.
+export async function balanceZelle(sb: Sb, _eventLegacyId: string): Promise<Zelle | null> {
+  return await depositZelle(sb);
 }
 
 export async function officePhone(sb: Sb, brandKey = "asp"): Promise<string | null> {
