@@ -24,6 +24,7 @@ import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 import { sendRelayEmail } from "../_shared/mail.ts";
 import { emailHeaderHtml, viaAsp } from "../_shared/config.ts";
+import { gigSheetEmailHtml } from "../_shared/gigsheet.ts";
 import { mintContractLink, mintBalanceLink } from "../_shared/paylinks.ts";
 import { clientOwedCentsOf, gigContracts } from "../_shared/connect.ts";
 import { paymentOptionsHtml, depositZelle, balanceZelle, officePhone } from "../_shared/payblock.ts";
@@ -90,12 +91,12 @@ Deno.serve(async (req) => {
   if (body.only === "submit_templates") return json({ ok: true, templates: await createTemplates360() });
 
   // Who's who, and what was already sent once (kind|gig|ref).
-  const { data: artists } = await sb.from("artists").select("id, legacy_id, name, whatsapp, role");
+  const { data: artists } = await sb.from("artists").select("id, legacy_id, name, whatsapp, role, email");
   const artistOf = (ref: string) => (artists || []).find((a: Row) => a.id === ref || a.legacy_id === ref);
   const nameOf = (ref: string) => artistOf(ref)?.name;
   const singersOf = (e: Row) => [e.artist_id || e.app_doc?.artistId, ...(((e.app_doc || {}).additionalArtists || []).map((x: Row) => x?.artistId))].filter(Boolean).map(String);
   const singerNames = (e: Row) => singersOf(e).map((r) => nameOf(r)).filter(Boolean).join(" & ") || "your event";
-  const onceKinds = ["deposit_confirmed", "contract_sent", "balance_paid", "gig_reminder", "flight_reminder", "office_signed", "office_deposit", "office_balance", "gig_form", "gig_form_wa", "office_payouts", "gig_form_nudge"];
+  const onceKinds = ["deposit_confirmed", "contract_sent", "balance_paid", "gig_reminder", "flight_reminder", "office_signed", "office_deposit", "office_balance", "gig_form", "gig_form_wa", "office_payouts", "gig_form_nudge", "gig_sheet", "thank_you"];
   const { data: doneRows } = await sb.from("client_followups").select("event_legacy_id, kind, ref").in("kind", onceKinds).eq("ok", true).limit(20000);
   const done = new Set((doneRows || []).map((d: Row) => `${d.kind}|${d.event_legacy_id}|${d.ref || ""}`));
   // When each gig's form was really sent (not the 'baseline' rows for gigs from before the form existed).
@@ -197,6 +198,18 @@ Deno.serve(async (req) => {
           [firstName(a.name), title, `${fmtDate(e.date)}${fmtTime(ev.time) ? `, ${fmtTime(ev.time)}` : ""}`, place]);
       }
     }
+    // A week before: the gig sheet by email to each singer on the gig (owner 2026-11-09), once per singer.
+    if (e.date === plusDays(nyToday(), 7) && !ev.unpaid) {
+      for (const ref of singersOf(e)) {
+        const a = artistOf(ref), key = `gig_sheet|${e.legacy_id}|${a?.id || ""}`;
+        if (!a?.email || done.has(key) || results.length >= MAX_SENDS_PER_RUN) continue;
+        done.add(key);
+        if (dryRun) { results.push({ kind: "gig_sheet", gig: e.legacy_id, to: a.email, dryRun: true, ok: true }); continue; }
+        const sent = await sendRelayEmail(sb, { to: a.email, subject: `Gig sheet — ${ev.type || "Gig"}, ${fmtDate(e.date)}`, html: gigSheetEmailHtml(ev, a.name, fmtDate(e.date), phone), brand: "asp" });
+        await sb.from("client_followups").insert({ event_legacy_id: e.legacy_id, kind: "gig_sheet", ref: String(a.id), sent_to: a.email, ok: sent.ok, error: sent.ok ? null : sent.error });
+        results.push({ kind: "gig_sheet", gig: e.legacy_id, ok: sent.ok, error: sent.error });
+      }
+    }
     const f = ev.flight || {};
     const departDay = String(f.depart || "").slice(0, 10);
     if (departDay === inThree && (f.flightNumber || f.airline)) {
@@ -210,6 +223,29 @@ Deno.serve(async (req) => {
   // The 1st of the month: the office sends singers' monthly payouts (owner 2026-11-09: "1st of the month, I send").
   if (!previewTo && officeTo && nyToday().endsWith("-01")) await once("office_payouts", "PAYOUTS", nyToday().slice(0, 7), officeTo, "office_alert",
     ["it's the 1st: this month's singer payouts are ready to review and send (Financials → Monthly Payouts)."]);
+  // The day after: thank the client and ask for a few words we can share (owner 2026-11-09: "thank you and
+  // testimonial"). Their reply goes to the office (the email's reply-to). Yesterday's gigs, queried on their own.
+  if (!previewTo) {
+    const { data: yesterday } = await sb.from("events").select("legacy_id, status, date, artist_id, app_doc").in("status", ["booked", "paid"]).eq("date", plusDays(nyToday(), -1));
+    for (const e of yesterday || []) {
+      const ev: Row = e.app_doc || {};
+      const clientTo = String(ev.clientEmail || "").trim();
+      if (!ev.unpaid && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clientTo) && !done.has(`thank_you|${e.legacy_id}|`) && results.length < MAX_SENDS_PER_RUN) {
+        done.add(`thank_you|${e.legacy_id}|`);
+        const singers = singerNames(e), artist = singers === "your event" ? "" : singers;
+        if (dryRun) results.push({ kind: "thank_you", gig: e.legacy_id, to: clientTo, dryRun: true, ok: true });
+        else {
+          const sent = await sendRelayEmail(sb, { to: clientTo, subject: viaAsp(artist, "Thank you"), brand: "asp", html: emailHtml({
+            artist, greeting: `Dear ${firstName(ev.clientName)},`, phone,
+            lines: [`Thank you for having ${artist ? `<strong>${esc(artist)}</strong>` : "us"} at your ${esc(String(ev.type || "event").toLowerCase())} last night. It was a privilege to be part of your simcha.`,
+              "We'd be grateful for a few words about your experience. Just reply to this email; with your permission we may share it (first names only) with future clients.",
+              "Mazel tov, and we hope to celebrate with you again!"] }) });
+          await sb.from("client_followups").insert({ event_legacy_id: e.legacy_id, kind: "thank_you", sent_to: clientTo, ok: sent.ok, error: sent.ok ? null : sent.error });
+          results.push({ kind: "thank_you", gig: e.legacy_id, ok: sent.ok, error: sent.error });
+        }
+      }
+    }
+  }
   const notices = results.splice(0);
   if (!dryRun && fromCron) await createTemplates360().catch(() => null);   // submit any template Meta doesn't have yet
 

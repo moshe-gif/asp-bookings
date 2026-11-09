@@ -63,6 +63,7 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0077_office_list_private | Applied 2026-11-02 — the office list (admin_users) is readable by admins only; others see just their own row. |
 | 0082_office_payouts_reminder | Applied 2026-11-09 — client_followups kind `office_payouts`: the 1st-of-the-month WhatsApp to the office that singer payouts are ready to send. |
 | 0083_gig_form_reminders | Applied 2026-11-09 — client_followups kind `gig_form_nudge` (ref 28/14): the event form link resent 4 and 2 weeks before the gig if not filled in. |
+| 0084_singer_gig_sheet_and_more | Applied 2026-11-09 — client_followups kinds `gig_sheet` (singers, 7 days before), `thank_you` (client, day after), `travel_request` (Rivky, out-of-town gig booked). |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in
