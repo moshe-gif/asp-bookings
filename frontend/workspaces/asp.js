@@ -647,6 +647,79 @@ function startContractForLead(id){
   if(template){ doCreateContractFromLead(id, template); return; }
   S.showTemplatePicker = true; S.templatePickerLeadId = id; render();
 }
+// The contract is made by itself when a lead is added (owner 2026-11-09: "auto create the contract when i enter the
+// info, ask me open questions and when we add the hold, it should ask me 'send contract' and thats it"). The template
+// follows the gig: several singers -> one Multi-Performer contract, a comedian -> the Comedian Agreement, else the
+// Standard Artist Agreement. Creative/video contracts are still made by hand.
+function autoTemplateFor(ev){
+  if((ev.additionalArtists||[]).length) return 'multiline';
+  return (artistById(ev.artistId)||{}).role==='Comedian' ? 'comedian' : 'standard';
+}
+function autoContractForLead(ev){
+  if(!ev || ev.unpaid || contractsForLead(ev.id).some(c=>c.status!=='void')) return null;
+  return doCreateContractFromLead(ev.id, autoTemplateFor(ev), { silent:true });
+}
+// "Send contract": the open questions (only what's missing is asked; the rest is shown), then the preview with Send.
+function openContractQuestions(contractId){
+  const c = getContract(contractId); if(!c) return;
+  const ev = getEvent(c.leadId) || {};
+  S.contractQuestions = { id: c.id, clientEmail: ev.clientEmail||'', price: ev.price||'', time: ev.time && ev.time!=='00:00' ? ev.time : '',
+    address: ev.address||'', hours: c.hoursOfEngagement||'', deposit: Number(c.deposit && c.deposit.percent) || '' };
+  render();
+}
+function renderContractQuestions(){
+  const q = S.contractQuestions; const c = q && getContract(q.id); if(!c) return '';
+  const ev = getEvent(c.leadId) || {};
+  const a = artistById(ev.artistId) || {};
+  const field = (key, label, type, ph, missing)=>`<div class="field"><label for="cq-${key}">${esc(label)}${missing? ' <span style="color:var(--warn-ink);text-transform:none;letter-spacing:0;">· needed</span>' : ''}</label>
+    <input id="cq-${key}" type="${type}" data-cq="${key}" data-focus-key="cq-${key}" value="${esc(q[key])}" placeholder="${esc(ph)}"/></div>`;
+  const multi = c.template==='multiline';
+  return `<div class="overlay center" data-action="cq-overlay-close">
+    <div class="modal" data-stop style="width:460px;" data-testid="contract-questions">
+      <div class="sheet-head"><h2 style="font-size:1.2rem;">Send contract</h2><button class="icon-btn" data-action="close-contract-questions" aria-label="Close">${ICO.x}</button></div>
+      <div class="sheet-body" style="display:flex;flex-direction:column;gap:10px;">
+        <p style="font-size:13px;color:var(--ink-2);margin:0;">The ${esc(contractTemplateLabel(c.template))} for <strong>${esc(a.name||'')}</strong> — ${esc(ev.clientName||'')}, ${esc(ev.date? fmtDate(ev.date) : 'date TBD')} — is ready. Check these, then send.</p>
+        ${field('clientEmail', 'Client email', 'email', 'name@example.com', !q.clientEmail)}
+        ${multi? '' : field('price', 'Fee ($)', 'number', 'e.g. 12000', !Number(q.price))}
+        <div class="field-row">
+          ${field('time', 'Start time', 'time', '', !q.time)}
+          ${field('deposit', 'Deposit (%)', 'number', '15', !Number(q.deposit))}
+        </div>
+        ${field('hours', 'Hours', 'text', 'e.g. 5 hours', !q.hours)}
+        ${field('address', 'Hall address', 'text', 'Street, city', !q.address && !ev.city)}
+        <button class="btn btn-primary btn-block" data-action="send-contract-from-questions" data-testid="cq-send" style="margin-top:6px;">${ICO.mail} Send contract</button>
+        <button class="btn btn-block btn-ghost" data-action="cq-edit-full" style="margin-top:0;">Change other terms</button>
+      </div>
+    </div>
+  </div>`;
+}
+// Save the answers to the gig (the master) and the contract, then show the preview with its Send button.
+function doSendContractFromQuestions(edit){
+  const q = S.contractQuestions; const c = q && getContract(q.id); if(!c) return;
+  const ev = getEvent(c.leadId); if(!ev) return;
+  if(!edit && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(q.clientEmail).trim())){ toast('Enter the client\'s email to send the contract.', 'system'); return; }
+  const patch = { clientEmail: String(q.clientEmail).trim(), address: String(q.address||'').trim() };
+  if(c.template!=='multiline' && Number(q.price) > 0){ patch.price = Number(q.price); patch.commission = standardCommission(patch.price, ev.artistId); }
+  if(q.time) patch.time = q.time;
+  if(!reportEventSave(updateEvent(ev.id, patch), 'saving the contract details')) return;
+  if(q.hours) c.hoursOfEngagement = String(q.hours).trim();
+  if(Number(q.deposit) > 0) c.deposit = { ...c.deposit, percent: Number(q.deposit), amount: 0 };
+  syncContractFromEvent(c, getEvent(ev.id));
+  S.contractQuestions = null; S.contractBuilderId = c.id;
+  if(edit){ S.showContractBuilder = true; render(); return; }
+  if(!isContractApproved(c)) doApproveContractForSending(c.id);
+  S.showContractBuilderDoc = true;
+  render();
+}
+// The contract's copy of the gig's details, refreshed from the gig (the gig is the master, owner 2026-11-09).
+function syncContractFromEvent(c, ev){
+  if(!c || !ev) return;
+  c.snapshot = { ...c.snapshot, clientName: ev.clientName||'', clientEmail: ev.clientEmail||'', clientPhone: ev.clientPhone||'', eventDate: ev.date||'', venue: ev.venue||'', address: ev.address||'', city: ev.city||'', state: ev.state||'', occasion: c.snapshot.occasion || ev.type || '' };
+  if(c.template!=='multiline' && ev.price) c.fee.amount = ev.price;
+  refreshAutoOvertime(c);
+  c.updatedAt = new Date().toISOString();
+  saveContracts();
+}
 function contractTemplateLabel(t){ const m = CONTRACT_TEMPLATES.find(([k])=>k===t); return m ? m[1] : t; }
 
 /* ---- Contracts (persisted, per-lead, versioned) ---- */
@@ -921,7 +994,7 @@ function defaultArtistProvides(template, performerName, role, hours){
   return `Vocal performance for up to ${hours}`;
 }
 function airschnitzPayeeProfile(){ return PAYEE_PROFILES.find(p=>/airschnitz/i.test(p.entityName||'')) || housePayeeProfile(); }
-function doCreateContractFromLead(eventId, template){
+function doCreateContractFromLead(eventId, template, opts={}){
   const ev = getEvent(eventId); if(!ev) return;
   const now = new Date().toISOString();
   const performerArtistId = ev.artistId || null;
@@ -1012,8 +1085,10 @@ function doCreateContractFromLead(eventId, template){
   }
   refreshAutoOvertime(contract);
   CONTRACTS.unshift(contract); saveContracts();
+  if(opts.silent) return contract;   // made automatically with the lead (autoContractForLead)
   S.showContractBuilder = true; S.contractBuilderId = contract.id;
   render();
+  return contract;
 }
 function doRefreshContractFromLead(id){
   const c = getContract(id); if(!c) return;
@@ -4525,7 +4600,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.57'; // bump on every release so a phone can tell it has updated. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Cormorant Garamond at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.58'; // bump on every release so a phone can tell it has updated. v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Cormorant Garamond at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4915,6 +4990,7 @@ function renderMgmtDashboard(){
   if(isCEO){
     return `
     ${renderWelcomeHeader((adminById(S.user).name||'').split(' ')[0])}
+    ${renderHomeSearch()}
     ${renderThisWeekCard()}
     ${renderOpenLeadsCard(S.events)}
     `;
@@ -4930,6 +5006,7 @@ function renderMgmtDashboard(){
 
   return `
   ${renderWelcomeHeader((adminById(S.user).name||'').split(' ')[0])}
+  ${renderHomeSearch()}
   ${renderThisWeekCard()}
   <div class="grid stat-row" style="margin-bottom:20px;">
     <div class="card stat-tile" style="cursor:pointer;" data-action="nav-today-gigs"><span class="u-label">Gigs Today</span><span class="val">${todayGigs.length}</span><span class="sub">${fmtDateShort(todayISO())}</span></div>
@@ -4969,6 +5046,40 @@ function gigMissing(ev){
   if((ev.flightNeeded && !ev.flightBooked) || (ev.groundTransportNeeded && !ev.groundTransportBooked)) out.push('Travel to arrange');
   if(!ev.balanceReceived && isStandardPayment(ev) && clientBalanceDue(ev) > 0) out.push(`Balance due ${money(clientBalanceDue(ev))}`);
   return out;
+}
+// Search on the home screen (owner 2026-11-09: "a search bar to search names, dates, halls"): every gig and lead
+// (not internal days), matched on the singer, the client, the hall and its city, the event type, the gig id and
+// the date -- typed as "Nov 11", "11/11", "2027-02-15", "February" or a weekday. Every word must match.
+const MONTHS = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+function gigSearchText(e){
+  const a = artistById(e.artistId) || {};
+  const extra = gigExtraArtists(e).map(x=>(artistById(x.artistId)||{}).name||'');
+  const d = e.date ? new Date(e.date+'T00:00:00') : null;
+  const dates = d ? [e.date, `${d.getMonth()+1}/${d.getDate()}`, `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`, `${d.getMonth()+1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`,
+    MONTHS[d.getMonth()], MONTHS[d.getMonth()].slice(0,3)+' '+d.getDate(), MONTHS[d.getMonth()]+' '+d.getDate(), d.toLocaleDateString('en-US',{weekday:'long'}), String(d.getFullYear())] : [];
+  return [a.name, ...extra, e.clientName, e.venue, e.address, e.city, e.state, e.type, e.id, ...dates].filter(Boolean).join(' | ').toLowerCase();
+}
+function homeSearchResults(q){
+  const words = String(q||'').toLowerCase().replace(/,/g,' ').split(/\s+/).filter(Boolean);
+  if(!words.length) return [];
+  const today = todayISO();
+  return S.events.filter(e=>!e.unpaid).filter(e=>{ const t = gigSearchText(e); return words.every(w=>t.includes(w)); })
+    .sort((x,y)=>{ const fx = x.date>=today, fy = y.date>=today; if(fx!==fy) return fx? -1 : 1; return fx ? x.date.localeCompare(y.date) : y.date.localeCompare(x.date); })
+    .slice(0, 12);
+}
+function renderHomeSearch(){
+  const q = S.homeSearch || '';
+  const hits = homeSearchResults(q);
+  return `<div style="margin-bottom:20px;" data-testid="home-search">
+    <label class="u-label" for="homeSearchInput" style="display:block;margin-bottom:6px;">Search gigs</label>
+    <input id="homeSearchInput" type="search" data-home-search data-focus-key="home-search" value="${esc(q)}" placeholder="Name, date or hall — e.g. Goldberg, Nov 11, Rockleigh" autocomplete="off" style="width:100%;box-sizing:border-box;padding:12px 14px;font-size:15px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);"/>
+    ${q.trim() ? (hits.length ? `<div class="card" style="margin-top:8px;">${hits.map(e=>{ const a = artistById(e.artistId)||{}; const sm = statusMeta(e);
+      return `<div class="kv-row" data-action="open-event" data-id="${e.id}" style="cursor:pointer;padding:10px 14px;gap:10px;align-items:flex-start;">
+        <div style="min-width:0;"><strong style="display:block;">${esc(e.clientName||'(no client)')}</strong>
+          <span style="font-size:12.5px;color:var(--ink-2);">${esc(e.date? fmtDateWeekday(e.date) : 'No date')} · ${esc(a.name||'')}${e.venue? ' · '+esc(e.venue) : ''}${e.city? ', '+esc(e.city) : ''}</span></div>
+        <span class="pill ${sm.cls}">${esc(sm.label)}</span></div>`; }).join('')}</div>`
+      : `<div class="card empty" style="margin-top:8px;">Nothing matches “${esc(q.trim())}”.</div>`) : ''}
+  </div>`;
 }
 function renderThisWeekCard(){
   const gigs = S.events.filter(e=>!e.unpaid && isConfirmed(e) && !isPast(e.date) && daysUntil(e.date) < 7)
@@ -8652,7 +8763,8 @@ function renderLeadContractsCard(ev){
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <h3 style="font-size:14px;margin:0;">Contracts</h3>
-      ${live ? `<button class="btn btn-sm btn-primary" data-action="open-contract-doc" data-id="${live.id}">${ICO.leads} View Contract</button>`
+      ${live && live.status==='draft' ? `<button class="btn btn-sm btn-primary" data-action="open-contract-questions" data-id="${live.id}" data-testid="send-contract">${ICO.mail} Send contract</button>`
+        : live ? `<button class="btn btn-sm btn-primary" data-action="open-contract-doc" data-id="${live.id}">${ICO.leads} View Contract</button>`
         : `<button class="btn btn-sm btn-primary" data-action="create-contract" data-id="${ev.id}">${ICO.plus} Create Contract</button>`}
     </div>
     ${contracts.length? `<div class="log">${contracts.map(c=>`
@@ -10947,6 +11059,7 @@ function doSubmitLead(){
   if(findConflicts(ev).length) toast(`⚠ Scheduling conflict — ${artistById(f.artistId).name} already has something at that time.`, 'system');
   S.showNewLead=false; S.newLeadForm={}; openEvent(ev.id);
   if(ev.flightNeeded && !isInternal) autoRequestFlight(ev.id);
+  if(!isInternal){ const c = autoContractForLead(ev); if(c) openContractQuestions(c.id); }
 }
 function doSubmitBlockTime(){
   if(artistReadOnly()) return; // blocks would only live in memory; artists can't write gigs (0038)
@@ -11120,6 +11233,14 @@ function bindGlobal(){
     holder.innerHTML = renderContractBuilderModal();
     document.body.appendChild(holder);
   }
+  const staleCq = document.getElementById('contractQuestionsHost');
+  if(staleCq) staleCq.remove();
+  if(S.contractQuestions){
+    const holder = document.createElement('div');
+    holder.id = 'contractQuestionsHost';
+    holder.innerHTML = renderContractQuestions();
+    document.body.appendChild(holder);
+  }
   const staleContractBuilderDoc = document.getElementById('contractBuilderPrintHost');
   if(staleContractBuilderDoc) staleContractBuilderDoc.remove();
   if(S.showContractBuilderDoc){
@@ -11258,6 +11379,8 @@ function bindGlobal(){
     // Re-render once the user leaves the field (e.g. a cleared overtime rate shows the automatic one).
     if(el.dataset.renderOnChange!==undefined) el.addEventListener('change', ()=>render());
   });
+  document.querySelectorAll('[data-cq]').forEach(el=>el.addEventListener('input', ()=>{ if(S.contractQuestions) S.contractQuestions[el.dataset.cq] = el.value; }));
+  document.querySelectorAll('[data-home-search]').forEach(el=>el.addEventListener('input', ()=>{ S.homeSearch = el.value; renderPreservingFocus(); }));
   document.querySelectorAll('[data-rider-upload]').forEach(inp=>inp.addEventListener('change', ()=>{ const f = inp.files && inp.files[0]; inp.value = ''; if(f) uploadRider(inp.dataset.riderUpload, f); }));
   document.querySelectorAll('[data-event-status]').forEach(el=>el.addEventListener('change', ()=>doSetEventStatus(el.dataset.id, el.value)));
   document.querySelectorAll('[data-outside-field]').forEach(el=>{
@@ -11539,6 +11662,11 @@ function bindGlobal(){
       case 'migrate-contracts': doMigrateContractsToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
       case 'open-send-contract': { const c=getContract(id); if(c){ const figures=contractPaymentFigures(c); S.contractBuilderId=id; S.showSendContractConfirm=true; S.sendContractPayOnline=!!contractDepositPayment(c); S.sendContractInvoice=!S.sendContractPayOnline; S.sendContractForm={ to:c.snapshot.clientEmail||'', subject: viaAsp(contractPerformerName(c)), qboAmount: figures.deposit||'', qboDescription: `Deposit — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` (${fmtDateShort(c.snapshot.eventDate)})`:''}` }; } render(); break; }
       case 'send-rider': doSendRider(id); break;
+      case 'open-contract-questions': openContractQuestions(id); break;
+      case 'close-contract-questions': S.contractQuestions = null; render(); break;
+      case 'cq-overlay-close': if(e.target===t){ S.contractQuestions = null; render(); } break;
+      case 'send-contract-from-questions': doSendContractFromQuestions(false); break;
+      case 'cq-edit-full': doSendContractFromQuestions(true); break;
       case 'faceid-unlock': doFaceIdUnlock(); break;
       case 'faceid-setup': doFaceIdSetup(); break;
       case 'remove-rider': if(confirm('Remove this rider?')){ const rd = { ...(ORG_SETTINGS.riders||{}) }; delete rd[id]; ORG_SETTINGS.riders = rd; saveOrgSettings(); render(); } break;

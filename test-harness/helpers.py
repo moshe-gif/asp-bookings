@@ -226,8 +226,7 @@ def mark_contract_sent_from_event_sheet(page):
     """From an open lead's event sheet: contract button -> Contract Builder (Standard) -> mark the
     contract Sent -> close. Moves the lead to Contract Sent the same way a real emailed send does
     (the event-sheet button stopped faking a send on 2026-10-09)."""
-    page.locator('[data-action="create-contract"]').click()
-    pick_template(page, "standard")
+    open_lead_contract(page, "standard")
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
     builder.locator('[data-action="set-contract-status"][data-status="sent"]').click()
@@ -270,6 +269,32 @@ def create_lead(page, client_name, date, artist_id="benny", event_type=None):
     page.locator('input[data-field="clientName"]').fill(client_name)
     page.locator('input[data-field="date"]').fill(date)
     page.locator('[data-action="submit-lead"]').click()
+    # The contract is made with the lead and "Send contract" opens (owner 2026-11-09); close it, leaving the sheet.
+    q = page.locator('[data-testid="contract-questions"]')
+    q.wait_for(state="visible", timeout=10000)
+    page.locator('[data-action="close-contract-questions"]').click()
+    q.wait_for(state="hidden")
+
+
+def open_lead_contract(page, template="standard"):
+    """From an open lead made with create_lead: open its contract in the builder. The lead already has one, made
+    automatically (Standard / Comedian / Multi-Performer by the gig); a test that needs another template deletes that
+    one and creates its own with the template picker."""
+    row = page.locator('.sheet [data-action="open-contract-builder"]').first
+    row.wait_for(state="visible", timeout=10000)
+    label = {"standard": "Standard Artist Agreement", "comedian": "Comedian Agreement",
+             "multiline": "Multi-Performer", "creative": "Creative"}[template]
+    if label in row.inner_text():
+        row.click()
+        page.locator('#contractBuilderOverlayHost .sheet').wait_for(state="visible")
+        return
+    row.click()
+    page.locator('#contractBuilderOverlayHost .sheet').wait_for(state="visible")
+    page.once("dialog", lambda d: d.accept())
+    page.locator('#contractBuilderOverlayHost [data-action="delete-contract"]').first.click()
+    page.locator('#contractBuilderOverlayHost .sheet').wait_for(state="hidden")
+    page.locator('.sheet [data-action="create-contract"]').first.click()
+    pick_template(page, template)
 
 
 def no_shared_sync(context):

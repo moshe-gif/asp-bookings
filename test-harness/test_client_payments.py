@@ -12,7 +12,7 @@ In live mode the payment steps are skipped (the harness never moves real money).
 Harness rows use "CT-TEST-…" ids, send no email and write no ledger or gig log. Clean up after a run
 (ops/STRIPE_SETUP.md → Testing).
 """
-from helpers import login_as, collect_console_errors, create_lead, pick_template, goto_nav, seed_events, fake_gig
+from helpers import login_as, collect_console_errors, create_lead, pick_template, goto_nav, seed_events, fake_gig, open_lead_contract
 
 
 def _stripe_status(page):
@@ -25,8 +25,7 @@ def _make_deposit_link(page, client_name, date, fee_percent="3"):
     fee = page.locator('[data-testid="online-payments-card"] input[data-field="cardFeePercent"]')
     fee.fill(fee_percent); fee.blur()
     create_lead(page, client_name, date, artist_id="eli")
-    page.locator('[data-action="create-contract"]').click()
-    pick_template(page, "standard")
+    open_lead_contract(page, "standard")
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
     # The standard template now asks a percentage deposit: clear it so the $ amount counts.

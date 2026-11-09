@@ -7,7 +7,7 @@ admin's Contract Builder then shows "Signed online by …" (pushed live) and the
 Harness links are keyed "CT-TEST-…" (never a real contract) and send no email. Admins can't delete
 signing links; remove the rows after a run (ops/CONTRACT_SIGN_SETUP.md → Testing).
 """
-from helpers import login_as, collect_console_errors, create_lead, pick_template
+from helpers import login_as, collect_console_errors, create_lead, pick_template, open_lead_contract
 
 
 def test_client_signs_contract_online(live_server, page, browser):
@@ -16,8 +16,7 @@ def test_client_signs_contract_online(live_server, page, browser):
     login_as(page, "admin_bookings")
 
     create_lead(page, "Online Signing Client", "2027-11-04", artist_id="eli")
-    page.locator('[data-action="create-contract"]').click()
-    pick_template(page, "standard")
+    open_lead_contract(page, "standard")
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
 
@@ -100,8 +99,7 @@ def test_voided_contract_link_stops_working(live_server, page, browser):
     page.goto(live_server)
     login_as(page, "admin_bookings")
     create_lead(page, "Void Link Client", "2027-12-02", artist_id="eli")
-    page.locator('[data-action="create-contract"]').click()
-    pick_template(page, "standard")
+    open_lead_contract(page, "standard")
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
     builder.locator('[data-action="approve-contract-for-sending"]').first.click()

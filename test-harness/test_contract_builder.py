@@ -8,13 +8,12 @@ Comedian contract with the No-Recording/credit-future cancellation defaults, a M
 with line items + add-ons matching the real Stein package numbers and its tiered cancellation
 schedule, live fee/deposit math, and reload persistence.
 """
-from helpers import login_as, goto_nav, collect_console_errors, create_lead, pick_template, open_more_terms
+from helpers import login_as, goto_nav, collect_console_errors, create_lead, pick_template, open_more_terms, open_lead_contract
 
 
 
 def create_contract_from_lead(page, template):
-    page.locator('[data-action="create-contract"]').click()
-    pick_template(page, template)
+    open_lead_contract(page, template)
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
     open_more_terms(page)   # these tests check the folded terms too

@@ -4,7 +4,7 @@ sheet) everywhere instead of the old 5-bar "ASP" wordmark; the logo's A, traced 
 (aspIconSvg), is the opener and the loading indicator with its bars moving. One client payment
 section (paymentOptionsEmailBlock): pay online first, Zelle QR, then a one-line check/cash footnote.
 """
-from helpers import login_as, collect_console_errors, create_lead, pick_template, goto_nav
+from helpers import login_as, collect_console_errors, create_lead, pick_template, goto_nav, open_lead_contract
 
 
 def test_logo_on_login_opener_and_rail(live_server, page):
@@ -28,8 +28,7 @@ def test_contract_carries_logo_and_payment_section(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
     create_lead(page, "Branding Client", "2027-09-19", artist_id="eli")
-    page.locator('[data-action="create-contract"]').click()
-    pick_template(page, "standard")
+    open_lead_contract(page, "standard")
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
     dep = builder.locator('input[data-contract-field="deposit.amount"]')

@@ -7,7 +7,7 @@
 """
 import json
 
-from helpers import login_as, goto_nav, collect_console_errors, fake_gig, seed_events, EVENTS_LS_KEY, create_lead, no_shared_sync, pick_template
+from helpers import login_as, goto_nav, collect_console_errors, fake_gig, seed_events, EVENTS_LS_KEY, create_lead, no_shared_sync, pick_template, open_lead_contract
 
 
 def _open_settings(page):
@@ -61,8 +61,7 @@ def test_stored_contract_versions_are_cleaned_of_nested_history(live_server, pag
     if not has_contract:
         # Create one through the real UI so there is something to migrate.
         create_lead(page, "Snapshot Client", "2027-08-08", artist_id="benny")
-        page.locator('[data-action="create-contract"]').click()
-        pick_template(page, "standard")
+        open_lead_contract(page, "standard")
         return test_stored_contract_versions_are_cleaned_of_nested_history(live_server, page)
     page.reload()
     login_as(page, "admin_bookings")

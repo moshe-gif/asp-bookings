@@ -2,7 +2,7 @@
 Scheduling conflicts compare times, not just dates (owner 2026-10-13), and "flight / ground
 transport needed" can be undone from the gig sheet. Locally seeded gigs only (no shared sync).
 """
-from helpers import login_as, goto_nav, collect_console_errors, fake_gig, seed_events, create_lead
+from helpers import login_as, goto_nav, collect_console_errors, fake_gig, seed_events, create_lead, open_lead_contract
 
 GIGS = [
     # same day, no overlap: morning vs evening
@@ -49,8 +49,7 @@ def test_wedding_contract_skips_template_picker(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
     create_lead(page, "Picker Skip Wedding", "2027-09-09", artist_id="benny")
-    page.locator('[data-action="create-contract"]').click()
-    page.locator('#contractBuilderOverlayHost .sheet').wait_for(state="visible")
+    open_lead_contract(page, "standard")
     assert page.locator('#templatePickerOverlayHost').count() == 0, "one-artist wedding still showed the template picker"
     assert "Standard Artist Agreement" in page.locator('#contractBuilderOverlayHost').inner_text()
     assert not errors, f"console errors: {errors}"

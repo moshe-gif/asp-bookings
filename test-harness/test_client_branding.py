@@ -8,7 +8,7 @@ Owner 2026-11-09, after the first real test run (Ilan as the client):
 - On the phone, the red count badges on the bottom nav were cut off.
 """
 import pytest
-from helpers import login_as, collect_console_errors, create_lead, pick_template, goto_nav, seed_events, fake_gig
+from helpers import login_as, collect_console_errors, create_lead, pick_template, goto_nav, seed_events, fake_gig, open_lead_contract
 
 
 @pytest.mark.parametrize("path", ["sign/", "pay/"])
@@ -42,8 +42,7 @@ def test_contract_header_is_light_with_small_logo_and_artist_name(live_server, p
     page.emulate_media(color_scheme="dark")
     login_as(page, "admin_bookings")
     create_lead(page, "Header Client", "2027-09-20", artist_id="eli")
-    page.locator('[data-action="create-contract"]').click()
-    pick_template(page, "standard")
+    open_lead_contract(page, "standard")
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
     builder.locator('[data-action="view-contract-builder-doc"]').first.click()
@@ -67,8 +66,7 @@ def test_send_contract_subject_is_artist_via_asp(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
     create_lead(page, "Subject Client", "2027-09-21", artist_id="eli")
-    page.locator('[data-action="create-contract"]').click()
-    pick_template(page, "standard")
+    open_lead_contract(page, "standard")
     page.locator('#contractBuilderOverlayHost .sheet').wait_for(state='visible')
     page.locator('#contractBuilderOverlayHost .sheet [data-action="view-contract-builder-doc"]').first.click()
     page.locator('[data-action="open-send-contract"]').first.click()
@@ -96,8 +94,7 @@ def test_occasion_fills_standard_hours_unless_typed(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_bookings")
     create_lead(page, "Hours Client", "2027-09-22", artist_id="eli")
-    page.locator('[data-action="create-contract"]').click()
-    pick_template(page, "standard")
+    open_lead_contract(page, "standard")
     b = page.locator('#contractBuilderOverlayHost .sheet')
     b.wait_for(state='visible')
     occ, hrs = b.locator('[data-testid="contract-occasion"]'), b.locator('[data-testid="contract-hours"]')
@@ -172,4 +169,56 @@ def test_riders_card_and_send_rider_on_the_gig(live_server, page):
     page.locator('[data-action="open-event"][data-id="EV-9822"]').first.click()
     page.locator('.sheet').wait_for(state='visible')
     assert page.locator('.sheet [data-testid="rider-block"]').count() == 0, "a gig with no rider on file shows the rider block"
+    assert not errors, f"console errors: {errors}"
+
+
+def test_home_search_finds_names_dates_and_halls(live_server, page):
+    # Owner 2026-11-09: "we need a search bar to search names, dates, halls" on the home page.
+    errors = collect_console_errors(page)
+    seed_events(page, [fake_gig("EV-9831", "benny", "2099-11-11", clientName="Goldberg Wedding", venue="The Rockleigh", city="Rockleigh"),
+                       fake_gig("EV-9832", "eli", "2099-03-04", clientName="Katz Bar Mitzvah", venue="Lake Terrace", city="Lakewood")])
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    box = page.locator('[data-home-search]')
+    box.wait_for(state='visible')
+    for q, want, not_want in [("goldberg", "Goldberg Wedding", "Katz"), ("lake terrace", "Katz Bar Mitzvah", "Goldberg"),
+                              ("nov 11 2099", "Goldberg Wedding", "Katz"), ("3/4/2099", "Katz Bar Mitzvah", "Goldberg"), ("eli marcus", "Katz", "Goldberg")]:
+        box = page.locator('[data-home-search]')
+        box.fill(q)
+        res = page.locator('[data-testid="home-search"]').inner_text()
+        assert want in res and not_want not in res, (q, res)
+    assert page.evaluate("document.activeElement && document.activeElement.hasAttribute('data-home-search')"), "typing loses the search box"
+    page.locator('[data-testid="home-search"] [data-action="open-event"]').first.click()
+    page.locator('.sheet').wait_for(state='visible')
+    assert not errors, f"console errors: {errors}"
+
+
+def test_adding_a_lead_makes_the_contract_and_asks_send_contract(live_server, page):
+    # Owner 2026-11-09: "auto create the contract when i enter the info, ask me open questions and when we add the
+    # hold, it should ask me 'send contract' and thats it".
+    errors = collect_console_errors(page)
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    page.locator('[data-action="open-new-lead"]').click()
+    page.locator('select[data-action="pick-artist"]').select_option("benny")
+    page.locator('input[data-field="clientName"]').fill("Auto Contract Client")
+    page.locator('input[data-field="date"]').fill("2027-10-10")
+    page.locator('input[data-field="price"]').fill("12000")
+    page.locator('[data-action="submit-lead"]').click()
+    q = page.locator('[data-testid="contract-questions"]')
+    q.wait_for(state="visible")
+    assert "Standard Artist Agreement" in q.inner_text()
+    assert "needed" in q.locator('label[for="cq-clientEmail"]').inner_text()
+    page.locator('[data-testid="cq-send"]').click()   # no email yet: it asks, doesn't send
+    assert q.is_visible()
+    page.locator('#cq-clientEmail').fill("client@example.com")
+    page.locator('#cq-hours').fill("5 hours")
+    page.locator('[data-testid="cq-send"]').click()
+    # The preview with Send to client -- nothing goes out until that's pressed.
+    page.locator('#contractBuilderPrintHost [data-action="open-send-contract"]').wait_for(state="visible")
+    assert "Auto Contract Client" in page.locator('#contractBuilderPrintHost').inner_text()
+    page.locator('#contractBuilderPrintHost [data-action="close-contract-builder-doc"]').click()
+    # The lead now offers Send contract (no Create Contract step).
+    assert page.locator('.sheet [data-testid="send-contract"]').count() == 1
+    assert page.locator('.sheet [data-action="create-contract"]').count() == 0
     assert not errors, f"console errors: {errors}"
