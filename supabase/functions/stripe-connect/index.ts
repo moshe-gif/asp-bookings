@@ -119,7 +119,7 @@ Deno.serve(async (req) => {
   if (body.send) {
     if (!email) return json({ ok: false, error: "Enter the email to send the setup link to." }, 400);
     const html = `<div style="max-width:560px;margin:0 auto;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;color:#17171A;line-height:1.55;">
-<div style="padding-bottom:14px;border-bottom:2px solid #17171A;margin-bottom:18px;">${brandLogoHtml(200)}</div>
+<div style="padding-bottom:14px;border-bottom:1px solid #E1E1E6;margin-bottom:18px;">${brandLogoHtml()}</div>
 <p>Hi,</p>
 <p>ASP Management now takes balance payments online, and they go straight to your bank account. To receive them for <strong>${esc(profile.entityName || "you")}</strong>, please set up your payouts with Stripe, our payment processor. It takes about 5 minutes: you'll need the bank account you want paid into and your tax ID (EIN or SSN).</p>
 <p style="text-align:center;margin:22px 0;"><a href="${esc(url)}" style="display:inline-block;background:#4C6FA5;color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px;">Set up my payouts</a></p>

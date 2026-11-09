@@ -65,10 +65,22 @@ function brandLogoHtml({ width=170, kind='horizontal', alt='ASP Management', loc
   return `<img class="brand-logo logo-on-light" src="${base}asp-${kind}-dark.png" alt="${esc(alt)}" width="${width}" style="display:block;${st}"/>`
     + `<img class="brand-logo logo-on-dark" src="${base}asp-${kind}-light.png" alt="" aria-hidden="true" width="${width}" style="display:none;${st}"/>`;
 }
-// Email-only HTML (always white paper): just the dark-ink logo.
-function brandLogoEmailHtml(width=170){
+// Email-only HTML (always white paper): just the dark-ink logo. Small everywhere (owner 2026-11-09: "cut down
+// on the size of the asp logo in every area" -- the artist's name is the headline now).
+function brandLogoEmailHtml(width=120){
   return `<img src="${BRAND_ASSET_BASE}asp-horizontal-dark.png" alt="ASP Management" width="${width}" style="display:block;width:${width}px;max-width:100%;height:auto;border:0;"/>`;
 }
+// The artist's name, big, at the top of everything a client sees (owner 2026-11-09: "add the artists name in
+// big at the top of the page in a classy font"). Cormorant Garamond (Google Fonts) where it loads -- the app,
+// the client pages, Apple Mail -- else Didot / Georgia. Inline styles, so emails and the frozen contract HTML
+// look the same. The server side has the same in supabase/functions/_shared/config.ts (artistNameHtml).
+const ARTIST_FONT = "'Cormorant Garamond',Didot,'Bodoni 72',Georgia,'Times New Roman',serif";
+const ARTIST_FONT_CSS = 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&display=swap';
+function artistNameHtml(name, { size=38, align='left' } = {}){
+  return name ? `<div class="artist-name" style="font-family:${ARTIST_FONT};font-size:${size}px;font-weight:600;line-height:1.1;letter-spacing:.01em;color:#17171A;text-align:${align};margin:8px 0 2px;overflow-wrap:anywhere;">${esc(name)}</div>` : '';
+}
+// Client email subjects lead with the artist (owner 2026-11-09: "benny friedman via asp").
+function viaAsp(artistName, what=''){ return `${artistName ? `${artistName} via ASP` : 'ASP Management'}${what ? ` — ${what}` : ''}`; }
 // The logo's "A" with its eight blue bars, drawn as SVG (traced from the owner's logo file) so the
 // bars can move: the loading indicator wherever something needs a moment, and the opener.
 function aspIconSvg({ height=16, animate=false } = {}){
@@ -399,6 +411,29 @@ function getDocument(id){ return DOCUMENTS.find(d=>d.id===id); }
 // Moved up from just after ADMIN_USERS (its original spot) so the Contract Builder block below
 // -- which seeds its clause library from EVENT_TYPES at load time -- can reference it without a
 // temporal-dead-zone error. Still declared once, still used everywhere else exactly as before.
+// Standard hours of engagement per occasion (owner 2026-11-09: "look at all the contracts and create standard times
+// for diff types of events, so when i click wedding on the contract, it fills in amount of time"). From the office's
+// contracts: weddings 5 hours (30 of 31), concerts a 2.5-hour show + rehearsal, holiday programs up to 2 hours a show,
+// comedy 45 min - 1 hour; bar mitzvahs 4 hours (owner); sheva brachos / dinners had none, so 2 hours.
+const STANDARD_HOURS = [
+  ['Wedding', '5 hours'],
+  ['Bar Mitzvah', '4 hours'],
+  ['Sheva Brachos', '2 hours'],
+  ['Concert', '2.5 hour show duration, plus rehearsal on the day of show'],
+  ['Holiday program', 'Each show up to 2 hours'],
+  ['Comedy show', '45 minutes – 1 hour'],
+  ['Melave Malka', '2 hours'],
+  ['Chinese Auction', '2 hours'],
+  ['Dinner', '2 hours'],
+];
+function standardHoursFor(occasion){
+  const o = String(occasion||'').trim().toLowerCase();
+  if(!o) return '';
+  const hit = STANDARD_HOURS.find(([k])=>o.includes(k.toLowerCase())) || (/\bbat mitzvah\b/.test(o) ? STANDARD_HOURS[1] : null) || (/comed/.test(o) ? STANDARD_HOURS[5] : null);
+  return hit ? hit[1] : '';
+}
+// Hours still at a standard (or blank / the old 5-hour default) were never typed by hand, so picking an occasion may replace them.
+function hoursAreStandard(h){ const v = String(h||'').trim(); return !v || STANDARD_HOURS.some(([,x])=>x===v); }
 const EVENT_TYPES = ['Wedding','Bar Mitzvah','Sheva Brachos','Concert','Melave Malka','Chinese Auction','Private Simcha','Other'];
 const DRESS_CODES = ['Black tie','Formal — dark suit','Business casual','All black','Uniform provided by venue'];
 const INTERNAL_EVENT_TYPES = ['Recording Day','Filming Day','Rehearsal','Studio Session','Unavailable','Other'];
@@ -903,7 +938,7 @@ function doCreateContractFromLead(eventId, template){
   // number -- $2,000 -- not a per-artist percent), so percent only wins when someone's actually
   // set one for that artist; otherwise fall back to the artist's own flat amount, then the house
   // profile's (the office-wide $2,000 figure lives there, not duplicated onto every artist).
-  const hours = (payeeProfile && payeeProfile.defaultHours) || '5 hours';
+  const hours = standardHoursFor(ev.type) || (payeeProfile && payeeProfile.defaultHours) || '5 hours';
   const houseDepositAmount = housePayeeProfile().defaultDepositAmount || 0;
   const depositPercent = (payeeProfile && payeeProfile.defaultDepositPercent) || 0;
   const depositAmount = (payeeProfile && payeeProfile.defaultDepositAmount) || houseDepositAmount || 0;
@@ -1074,7 +1109,11 @@ function doRemoveClientProvides(contractId, idx){
 function setContractFieldByPath(c, path, value){
   const parts = path.split('.');
   const kind = parts[0];
-  if(kind==='snapshot') c.snapshot[parts[1]] = value;
+  if(kind==='snapshot'){
+    c.snapshot[parts[1]] = value;
+    // Picking an occasion fills its standard hours, unless the hours were typed by hand (owner 2026-11-09).
+    if(parts[1]==='occasion'){ const std = standardHoursFor(value); if(std && hoursAreStandard(c.hoursOfEngagement)) c.hoursOfEngagement = std; }
+  }
   else if(kind==='fee'){
     c.fee[parts[1]] = value;
   }
@@ -1530,7 +1569,7 @@ function invoiceEmailHtml(inv, payUrl){
   const rows = (inv.items||[]).map(it=>`<tr><td style="padding:8px 0;border-bottom:1px dashed #E1E1E6;">${esc(it.label)}</td><td style="padding:8px 0;border-bottom:1px dashed #E1E1E6;text-align:right;">${moneyCents(it.amount)}</td></tr>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"/></head><body style="margin:0;padding:24px;background:#F5F4EF;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17171A;">
   <div style="max-width:640px;margin:0 auto;background:#fff;padding:32px;border-radius:10px;">
-    <div style="padding-bottom:18px;border-bottom:2px solid #17171A;margin-bottom:22px;">${brandLogoEmailHtml(180)}</div>
+    <div style="padding-bottom:18px;border-bottom:2px solid #17171A;margin-bottom:22px;">${brandLogoEmailHtml()}</div>
     <div style="font-size:1.5rem;font-weight:700;text-align:center;margin:6px 0 2px;">INVOICE</div>
     <div style="text-align:center;font-size:11.5px;color:#9A9AA1;margin-bottom:26px;">${esc(inv.id)} &middot; ${esc(fmtDate(inv.createdAt))}</div>
     <p style="margin:0 0 18px;font-size:13.5px;"><span style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#9A9AA1;font-weight:700;">Billed to</span><br/><strong>${esc(inv.clientName)}</strong>${inv.clientEmail?`<br/>${esc(inv.clientEmail)}`:''}</p>
@@ -2253,7 +2292,7 @@ function travelRequestEmailHtml(tr){
     .doc-facts > div > span:last-child{ display:table-cell; padding:5px 0; }
     .doc-foot{ margin-top:22px; padding-top:12px; border-top:1px solid #E1E1E6; font-size:10.5px; color:#9A9AA1; }
   </style></head><body><div class="doc">
-    <div class="wordmark">${brandLogoEmailHtml(170)}<div style="margin-top:8px;">Travel Request</div></div>
+    <div class="wordmark">${brandLogoEmailHtml()}<div style="margin-top:8px;">Travel Request</div></div>
     <p style="font-size:13.5px;">Hi Rivky, could you help arrange travel for the following${ev?` (${esc(ev.type)})`:''}?</p>
     <div class="doc-facts">${rows.map(([k,v])=>`<div><span class="k">${esc(k)}</span><span>${esc(String(v))}</span></div>`).join('')}</div>
     ${d.notes? `<p style="font-size:13px;margin-top:16px;"><strong>Notes:</strong> ${esc(d.notes)}</p>` : ''}
@@ -2356,7 +2395,7 @@ function clientNoticeEmailHtml(ev, artist, introHtml, payUrl){
     .wordmark{ font-size:1.1rem; font-weight:700; border-bottom:2px solid #17171A; padding-bottom:14px; margin-bottom:18px; }
     .doc-foot{ margin-top:22px; padding-top:12px; border-top:1px solid #E1E1E6; font-size:10.5px; color:#9A9AA1; }
   </style></head><body><div class="doc">
-    <div class="wordmark">${brandLogoEmailHtml(170)}</div>
+    <div class="wordmark"><style>@import url('${ARTIST_FONT_CSS}');</style>${brandLogoEmailHtml()}${artistNameHtml(artist && artist.name)}</div>
     ${introHtml}
     ${hasLocation(ev)? `<p style="margin:0 0 8px;font-size:13px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:#4C6FA5;">Open in Maps</a></p>` : ''}
     ${isStandardPayment(ev) && balance>0 ? paymentOptionsEmailBlock({ kind:'balance', payUrl, amount:balance, memo:gigPaymentMemo(ev), zelle:balanceZelle(ev) }) : ''}
@@ -2404,7 +2443,7 @@ async function doSendBookingConfirmationEmail(id){
   const ev = getEvent(id); if(!ev) return;
   const artist = artistById(ev.artistId);
   const balance = clientBalanceDue(ev);
-  const subject = `You're booked! — ${artist.name}, ${fmtDateShort(ev.date)}`;
+  const subject = viaAsp(artist.name, `You're booked! ${fmtDateShort(ev.date)}`);
   S.bookingConfirmationBusy = true; render();
   const payUrl = await balancePayUrl(ev);
   const intro = bookingConfirmationIntroHtml(ev, artist, balance, payUrl);
@@ -2425,7 +2464,7 @@ async function doSendReminderEmail(id){
   const ev = getEvent(id); if(!ev) return;
   const artist = artistById(ev.artistId);
   const balance = clientBalanceDue(ev);
-  const subject = `Balance reminder — ${artist.name}, ${fmtDateShort(ev.date)}`;
+  const subject = viaAsp(artist.name, `Balance reminder, ${fmtDateShort(ev.date)}`);
   S.reminderBusy = true; render();
   const payUrl = await balancePayUrl(ev);
   const intro = reminderIntroHtml(ev, artist, balance, payUrl);
@@ -4424,7 +4463,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.54'; // bump on every release so a phone can tell it has updated. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.55'; // bump on every release so a phone can tell it has updated. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Cormorant Garamond at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4433,7 +4472,7 @@ function isNavActive(v){ return S.view===v || (v==='artists' && S.view==='artist
 
 function renderRail(){
   return `<div class="rail">
-    <div class="wordmark">${brandLogoHtml({ width:150, local:true })}</div>
+    <div class="wordmark">${brandLogoHtml({ width:110, local:true })}</div>
     <div class="rail-nav">
       ${mgmtNavItemsFor(S.user).map(([v,l,ic])=>`<a href="#" class="rail-link ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span>${l}</a>`).join('')}
       <a href="#" class="rail-link ${isNavActive('settings')?'active':''}" data-action="nav" data-view="settings">${ICO.settings}Settings</a>
@@ -4447,7 +4486,7 @@ function renderRail(){
 function renderArtistTopTabs(){
   return `<div class="artist-top-tabs">
   <div class="topbar" style="border-bottom:none;padding-bottom:0;">
-    <div class="wordmark">${brandLogoHtml({ width:140, local:true })}</div>
+    <div class="wordmark">${brandLogoHtml({ width:110, local:true })}</div>
     <button class="icon-btn artist-settings-btn" data-action="nav" data-view="settings" title="Settings" aria-label="Settings">${ICO.settings}</button>
   </div>
   <div style="padding:0 28px;">
@@ -4472,7 +4511,7 @@ function renderMobileMenu(isAdmin){
   return `<div class="overlay left" data-action="mobilemenu-close">
     <div class="mobile-menu-panel" data-stop>
       <div style="display:flex;align-items:center;justify-content:space-between;">
-        <div class="wordmark">${brandLogoHtml({ width:140, local:true })}</div>
+        <div class="wordmark">${brandLogoHtml({ width:110, local:true })}</div>
         <button class="icon-btn" data-action="close-mobile-menu" aria-label="Close">${ICO.x}</button>
       </div>
       <div class="rail-nav">
@@ -4745,7 +4784,7 @@ function renderSettingsPage(){
 function loginWordmark(){
   const brand = window.ASP_BRAND_OVERRIDE || {};
   const tagline = brand.tagline || 'Bookings';
-  if(!brand.name) return `<div class="wordmark" style="flex-direction:column;gap:8px;align-items:center;justify-content:center;">${brandLogoHtml({ width:240, local:true })}<small>${esc(tagline)}</small></div>`;
+  if(!brand.name) return `<div class="wordmark" style="flex-direction:column;gap:8px;align-items:center;justify-content:center;">${brandLogoHtml({ width:160, local:true })}<small>${esc(tagline)}</small></div>`;
   return `<div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(brand.name)}<small>${esc(tagline)}</small></div>`;
 }
 function renderLogin(){
@@ -7504,7 +7543,10 @@ function renderEventSheet(ev){
         <div style="display:flex;align-items:center;gap:10px;">
           <span class="avatar" data-slot="${a.slot}" style="width:38px;height:38px;">${esc(a.initials)}</span>
           <div><strong style="font-family:var(--font-display);font-size:1.2rem;display:block;">${esc(a.name)}</strong>
-          <span class="pill ${sm.cls}">${esc(sm.label)}</span></div>
+          <span class="pill ${sm.cls}">${esc(sm.label)}</span>
+          ${isAdmin && !ev.unpaid ? `<select class="status-select" data-event-status data-id="${ev.id}" data-testid="gig-status-select" aria-label="Change status" title="Change status" style="margin-left:6px;font-size:12px;padding:2px 6px;border-radius:999px;border:1px solid var(--border-strong);background:var(--surface);color:var(--ink);max-width:150px;">
+            ${EVENT_PIPELINE.map(p=>`<option value="${p.key}" ${p.key===ev.status?'selected':''}>${esc(p.step)}</option>`).join('')}${EVENT_PIPELINE.some(p=>p.key===ev.status)?'':`<option value="${esc(ev.status)}" selected>${esc(sm.label)}</option>`}
+          </select>` : ''}</div>
         </div>
         <div class="kebab-menu-wrap" style="display:flex;gap:4px;align-items:center;position:relative;">
           ${isAdmin? `<button class="icon-btn" data-action="open-edit-event" title="Edit details" aria-label="Edit details">${ICO.edit}</button>`:''}
@@ -8411,7 +8453,7 @@ function renderDocumentDoc(doc){
       <div class="sheet-head"><h2 style="font-size:1.1rem;">Document Preview</h2><button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button></div>
       <div class="doc-body">
         <div class="doc-letterhead">
-          <div class="doc-logo">${brandLogoHtml({ width:170 })}</div>
+          <div class="doc-logo">${brandLogoHtml({ width:110 })}</div>
           <span class="pill ${doc.signedAt?'pill-good':'pill-neutral'}">${doc.signedAt?'Signed':'Unsigned'}</span>
         </div>
         <div class="doc-title">${esc((doc.title||'Document').toUpperCase())}</div>
@@ -8448,7 +8490,7 @@ function renderInvoiceDoc(){
       </div>
       <div class="doc-body">
         <div class="doc-letterhead">
-          <div class="doc-logo">${brandLogoHtml({ width:170 })}</div>
+          <div class="doc-logo">${brandLogoHtml({ width:110 })}</div>
           <span class="pill ${inv.status==='paid'?'pill-good':'pill-warn'}">${inv.status==='paid'?'Paid':'Open'}</span>
         </div>
         <div class="doc-title">INVOICE</div>
@@ -8732,9 +8774,9 @@ function renderContractBuilderModal(){
         </div>
         <div class="field-row">
           <div class="field"><label>State</label><input data-contract-field="snapshot.state" value="${esc(c.snapshot.state||'')}"/></div>
-          ${!isCreative? `<div class="field"><label>Occasion</label><input data-contract-field="snapshot.occasion" value="${esc(c.snapshot.occasion||'')}" placeholder="e.g. Wedding, Purim Party, Bar Mitzvah"/></div>` : ''}
+          ${!isCreative? `<div class="field"><label>Occasion</label><input data-contract-field="snapshot.occasion" data-testid="contract-occasion" list="contract-occasions" data-render-on-change value="${esc(c.snapshot.occasion||'')}" placeholder="e.g. Wedding, Purim Party, Bar Mitzvah"/><datalist id="contract-occasions">${STANDARD_HOURS.map(([k])=>`<option value="${esc(k)}"></option>`).join('')}</datalist></div>` : ''}
         </div>
-        ${!isCreative? `<div class="field"><label>Hours of Engagement</label><input data-contract-field="top.hoursOfEngagement" data-focus-key="top.hoursOfEngagement" data-live value="${esc(c.hoursOfEngagement||'')}" placeholder="e.g. 5 hours"/></div>` : ''}
+        ${!isCreative? `<div class="field"><label>Hours of Engagement</label><input data-contract-field="top.hoursOfEngagement" data-testid="contract-hours" data-focus-key="top.hoursOfEngagement" data-live value="${esc(c.hoursOfEngagement||'')}" placeholder="e.g. 5 hours"/></div>` : ''}
 
         ${isCreative? renderCreativeFieldsSection(c) : renderContractPerformerSection(c)}
         ${c.template==='multiline' ? renderContractLineItemsSection(c) : ''}
@@ -9081,20 +9123,15 @@ function renderContractBuilderDoc(c){
 // The dark band at the top of contracts and gig sheets: the logo (version 1, white and blue on dark)
 // on its own line, then the document's title -- stacked, so it fits a phone and an email alike.
 function aspDocHeaderHtml({ kicker, title, subtitle, bsd, light }){
-  // light: white header with the dark logo -- gig sheets and itineraries (owner 2026-10-16: "remove the darker").
-  if(light) return `<div style="background:#fff;color:#17171A;padding:4px 0 14px;border-bottom:2px solid #17171A;position:relative;">
-      ${bsd? `<div style="position:absolute;top:0;right:0;font-size:11px;color:#5B78A8;">BS"D</div>` : ''}
-      <img src="${BRAND_ASSET_BASE}asp-horizontal-dark.png" alt="ASP Management" width="170" style="display:block;width:170px;max-width:100%;height:auto;border:0;margin:0 0 12px;"/>
+  // Always white paper with the small dark logo, then the artist's name big (owner 2026-11-09: "always ... the
+  // dark logo on the light background"). light: the gig sheet / itinerary spacing (no side padding).
+  return `<div style="background:#fff;color:#17171A;padding:${light ? '4px 0 14px' : '16px 24px 14px'};border-bottom:2px solid #17171A;position:relative;">
+      <style>@import url('${ARTIST_FONT_CSS}');</style>
+      ${bsd? `<div style="position:absolute;top:${light ? '0' : '12px'};right:${light ? '0' : '16px'};font-size:11px;color:#5B78A8;">BS"D</div>` : ''}
+      <img src="${BRAND_ASSET_BASE}asp-horizontal-dark.png" alt="ASP Management" width="110" style="display:block;width:110px;max-width:100%;height:auto;border:0;margin:0 0 12px;"/>
       <div style="font-size:10.5px;letter-spacing:.22em;color:#5B78A8;font-weight:700;">${kicker}</div>
-      <div style="font-size:24px;font-weight:700;line-height:1.2;overflow-wrap:anywhere;">${title}</div>
+      <div class="artist-name" style="font-family:${ARTIST_FONT};font-size:40px;font-weight:600;line-height:1.1;letter-spacing:.01em;margin:2px 0 4px;overflow-wrap:anywhere;">${title}</div>
       <div style="font-size:12.5px;color:#6B6B72;">${subtitle}</div>
-    </div>`;
-  return `<div style="background:#14161C;color:#fff;border-radius:10px 10px 0 0;padding:20px 24px;position:relative;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
-      ${bsd? `<div style="position:absolute;top:10px;right:16px;font-size:11px;color:#9FB3D6;">BS"D</div>` : ''}
-      <img src="${BRAND_ASSET_BASE}asp-horizontal-light.png" alt="ASP Management" width="190" style="display:block;width:190px;max-width:100%;height:auto;border:0;margin:0 0 14px;"/>
-      <div style="font-size:10.5px;letter-spacing:.22em;color:#9FB3D6;">${kicker}</div>
-      <div style="font-size:24px;font-weight:700;line-height:1.2;overflow-wrap:anywhere;">${title}</div>
-      <div style="font-size:12.5px;color:#C9CFDA;">${subtitle}</div>
     </div>`;
 }
 // The Standard Artist Agreement's TERMS, in order (owner 2026-10-15: the terms "have to become standard").
@@ -9201,9 +9238,10 @@ function comedianDocContent(c){
   return `
     ${docBsdHeader(c)}
     <div class="doc-letterhead">
-      <div class="doc-logo">${brandLogoHtml({ width:170 })}</div>
+      <div class="doc-logo">${brandLogoHtml({ width:110 })}</div>
       <span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span>
     </div>
+    ${artistNameHtml(who, { align:'center', size:40 })}
     <div class="doc-title">COMEDIAN AGREEMENT</div>
     <div class="doc-sub">Agreement ${esc(c.id)} &middot; ${contractDateSentence(c)}, between ${esc(who)}, hereafter referred to as "the Artist", and ${esc(c.snapshot.clientName||'the Client')}, hereafter referred to as "the Client".</div>
     <div class="doc-parties">
@@ -9251,12 +9289,14 @@ function multilineDocContent(c){
   const figures = contractPaymentFigures(c);
   const boilerplate = contractBoilerplateLines(c);
   const contactLine = contractClientContactLine(c);
+  const who = contractPerformerName(c);
   return `
     ${docBsdHeader(c)}
     <div class="doc-letterhead">
-      <div class="doc-logo">${brandLogoHtml({ width:170 })}</div>
+      <div class="doc-logo">${brandLogoHtml({ width:110 })}</div>
       <span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span>
     </div>
+    ${artistNameHtml(who, { align:'center', size:40 })}
     <div class="doc-title">ARTIST AGREEMENT</div>
     <div class="doc-sub">Agreement ${esc(c.id)} &middot; ${contractDateSentence(c)}, between ${esc(profile.entityName)}, acting on behalf of the performers listed herein, collectively referred to as "the Artist", and ${esc(c.snapshot.clientName||'the Client')}, hereafter referred to as "the Client".</div>
     <div class="doc-parties">
@@ -9301,12 +9341,14 @@ function creativeDocContent(c){
   const brand = getBrandConfig(c.brand);
   const figures = contractPaymentFigures(c);
   const contactLine = contractClientContactLine(c);
+  const who = contractPerformerName(c);
   return `
     ${docBsdHeader(c)}
     <div class="doc-letterhead">
-      <div class="doc-logo">${brandLogoHtml({ width:170 })}</div>
+      <div class="doc-logo">${brandLogoHtml({ width:110 })}</div>
       <span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span>
     </div>
+    ${artistNameHtml(who, { align:'center', size:40 })}
     <div class="doc-title">CREATIVE / VIDEO PRODUCTION AGREEMENT</div>
     <div class="doc-sub">Agreement ${esc(c.id)} &middot; ${contractDateSentence(c)}, between ${esc(profile.entityName)}, hereafter referred to as "the Artist", and ${esc(c.snapshot.clientName||'the Client')}, hereafter referred to as "the Client".</div>
     <div class="doc-parties">
@@ -10000,6 +10042,17 @@ function doSendContract(id){
   // Send and Edit at the top; a new one opens in the builder to be filled in.
   if(latest){ S.contractBuilderId = latest.id; S.showContractBuilderDoc = true; }
   else { startContractForLead(id); return; }
+  render();
+}
+// The office can set a gig's status by hand from the gig page (owner 2026-11-09: "i need to be able to change a status
+// of a gig from in the gig page as administrator"). Only the status moves; deposit / balance flags stay as recorded.
+function doSetEventStatus(id, status){
+  const ev = getEvent(id); if(!ev || ev.status===status || !EVENT_PIPELINE.some(p=>p.key===status)) return;
+  const from = (EVENT_PIPELINE.find(p=>p.key===ev.status)||{}).step || ev.status;
+  const to = EVENT_PIPELINE.find(p=>p.key===status).step;
+  if(!confirm(`Change this gig from ${from} to ${to}?`)){ render(); return; }
+  logEvent(ev, 'system', `Status changed by hand from ${from} to ${to}.`);
+  if(reportEventSave(updateEvent(id, { status }), 'changing the status')) toast(`Status changed to ${to}.`, 'success');
   render();
 }
 function doConfirmLead(id){
@@ -11085,6 +11138,7 @@ function bindGlobal(){
     // Re-render once the user leaves the field (e.g. a cleared overtime rate shows the automatic one).
     if(el.dataset.renderOnChange!==undefined) el.addEventListener('change', ()=>render());
   });
+  document.querySelectorAll('[data-event-status]').forEach(el=>el.addEventListener('change', ()=>doSetEventStatus(el.dataset.id, el.value)));
   document.querySelectorAll('[data-outside-field]').forEach(el=>{
     const evt = (el.tagName==='SELECT' || el.type==='checkbox') ? 'change' : 'input';
     el.addEventListener(evt, ()=>{
@@ -11362,7 +11416,7 @@ function bindGlobal(){
       case 'add-gmail-mailbox': doAddGmailMailbox(); break;
       case 'migrate-payee-profiles': doMigratePayeeProfilesToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
       case 'migrate-contracts': doMigrateContractsToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
-      case 'open-send-contract': { const c=getContract(id); if(c){ const figures=contractPaymentFigures(c); S.contractBuilderId=id; S.showSendContractConfirm=true; S.sendContractPayOnline=!!contractDepositPayment(c); S.sendContractInvoice=!S.sendContractPayOnline; S.sendContractForm={ to:c.snapshot.clientEmail||'', subject:`${contractTemplateLabel(c.template)} — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` — ${fmtDateShort(c.snapshot.eventDate)}`:''}`, qboAmount: figures.deposit||'', qboDescription: `Deposit — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` (${fmtDateShort(c.snapshot.eventDate)})`:''}` }; } render(); break; }
+      case 'open-send-contract': { const c=getContract(id); if(c){ const figures=contractPaymentFigures(c); S.contractBuilderId=id; S.showSendContractConfirm=true; S.sendContractPayOnline=!!contractDepositPayment(c); S.sendContractInvoice=!S.sendContractPayOnline; S.sendContractForm={ to:c.snapshot.clientEmail||'', subject: viaAsp(contractPerformerName(c)), qboAmount: figures.deposit||'', qboDescription: `Deposit — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` (${fmtDateShort(c.snapshot.eventDate)})`:''}` }; } render(); break; }
       case 'close-send-contract-confirm': if(!S.sendContractBusy){ S.showSendContractConfirm=false; S.sendContractForm={}; render(); } break;
       case 'sendcontract-overlay-close': if(e.target===t && !S.sendContractBusy){ S.showSendContractConfirm=false; S.sendContractForm={}; render(); } break;
       case 'confirm-send-contract': doSendContractEmail(); break;

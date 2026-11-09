@@ -6,6 +6,8 @@
 <meta name="robots" content="noindex" />
 <meta name="referrer" content="no-referrer" />
 <link rel="icon" type="image/png" href="../icon-192.png" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&display=swap" />
 <!-- The client's payment page for an invoice (migration 0056) or a gig's balance (0063), Edge Function
      client-pay. Standalone like /sign/: no app code, no sign-in. Shows the frozen invoice (in a
      sandboxed frame that can't run scripts) and the Pay panel from ../sign/pay.js. The link's token is after the "#", so it only
@@ -19,12 +21,15 @@
   *{ box-sizing:border-box; }
   body{ margin:0; background:var(--page); color:var(--ink); font:15px/1.5 Inter,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
   .wrap{ max-width:720px; margin:0 auto; padding:24px 16px calc(32px + env(safe-area-inset-bottom)); }
-  .top{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
+  .top{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:16px; }
   .brandhead{ display:flex; flex-direction:column; gap:6px; min-width:0; }
-  .logo{ display:block; width:220px; max-width:100%; height:auto; }
+  .logo{ display:block; width:120px; max-width:100%; height:auto; }
+  .artist{ font-family:'Cormorant Garamond',Didot,'Bodoni 72',Georgia,'Times New Roman',serif; font-size:40px; font-weight:600; line-height:1.05; letter-spacing:.01em; color:var(--ink); margin:8px 0 2px; overflow-wrap:anywhere; }
+  @media (max-width:420px){ .artist{ font-size:34px; } }
   .label{ font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-3); font-weight:700; }
   .card{ background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 1px 2px rgba(23,23,26,.04),0 4px 14px rgba(23,23,26,.04); }
-  iframe{ display:block; width:100%; border:0; border-radius:10px; min-height:300px; background:var(--page); }
+  /* Only the invoice's own frame: Stripe's card fields are iframes too (a bare iframe rule covered them, 2026-11-09). */
+  #doc > iframe{ display:block; width:100%; border:0; border-radius:10px; min-height:300px; background:var(--page); }
   .btn{ display:inline-flex; align-items:center; justify-content:center; padding:11px 18px; border-radius:8px; border:1px solid transparent; font:inherit; font-weight:600; cursor:pointer; transition:background .15s; }
   .btn-primary{ background:var(--accent); color:#fff; width:100%; }
   .btn-primary:hover{ background:var(--accent-hover); }
@@ -34,7 +39,7 @@
   .muted{ color:var(--ink-2); font-size:13.5px; margin:0 0 14px; }
   .msg{ padding:32px 20px; text-align:center; }
   .msg h1{ font-size:1.25rem; margin:0 0 6px; }
-  @media print{ .top .btn, #pay{ display:none !important; } body{ background:#fff; } .wrap{ padding:0; max-width:none; } iframe{ border-radius:0; } }
+  @media print{ .top .btn, #pay{ display:none !important; } body{ background:#fff; } .wrap{ padding:0; max-width:none; } #doc > iframe{ border-radius:0; } }
 </style>
 
 <script src="../sign/pay.js"></script>
@@ -71,11 +76,11 @@
     const p = res.payment;
     if(p.kind==='event_balance'){
       // A balance has no document of its own: the client already has the contract.
-      root.innerHTML = `<div class="top"><div class="brandhead"><img class="logo" src="../assets/brand/asp-horizontal-dark.png" alt="${esc(p.brandName)}" width="220" height="29"/><div class="label">Balance due</div></div></div><div id="pay"></div>`;
+      root.innerHTML = `<div class="top"><div class="brandhead"><img class="logo" src="../assets/brand/asp-horizontal-dark.png" alt="${esc(p.brandName)}" width="120" height="16"/>${p.artistName ? `<div class="artist" data-testid="artist-name">${esc(p.artistName)}</div>` : ''}<div class="label">Balance due</div></div></div><div id="pay"></div>`;
       window.ASPPay.mount(document.getElementById('pay'), token, p);
       return;
     }
-    root.innerHTML = `<div class="top"><div class="brandhead"><img class="logo" src="../assets/brand/asp-horizontal-dark.png" alt="${esc(p.brandName)}" width="220" height="29"/><div class="label">Invoice ${esc(p.reference)}</div></div>
+    root.innerHTML = `<div class="top"><div class="brandhead"><img class="logo" src="../assets/brand/asp-horizontal-dark.png" alt="${esc(p.brandName)}" width="120" height="16"/>${p.artistName ? `<div class="artist" data-testid="artist-name">${esc(p.artistName)}</div>` : ''}<div class="label">Invoice ${esc(p.reference)}</div></div>
       <button class="btn btn-ghost" id="print" type="button">Print / Save PDF</button></div>
       <div id="doc"></div><div id="pay"></div>`;
     document.getElementById('doc').appendChild(frame(p.html));

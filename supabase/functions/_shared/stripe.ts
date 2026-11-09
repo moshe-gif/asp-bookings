@@ -5,7 +5,7 @@
 // the client's browser), STRIPE_WEBHOOK_SECRET (whsec_…, for stripe-webhook).
 import { serviceClient } from "./auth.ts";
 import { sendRelayEmail } from "./mail.ts";
-import { brandFor, brandLogoHtml } from "./config.ts";
+import { brandFor, emailHeaderHtml, gigArtistNames, viaAsp } from "./config.ts";
 
 export function stripeConfigured(): boolean {
   return !!(Deno.env.get("STRIPE_SECRET_KEY") && Deno.env.get("STRIPE_PUBLISHABLE_KEY"));
@@ -186,15 +186,16 @@ export async function recordPaymentIntent(sb: any, pi: any): Promise<void> {
 
   // The receipt (with the fee on its own line, as card rules require) and the office notice.
   const brand = await brandFor(sb, p.brand_key || undefined);
+  const artist = await gigArtistNames(sb, p.event_legacy_id);
   const rows = [[p.description, dollars(p.amount_cents)], ...(fee ? [["Credit card fee", dollars(fee)]] : []), ["Total paid", dollars(total)]];
   const receipt = `<div style="max-width:520px;margin:0 auto;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;color:#17171A;">
-<div style="padding-bottom:14px;border-bottom:2px solid #17171A;margin-bottom:18px;">${brandLogoHtml(200)}</div>
+<div style="padding-bottom:16px;border-bottom:1px solid #E1E1E6;margin-bottom:18px;">${emailHeaderHtml(artist)}</div>
 <p style="font-size:18px;font-weight:600;margin:0 0 4px;">Payment received — thank you!</p>
 <p style="color:#67676D;margin:0 0 16px;">${escapeHtml(brand.senderName)} received your payment on ${escapeHtml(new Date(now).toUTCString())}.</p>
 <table style="width:100%;border-collapse:collapse;">${rows.map(([k, v], i) => `<tr><td style="padding:8px 0;border-top:1px solid #E1E1E6;${i === rows.length - 1 ? "font-weight:600;" : ""}">${escapeHtml(k)}</td><td style="padding:8px 0;border-top:1px solid #E1E1E6;text-align:right;${i === rows.length - 1 ? "font-weight:600;" : ""}">${v}</td></tr>`).join("")}</table>
 <p style="color:#67676D;margin:16px 0 0;">Paid with your ${escapeHtml(methodLabel(p))}. Reference ${escapeHtml(pi.id)}. Reply to this email with any questions.</p></div>`;
   const tasks: Promise<unknown>[] = [];
-  if (p.client_email) tasks.push(relay(p.client_email, `Receipt: ${p.description}`, receipt, brand.senderName, brand.replyTo));
+  if (p.client_email) tasks.push(relay(p.client_email, viaAsp(artist, `Receipt: ${p.description}`), receipt, brand.senderName, brand.replyTo));
   if (brand.replyTo) {
     tasks.push(relay(brand.replyTo, `Paid online: ${dollars(total)}${p.client_name ? " — " + p.client_name : ""}`,
       `<p style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;">${escapeHtml(p.client_name || "A client")} paid the ${escapeHtml(what)} online. ASP Bookings marks it received automatically.${Number(pi.metadata?.held_by_asp_cents) ? ` <strong>ASP owes the artist ${dollars(Number(pi.metadata.held_by_asp_cents))}</strong>: the deposit was more than ASP's cut, so that part of their money is with ASP. Pay it to them by hand.` : ""}</p>${receipt}`,

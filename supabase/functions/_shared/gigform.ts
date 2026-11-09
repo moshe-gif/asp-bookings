@@ -4,7 +4,7 @@
 // gig's Gig Info sheet (startTime, run of the night, songs, contacts) by applyAnswers() below.
 // Concerts get no form. A comedian's gigs (Dovie) get a short audience form -- a first draft, the owner
 // said "we have to figure out what we should do for dovie gigs".
-import { appUrl, brandLogoHtml } from "./config.ts";
+import { appUrl, emailHeaderHtml, viaAsp } from "./config.ts";
 import { sendRelayEmail } from "./mail.ts";
 import { sendTemplate, templateStatus360, waNumber } from "./whatsapp.ts";
 
@@ -275,7 +275,7 @@ export async function sendGigForm(sb: Sb, o: { gig: string; ev: Doc; singers: st
   if (wantEmail) {
     const html = `<!doctype html><html><body style="margin:0;padding:24px;background:#F5F4EF;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17171A;">
   <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;">
-    <div style="padding:20px 24px 14px;border-bottom:1px solid #E3E3E8;">${brandLogoHtml(180)}</div>
+    <div style="padding:20px 24px 16px;border-bottom:1px solid #E3E3E8;">${emailHeaderHtml(o.singers === "your event" ? "" : o.singers)}</div>
     <div style="padding:24px;font-size:14px;line-height:1.6;">
       <p style="margin:0 0 12px;">Hi ${escH(first)},</p>
       <p style="margin:0 0 12px;">Thank you, your date is booked: <strong>${escH(o.singers)}</strong> on <strong>${escH(o.when)}</strong>.</p>
@@ -285,7 +285,7 @@ export async function sendGigForm(sb: Sb, o: { gig: string; ev: Doc; singers: st
     </div>
     <div style="padding:12px 24px;border-top:1px solid #E3E3E8;font-size:11px;color:#6B6B72;">ASP Management &middot; office@aspmgmt.com</div>
   </div></body></html>`;
-    const sent = await sendRelayEmail(sb, { to, subject: `Your event details — ${o.when}`, html, brand: "asp" });
+    const sent = await sendRelayEmail(sb, { to, subject: viaAsp(o.singers === "your event" ? "" : o.singers, `Your event details, ${o.when}`), html, brand: "asp" });
     out.email = { ok: sent.ok, error: sent.error, to };
   }
   if (wantWa) {

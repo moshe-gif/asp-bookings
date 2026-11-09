@@ -202,7 +202,7 @@ def test_send_contract_confirm_flow_fails_gracefully_without_backend(live_server
     confirm = page.locator('#sendContractOverlayHost .modal')
     confirm.wait_for(state='visible')
     assert "Send Contract" in confirm.inner_text()
-    assert "Standard Artist Agreement" in confirm.locator('input[data-field="subject"]').input_value()
+    assert confirm.locator('input[data-field="subject"]').input_value().endswith(" via ASP")  # owner 2026-11-09: "Artist via ASP"
 
     confirm.locator('input[data-field="to"]').fill("client@example.com")
     confirm.locator('[data-action="confirm-send-contract"]').click()

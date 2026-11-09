@@ -17,7 +17,7 @@
 import { sendRelayEmail } from "../_shared/mail.ts";
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { serviceClient } from "../_shared/auth.ts";
-import { brandFor } from "../_shared/config.ts";
+import { brandFor, gigArtistNames, viaAsp } from "../_shared/config.ts";
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;  // 32 bytes, base64url, no padding
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
 
   if (body.action === "view") {
     const { data: r, error } = await sb.from("contract_sign_requests")
-      .select("id, contract_legacy_id, contract_created_at, terms_sha256, client_name, brand_key, rendered_html, html_sha256, expires_at, revoked_at, first_viewed_at, signed_at, signer_name, signer_ip")
+      .select("id, contract_legacy_id, contract_created_at, terms_sha256, event_legacy_id, client_name, brand_key, rendered_html, html_sha256, expires_at, revoked_at, first_viewed_at, signed_at, signer_name, signer_ip")
       .eq("token_hash", tokenHash).maybeSingle();
     if (error) { console.error("contract-sign view", error.message); return json({ ok: false, error: "server" }, 500); }
     if (!r) return json({ ok: false, error: "not_found" }, 404);
@@ -100,6 +100,7 @@ Deno.serve(async (req) => {
       contractId: r.contract_legacy_id,
       clientName: r.client_name || "",
       brandName: brand.senderName,
+      artistName: await gigArtistNames(sb, r.event_legacy_id),
       html: r.signed_at ? signedCopy(r.rendered_html, certificateHtml(r)) : r.rendered_html,
       consentText: CONSENT_TEXT,
       signed: r.signed_at ? { name: r.signer_name, at: r.signed_at } : null,
@@ -124,17 +125,18 @@ Deno.serve(async (req) => {
 
     // The two emails. Never fail the response over them: the signature is recorded.
     const { data: r } = await sb.from("contract_sign_requests")
-      .select("id, contract_legacy_id, client_name, client_email, brand_key, rendered_html, html_sha256, signed_at, signer_name, signer_ip")
+      .select("id, contract_legacy_id, event_legacy_id, client_name, client_email, brand_key, rendered_html, html_sha256, signed_at, signer_name, signer_ip")
       .eq("id", res.id).single();
     // Test-harness links (contract id "CT-TEST-…", never a real contract) send no email.
     if (r && !r.contract_legacy_id.startsWith("CT-TEST-")) {
       const brand = await brandFor(sb, r.brand_key || undefined);
       const copy = signedCopy(r.rendered_html, certificateHtml(r));
+      const artist = await gigArtistNames(sb, r.event_legacy_id);
       const tasks: Promise<unknown>[] = [];
       // The address the contract was sent to, and the one the signer typed for their copy.
       const clientTo = [...new Set([r.client_email, email].filter((a): a is string => !!a && EMAIL_RE.test(a)).map((a) => a.toLowerCase()))];
       for (const to of clientTo) {
-        tasks.push(relay(to, `Your signed contract with ${brand.senderName}`, copy, brand.senderName, brand.replyTo));
+        tasks.push(relay(to, viaAsp(artist, "Your signed contract"), copy, brand.senderName, brand.replyTo));
       }
       if (brand.replyTo) {
         const notice = `<p style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;">

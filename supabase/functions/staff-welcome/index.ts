@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
   const url = appUrl();
   const html = `<!doctype html><html><body style="margin:0;padding:24px;background:#F5F4EF;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17171A;">
   <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;">
-    <div style="padding:22px 24px 14px;border-bottom:1px solid #E3E3E8;">${brandLogoHtml(180)}</div>
+    <div style="padding:22px 24px 14px;border-bottom:1px solid #E3E3E8;">${brandLogoHtml()}</div>
     <div style="padding:24px;font-size:14px;line-height:1.6;">
       <p style="margin:0 0 12px;font-size:18px;font-weight:700;">Welcome to ASP Bookings, ${esc(first)}!</p>
       <p style="margin:0 0 12px;">You now have an account in the ASP Management booking app. ${esc(what)}</p>

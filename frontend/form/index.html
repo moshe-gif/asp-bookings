@@ -6,6 +6,8 @@
 <meta name="robots" content="noindex" />
 <meta name="referrer" content="no-referrer" />
 <link rel="icon" type="image/png" href="../icon-glass-192.png" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&display=swap" />
 <!-- The client's event details form (migration 0081, Edge Function gig-form). Standalone like sign/: clients aren't
      ASP users, so no app, no sign-in, no supabase-js. The questions come from the server (_shared/gigform.ts, one
      set per kind of gig), so this page only draws them. The token is after the "#", sent only in the POST body.
@@ -19,7 +21,10 @@
   *{ box-sizing:border-box; }
   body{ margin:0; background:var(--page); color:var(--ink); font:15px/1.5 Inter,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
   .wrap{ max-width:720px; margin:0 auto; padding:24px 16px calc(110px + env(safe-area-inset-bottom)); }
-  .logo{ display:block; width:200px; max-width:60%; height:auto; margin-bottom:18px; }
+  .logo{ display:block; width:120px; max-width:60%; height:auto; margin-bottom:18px; }
+  .logo.withartist{ margin-bottom:0; }
+  .artist{ font-family:'Cormorant Garamond',Didot,'Bodoni 72',Georgia,'Times New Roman',serif; font-size:40px; font-weight:600; line-height:1.05; letter-spacing:.01em; margin:8px 0 18px; overflow-wrap:anywhere; }
+  @media (max-width:420px){ .artist{ font-size:34px; } }
   .label{ font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-3); font-weight:700; }
   .card{ background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 1px 2px rgba(23,23,26,.04),0 4px 14px rgba(23,23,26,.04); }
   .hero{ padding:20px; margin-bottom:16px; }
@@ -56,7 +61,7 @@
   @media (max-width:560px){ .grid{ grid-template-columns:minmax(0,1fr); } .f.half{ grid-column:1 / -1; } }
 </style>
 
-<div class="wrap" id="root"><img class="logo" src="../assets/brand/asp-horizontal-dark.png" alt="ASP Management" width="200" height="26"/><div class="card msg"><p class="muted">Loading…</p></div></div>
+<div class="wrap" id="root"><img class="logo" src="../assets/brand/asp-horizontal-dark.png" alt="ASP Management" width="120" height="16"/><div class="card msg"><p class="muted">Loading…</p></div></div>
 
 <script>
 (function(){
@@ -67,7 +72,7 @@
   try{ const t = new URLSearchParams(location.search).get('t'); if (t && !location.hash) history.replaceState(null, '', location.pathname + '#' + encodeURIComponent(t)); }catch(e){}
   try{ token = decodeURIComponent((location.hash||'').replace(/^#/, '')); }catch(e){}
   const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const LOGO = '<img class="logo" src="../assets/brand/asp-horizontal-dark.png" alt="ASP Management" width="200" height="26"/>';
+  const LOGO = '<img class="logo" src="../assets/brand/asp-horizontal-dark.png" alt="ASP Management" width="120" height="16"/>';
   const MESSAGES = {
     not_found: ['This link doesn’t work', 'Check that you opened the whole link, or ask us to send it again.'],
     expired:   ['This link has expired', 'Ask us and we’ll send a fresh link.'],
@@ -115,7 +120,8 @@
       if (D.closed && !body) return '';
       return `<section class="card sec"><h2>${esc(s.title)}</h2>${s.intro && !D.closed ? `<p class="intro">${esc(s.intro)}</p>` : ''}<div class="grid">${body}</div></section>`;
     }).join('');
-    root.innerHTML = `${LOGO}
+    const artist = g.singers && g.singers !== 'your event' ? g.singers : '';
+    root.innerHTML = `${artist ? LOGO.replace('class="logo"', 'class="logo withartist"') + `<div class="artist" data-testid="artist-name">${esc(artist)}</div>` : LOGO}
       <div class="card hero"><div class="label">${esc(form.title)}</div>
         <h1>${g.clientFirst ? `Hi ${esc(g.clientFirst)}!` : 'Hi!'}</h1>
         <p class="gig">${esc(gigLine)}</p>

@@ -23,7 +23,7 @@
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 import { sendRelayEmail } from "../_shared/mail.ts";
-import { brandLogoHtml } from "../_shared/config.ts";
+import { emailHeaderHtml, viaAsp } from "../_shared/config.ts";
 import { mintContractLink, mintBalanceLink } from "../_shared/paylinks.ts";
 import { clientOwedCentsOf, gigContracts } from "../_shared/connect.ts";
 import { paymentOptionsHtml, depositZelle, balanceZelle, officePhone } from "../_shared/payblock.ts";
@@ -45,10 +45,10 @@ const plusDays = (iso: string, n: number) => new Date(Date.parse(iso + "T12:00:0
 const fmtTime = (t: string) => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t || "")); if (!m) return ""; const h = Number(m[1]); return `${(h % 12) || 12}:${m[2]} ${h < 12 ? "AM" : "PM"}`; };
 const firstName = (s: unknown) => String(s || "").trim().split(/\s+/)[0] || "there";
 
-function emailHtml(o: { greeting: string; lines: string[]; button?: { label: string; url: string }; payment?: string; phone: string }) {
+function emailHtml(o: { artist: string; greeting: string; lines: string[]; button?: { label: string; url: string }; payment?: string; phone: string }) {
   return `<!doctype html><html><body style="margin:0;padding:24px;background:#F5F4EF;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17171A;">
   <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;">
-    <div style="padding:20px 24px 14px;border-bottom:1px solid #E3E3E8;">${brandLogoHtml(180)}</div>
+    <div style="padding:20px 24px 16px;border-bottom:1px solid #E3E3E8;">${emailHeaderHtml(o.artist)}</div>
     <div style="padding:24px;font-size:14px;line-height:1.6;">
       <p style="margin:0 0 12px;">${esc(o.greeting)}</p>
       ${o.lines.map((l) => `<p style="margin:0 0 12px;">${l}</p>`).join("")}
@@ -214,7 +214,7 @@ Deno.serve(async (req) => {
       if (!sr) continue; // contract not sent through the app's link -- nothing to point them to
       const since = lastSent.get(`${e.legacy_id}|deposit_reminder`) ?? Date.parse(sr.created_at);
       if (now - since < EVERY_DAYS * DAY) continue;
-      planned.push({ kind: "deposit_reminder", gig: e.legacy_id, contract: sr.contract_legacy_id, contractCreatedAt: sr.contract_created_at, to, waTo, greeting, when, ev });
+      planned.push({ kind: "deposit_reminder", singers: singerNames(e), gig: e.legacy_id, contract: sr.contract_legacy_id, contractCreatedAt: sr.contract_created_at, to, waTo, greeting, when, ev });
     } else if (e.status === "booked" && ev.depositReceived && !ev.balanceReceived) {
       // What the client owes after the contract's deposit (clientOwedCentsOf, the same figure as the app,
       // the pay link and the inbox's payment matching). NaN (an extra artist's figures missing) sends nothing.
@@ -226,7 +226,7 @@ Deno.serve(async (req) => {
       if (ev.needsReview) continue;
       const last = lastSent.get(`${e.legacy_id}|balance_reminder`);
       if (last !== undefined && now - last < EVERY_DAYS * DAY) continue;
-      planned.push({ kind: "balance_reminder", gig: e.legacy_id, to, waTo, greeting, when, balance, ev });
+      planned.push({ kind: "balance_reminder", singers: singerNames(e), gig: e.legacy_id, to, waTo, greeting, when, balance, ev });
     }
   }
 
@@ -243,23 +243,23 @@ Deno.serve(async (req) => {
         const link = await mintContractLink(sb, p.contract, p.contractCreatedAt);
         if (!link.ok) { results.push({ kind: p.kind, gig: p.gig, ok: false, skipped: link.error }); continue; } // void / changed / paid: the office handles it
         waParams = [first, p.when, link.url];
-        subject = `Reminder: your date is held once the deposit is received — ${p.when}`;
+        subject = viaAsp(p.singers === "your event" ? "" : p.singers, `Deposit reminder, ${p.when}`);
         html = emailHtml({
-          greeting: p.greeting, phone,
+          artist: p.singers === "your event" ? "" : p.singers, greeting: p.greeting, phone,
           lines: [`This is a friendly reminder about your booking on <strong>${esc(p.when)}</strong>.`,
             "Your date is not held until the deposit is received. You can review and sign the agreement and pay the deposit using the button below."],
           button: { label: "Review & pay deposit", url: link.url },
           payment: paymentOptionsHtml({ kind: "deposit", payUrl: link.withPay ? link.url : null, memo: `${p.ev.clientName || ""} ${p.when}`.trim(), zelle: await depositZelle(sb), officePhone: phone }),
         });
       } else {
-        subject = `Balance reminder — ${p.when}`;
+        subject = viaAsp(p.singers === "your event" ? "" : p.singers, `Balance reminder, ${p.when}`);
         // Pay online when the artist's payee has Stripe payouts set up (a new link row per send, so never for a
         // preview: that would leave a real payable link to a real gig). Otherwise Zelle/check as before.
         const bal = previewTo ? null : await mintBalanceLink(sb, p.gig);
         const payUrl = bal && bal.ok ? bal.url : null;
         waParams = [first, money(p.balance), p.when, payUrl ? `Pay online: ${payUrl}` : (p.to ? "Payment details are in your email." : "Reply here for payment details.")];
         html = emailHtml({
-          greeting: p.greeting, phone,
+          artist: p.singers === "your event" ? "" : p.singers, greeting: p.greeting, phone,
           lines: [`Thank you for booking with ASP Management. Your date on <strong>${esc(p.when)}</strong> is confirmed.`,
             `This is a reminder that the remaining balance of <strong>${money(p.balance)}</strong> is due before the event.`],
           payment: paymentOptionsHtml({ kind: "balance", payUrl, amount: p.balance, memo: `${p.ev.clientName || ""} ${p.when}`.trim(), zelle: await balanceZelle(sb, p.gig), officePhone: phone }),

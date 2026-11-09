@@ -21,7 +21,7 @@
 // through Mercury (Settings, 0067), to ASP's own account like a deposit, split afterwards by mercury.
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { serviceClient } from "../_shared/auth.ts";
-import { brandFor } from "../_shared/config.ts";
+import { brandFor, gigArtistNames } from "../_shared/config.ts";
 import { cardFeeCents, recordPaymentIntent, stripeApi, stripeConfigured, stripeMode } from "../_shared/stripe.ts";
 import { balanceZelle, depositZelle, officePhone } from "../_shared/payblock.ts";
 import { balancePayeeProfile, balanceSplit, gigCardFeeBps, payoutViaMercury, splitAccounts } from "../_shared/connect.ts";
@@ -133,6 +133,7 @@ async function viewOf(sb: any, r: Row, tokenHash: string) {
     cardFeeBps: r.card_fee_bps,
     clientName: r.client_name || "",
     brandName: brand.senderName,
+    artistName: await gigArtistNames(sb, r.event_legacy_id),
     replyTo: brand.replyTo,
     zelle,
     officePhone: phone,
