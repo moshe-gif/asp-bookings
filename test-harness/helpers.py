@@ -268,10 +268,18 @@ def create_lead(page, client_name, date, artist_id="benny", event_type=None):
         page.locator('select[data-action="pick-event-type"]').select_option(event_type)
     page.locator('input[data-field="clientName"]').fill(client_name)
     page.locator('input[data-field="date"]').fill(date)
-    page.locator('[data-action="submit-lead"]').click()
-    # The contract is made with the lead and "Send contract" opens (owner 2026-11-09); close it, leaving the sheet.
+    submit_lead(page)
+
+
+def submit_lead(page):
+    """Click Add Lead. A client lead makes its contract and opens Send contract (owner 2026-11-09); close that, so the
+    test carries on from the lead's sheet. Internal days and refused submits open nothing."""
+    page.locator('[data-action="submit-lead"]').first.click()
     q = page.locator('[data-testid="contract-questions"]')
-    q.wait_for(state="visible", timeout=10000)
+    try:
+        q.wait_for(state="visible", timeout=2500)
+    except Exception:
+        return
     page.locator('[data-action="close-contract-questions"]').click()
     q.wait_for(state="hidden")
 

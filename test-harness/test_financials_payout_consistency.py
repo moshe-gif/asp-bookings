@@ -8,7 +8,7 @@ through. This reproduces the original bug scenario end to end and confirms both 
 
 Runs as admin_bookings.
 """
-from helpers import record_deposit, login_as, collect_console_errors, mark_contract_sent_from_event_sheet
+from helpers import record_deposit, login_as, collect_console_errors, mark_contract_sent_from_event_sheet, submit_lead
 
 
 def test_all_jobs_and_artist_payouts_tables_agree_with_a_post_signing_charge(live_server, page):
@@ -21,7 +21,7 @@ def test_all_jobs_and_artist_payouts_tables_agree_with_a_post_signing_charge(liv
     page.locator('input[data-field="clientName"]').fill("Test Harness Payout Consistency")
     page.locator('input[data-field="date"]').fill("2027-05-10")
     page.locator('input[data-field="price"]').fill("4000")
-    page.locator('[data-action="submit-lead"]').click()
+    submit_lead(page)
 
     sheet = page.locator(".sheet")
     assert sheet.is_visible(), "event sheet didn't open after submitting a lead"

@@ -7,7 +7,7 @@ phases have no real flow to test until real credentials exist).
 
 All admin-only, so these run as admin_bookings like test_core_flows.py.
 """
-from helpers import login_as, goto_nav, collect_console_errors
+from helpers import login_as, goto_nav, collect_console_errors, submit_lead
 
 
 def test_external_event_detail_fields_and_reminder_persist(live_server, page):
@@ -71,7 +71,7 @@ def test_multi_artist_lead_roster_and_multiline_contract_prefill(live_server, pa
     modal.locator('input[data-field="clientName"]').fill("Multi Artist Test Client")
     modal.locator('input[data-field="date"]').fill("2027-06-01")
     modal.locator('input[data-field="price"]').fill("5000")
-    modal.locator('[data-action="submit-lead"]').click()
+    submit_lead(page)
     page.wait_for_timeout(400)
 
     sheet = page.locator('.sheet').last
@@ -79,18 +79,17 @@ def test_multi_artist_lead_roster_and_multiline_contract_prefill(live_server, pa
     assert "Eli Marcus" in sheet_text, "additional artist not shown in the roster on event detail"
     assert "1,500" in sheet_text, "additional artist's fee not shown in the roster"
 
-    sheet.locator('[data-action="create-contract"]').click()
-    page.wait_for_timeout(300)
-    picker = page.locator('.modal', has_text="Choose a Contract Template")
-    assert "2 artists" in picker.inner_text(), "template picker should hint at the multi-artist lead"
-    picker.locator('[data-action="pick-template-create"][data-template="multiline"]').click()
-    page.wait_for_timeout(300)
+    # Adding the lead made its contract (owner 2026-11-09): two singers -> one Multi-Performer contract.
+    row = sheet.locator('[data-action="open-contract-builder"]').first
+    assert "Multi-Performer" in row.inner_text(), "a two-singer lead should get the Multi-Performer contract by itself"
+    row.click()
+    page.locator('#contractBuilderOverlayHost .sheet').wait_for(state="visible")
 
     # doCreateContractFromLead() opens the Contract Builder sheet on top of the still-open event
     # sheet (same layering as the event/travel-request stack elsewhere) -- both now mention the
     # template name (the event sheet via its own contract-list entry), so .last (the most recently
     # appended, topmost sheet) is the reliable way to grab the actual builder, not a text filter.
-    builder = page.locator('.sheet').last
+    builder = page.locator('#contractBuilderOverlayHost .sheet')
     line_items_text = builder.inner_text()
     assert "Baruch Levine" in line_items_text, "primary artist not pre-filled as a line item"
     assert "Eli Marcus" in line_items_text, "additional artist not pre-filled as a line item"
@@ -113,7 +112,7 @@ def test_travel_request_send_gated_on_rivky_email(live_server, page):
     modal.locator('input[data-field="date"]').fill("2027-07-01")
     modal.locator('input[data-field="price"]').fill("4000")
     modal.locator('#flightck').click()
-    modal.locator('[data-action="submit-lead"]').click()
+    submit_lead(page)
     page.wait_for_timeout(400)
 
     # Flight needed on a new lead creates its travel request automatically (owner 2026-10-14) --

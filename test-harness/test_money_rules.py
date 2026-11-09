@@ -5,7 +5,7 @@ Owner money rules (2026-10-12, audit W2-2):
   - Overtime is covered in test_contract_builder.py::test_overtime_auto_suggest_and_travel_sentence.
 Fictional data in the test browser only (shared sync is off).
 """
-from helpers import login_as, collect_console_errors
+from helpers import login_as, collect_console_errors, submit_lead
 
 
 def _new_lead(page, artist_id, client, price):
@@ -14,7 +14,7 @@ def _new_lead(page, artist_id, client, price):
     page.locator('input[data-field="clientName"]').fill(client)
     page.locator('input[data-field="date"]').fill("2099-07-07")
     page.locator('[data-form="lead"] input[data-field="price"]').fill(str(price))
-    page.locator('[data-action="submit-lead"]').click()
+    submit_lead(page)
     page.wait_for_timeout(300)
     return page.evaluate("c => S.events.find(e => e.clientName === c).commission", client)
 

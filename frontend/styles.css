@@ -775,3 +775,5 @@ th{ border-bottom:1px solid var(--ink); }
 .filter-chip.sel{ background:var(--accent); border-color:var(--accent); color:#fff; }
 /* The gig's singer name at the top of its window: light + wide like every title. */
 .sheet-head strong[style*="font-display"]{ font-weight:400 !important; font-stretch:112%; font-size:1.45rem !important; letter-spacing:-.02em; }
+/* "View as singer" lives in the top bar on a computer; on a phone the bar has no room (Artists -> Preview their app). */
+@media (max-width:900px){ .viewas{ display:none !important; } }

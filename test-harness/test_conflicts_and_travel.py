@@ -2,7 +2,7 @@
 Scheduling conflicts compare times, not just dates (owner 2026-10-13), and "flight / ground
 transport needed" can be undone from the gig sheet. Locally seeded gigs only (no shared sync).
 """
-from helpers import login_as, goto_nav, collect_console_errors, fake_gig, seed_events, create_lead, open_lead_contract
+from helpers import login_as, goto_nav, collect_console_errors, fake_gig, seed_events, create_lead, open_lead_contract, submit_lead
 
 GIGS = [
     # same day, no overlap: morning vs evening
@@ -70,7 +70,7 @@ def test_new_lead_end_time_autofills_and_time_tbd(live_server, page):
     assert page.locator('input[data-field="time"]').count() == 0, "time fields still shown with Time TBD"
     page.locator('input[data-field="clientName"]').fill("TBD Time Client")
     page.locator('input[data-field="date"]').fill("2027-09-10")
-    page.locator('[data-action="submit-lead"]').click()
+    submit_lead(page)
     assert "Time TBD" in page.locator(".sheet").inner_text(), "lead saved with a time despite Time TBD"
     assert not errors, f"console errors: {errors}"
 
@@ -95,7 +95,7 @@ def test_paste_message_fills_new_lead(live_server, page):
     assert page.locator('input[data-field="venue"]').input_value() == "Test Paste Hall"
     assert page.locator('input[data-field="date"]').input_value() == "2027-12-15"
     assert page.locator('select[data-action="pick-artist"]').input_value() == "benny"
-    page.locator('[data-action="submit-lead"]').click()
+    submit_lead(page)
     assert "From the pasted message: Band is TBD" in page.locator(".sheet").inner_text()
     assert not errors, f"console errors: {errors}"
 
@@ -218,7 +218,7 @@ def test_new_lead_mezumin_marks_cash(live_server, page):
     page.locator('input[data-field="clientName"]').fill("Mezumin Client")
     page.locator('input[data-field="date"]').fill("2027-08-08")
     page.locator('[data-action="toggle-lead-mezumin"]').click()
-    page.locator('[data-action="submit-lead"]').click()
+    submit_lead(page)
     assert "Mezumin (cash)" in page.locator(".sheet").first.inner_text(), "lead isn't marked Mezumin (cash)"
     assert not errors, f"console errors: {errors}"
 
@@ -360,7 +360,7 @@ def test_venue_pick_fills_address(live_server, page):
     assert page.locator('input[data-field="address"]').input_value() == "1 Test Ave"
     assert page.locator('input[data-field="city"]').input_value() == "Lakewood"
     assert page.locator('input[data-field="state"]').input_value() == "NJ"
-    page.locator('[data-action="submit-lead"]').click()
+    submit_lead(page)
     ev = page.evaluate("() => JSON.parse(localStorage.getItem('asp_mock_state_v3')||'[]').find(e => e.clientName === 'Venue Pick Client')")
     assert ev and ev["address"] == "1 Test Ave" and ev["city"] == "Lakewood", f"gig didn't keep the venue address: {ev and ev.get('address')}"
     assert not errors, f"console errors: {errors}"
@@ -401,7 +401,7 @@ def test_built_in_venues_fill_on_a_fresh_browser(live_server, page):
     page.locator('input[data-field="clientName"]').fill("Built In Venue Client")
     page.locator('input[data-field="date"]').fill("2027-06-07")
     page.locator('input[data-field="venue"]').fill("Cipriani Wall Street")
-    page.locator('[data-action="submit-lead"]').click()
+    submit_lead(page)
     ev = page.evaluate("() => JSON.parse(localStorage.getItem('asp_mock_state_v3')||'[]').find(e => e.clientName === 'Built In Venue Client')")
     assert ev and ev["address"] == "55 Wall St" and ev["city"] == "New York" and ev["state"] == "NY", ev
     assert not errors, f"console errors: {errors}"

@@ -3,7 +3,7 @@ Wedding-only "Band" fields: New Lead reveals a "Which Band Is Playing" + "Band S
 the moment Event Type is set to Wedding (hidden for every other type), and the entered values
 persist onto the event and show up on its detail sheet -- both at creation and via Edit Details.
 """
-from helpers import login_as, collect_console_errors
+from helpers import login_as, collect_console_errors, submit_lead
 
 
 def test_band_fields_hidden_until_wedding_selected(live_server, page):
@@ -37,7 +37,7 @@ def test_band_fields_saved_and_shown_on_new_lead(live_server, page):
     page.locator('[data-action="pick-event-type"]').select_option("Wedding")
     page.locator('input[data-field="band"]').fill("Simcha Players")
     page.locator('input[data-field="bandSize"]').fill("5")
-    page.locator('[data-action="submit-lead"]').click()
+    submit_lead(page)
 
     sheet = page.locator(".sheet")
     assert sheet.is_visible(), "event sheet didn't open after submitting a wedding lead"
@@ -60,7 +60,7 @@ def test_band_fields_editable_and_hidden_for_other_types(live_server, page):
     page.locator('input[data-field="clientName"]').fill("Concert To Wedding Client")
     page.locator('input[data-field="date"]').fill("2027-07-01")
     page.locator('[data-action="pick-event-type"]').select_option("Concert")
-    page.locator('[data-action="submit-lead"]').click()
+    submit_lead(page)
 
     sheet = page.locator(".sheet")
     assert "Band" not in sheet.inner_text(), "Band row shown on a non-Wedding event's detail sheet"
