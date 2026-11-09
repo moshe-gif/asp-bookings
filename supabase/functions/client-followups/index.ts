@@ -40,6 +40,8 @@ const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "
 const money = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
 const fmtDate = (iso: string) => new Date(iso + "T00:00:00Z").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 const nyToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+// Balance reminders start this many days before the gig (owner 2026-11-09: "only 6 weeks prior to event").
+const BALANCE_REMINDERS_FROM_DAYS = 42;
 const plusDays = (iso: string, n: number) => new Date(Date.parse(iso + "T12:00:00Z") + n * DAY).toISOString().slice(0, 10);
 // "18:00" -> "6:00 PM"
 const fmtTime = (t: string) => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t || "")); if (!m) return ""; const h = Number(m[1]); return `${(h % 12) || 12}:${m[2]} ${h < 12 ? "AM" : "PM"}`; };
@@ -221,9 +223,11 @@ Deno.serve(async (req) => {
       const owed = clientOwedCentsOf(ev, await gigContracts(sb, e.legacy_id));
       if (!Number.isFinite(owed) || owed <= 0) continue;
       const balance = owed / 100;
-      // Weekly from the deposit on (owner 2026-10-14: "right after the deposit"); a gig with no deposit
+      // Weekly once the gig is within BALANCE_REMINDERS_FROM_DAYS (was "right after the deposit", 2026-10-14); a gig with no deposit
       // date (imported) is due at once. Gigs still flagged for review keep their reminders until reviewed.
       if (ev.needsReview) continue;
+      // Not right after the deposit any more: weekly from 6 weeks before the event (owner 2026-11-09).
+      if (String(e.date) > plusDays(nyToday(), BALANCE_REMINDERS_FROM_DAYS)) continue;
       const last = lastSent.get(`${e.legacy_id}|balance_reminder`);
       if (last !== undefined && now - last < EVERY_DAYS * DAY) continue;
       planned.push({ kind: "balance_reminder", singers: singerNames(e), gig: e.legacy_id, to, waTo, greeting, when, balance, ev });

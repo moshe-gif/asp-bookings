@@ -988,7 +988,8 @@ function doCreateContractFromLead(eventId, template){
     contract.cancellationPolicy = { type:'credit_reschedule', flatPercent:80, tiers:[], creditWindowMonths:6, withinDays:40 };
   } else {
     contract.boilerplate.acceptanceClause = true;
-    contract.deposit = { amount:0, percent:15, nonRefundable:true }; // the office's deposit (owner 2026-10-14)
+    // 15% for everyone, unless the artist's payee profile sets its own percent -- Dovie 10% (owner 2026-11-09).
+    contract.deposit = { amount:0, percent: Number(depositPercent) || 15, nonRefundable:true };
   }
   if(template==='multiline'){
     contract.deposit = { amount:0, percent:0, nonRefundable:false };

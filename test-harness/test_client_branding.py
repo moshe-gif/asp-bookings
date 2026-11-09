@@ -28,11 +28,12 @@ def test_only_the_document_frame_is_styled_not_stripes(live_server, page, path):
     assert css["ownMin"] not in ("0px", "auto"), "the document's own frame lost its height"
 
 
-def test_pay_form_asks_stripe_for_card_and_bank_only():
+def test_pay_form_uses_the_option_this_stripe_js_accepts():
     import pathlib
     js = (pathlib.Path(__file__).parent.parent / "frontend/sign/pay.js").read_text()
-    assert "paymentMethodTypes:['card', 'us_bank_account']" in js
-    assert "allowedPaymentMethodTypes:" not in js, "Stripe ignores allowedPaymentMethodTypes (Klarna showed)"
+    # Stripe.js endive throws on the older `paymentMethodTypes` option and the card form never loads (2026-11-09).
+    assert "allowedPaymentMethodTypes:['card', 'us_bank_account']" in js
+    assert " paymentMethodTypes:" not in js and "{paymentMethodTypes" not in js
 
 
 def test_contract_header_is_light_with_small_logo_and_artist_name(live_server, page):
@@ -46,18 +47,19 @@ def test_contract_header_is_light_with_small_logo_and_artist_name(live_server, p
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
     builder.locator('[data-action="view-contract-builder-doc"]').first.click()
-    body = page.locator('.doc-body').first
+    body = page.locator('.doc-body:visible').first
     body.wait_for(state='visible')
     html = body.inner_html()
     assert 'asp-horizontal-light.png' not in html, "white logo / dark band still on the contract"
     name = body.locator('.artist-name').first
     assert name.is_visible()
-    assert 'Cormorant' in name.evaluate("e => getComputedStyle(e).fontFamily")
-    assert float(name.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")) >= 34
+    style = name.get_attribute("style") or ""   # inline on purpose: emails and the frozen contract HTML carry it too
+    assert 'Cormorant' in style and 'font-size:40px' in style, style
     widths = page.evaluate("() => [...document.querySelectorAll('.doc-body img[src*=\"asp-horizontal\"]')].map(i => i.getBoundingClientRect().width)")
     assert widths and max(widths) <= 120, f"logo too big: {widths}"
     # Paper stays white in the dark theme.
-    assert body.evaluate("e => getComputedStyle(e).backgroundColor") == "rgb(255, 255, 255)"
+    # (polled: the builder re-renders, and a replaced node reads as an empty style)
+    page.wait_for_function("() => { const b = [...document.querySelectorAll('.doc-body')].find(e => e.offsetParent); return b && getComputedStyle(b).backgroundColor === 'rgb(255, 255, 255)'; }", timeout=5000)
     assert not errors, f"console errors: {errors}"
 
 

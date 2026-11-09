@@ -118,7 +118,7 @@
       stripe = stripe || window.Stripe(p.publishableKey);
       elements = stripe.elements({
         mode:'payment', amount:p.amountCents, currency:'usd',
-        paymentMethodTypes:['card', 'us_bank_account'],   // (was allowedPaymentMethodTypes, which Stripe ignores: Klarna showed, 2026-11-09)
+        allowedPaymentMethodTypes:['card', 'us_bank_account'],   // this Stripe.js (endive) refuses paymentMethodTypes and breaks the form (2026-11-09)
         // Instant bank verification only (as the server confirms it): micro-deposits would strand the client.
         paymentMethodOptions:{ us_bank_account:{ verification_method:'instant' } },
         appearance:{ theme:'stripe', variables:{ colorPrimary:'#4C6FA5', fontFamily:'Inter, -apple-system, Segoe UI, Roboto, Arial, sans-serif', borderRadius:'8px' } },
