@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
   const nameOf = (ref: string) => artistOf(ref)?.name;
   const singersOf = (e: Row) => [e.artist_id || e.app_doc?.artistId, ...(((e.app_doc || {}).additionalArtists || []).map((x: Row) => x?.artistId))].filter(Boolean).map(String);
   const singerNames = (e: Row) => singersOf(e).map((r) => nameOf(r)).filter(Boolean).join(" & ") || "your event";
-  const onceKinds = ["deposit_confirmed", "contract_sent", "balance_paid", "gig_reminder", "flight_reminder", "office_signed", "office_deposit", "office_balance", "gig_form", "gig_form_wa"];
+  const onceKinds = ["deposit_confirmed", "contract_sent", "balance_paid", "gig_reminder", "flight_reminder", "office_signed", "office_deposit", "office_balance", "gig_form", "gig_form_wa", "office_payouts"];
   const { data: doneRows } = await sb.from("client_followups").select("event_legacy_id, kind, ref").in("kind", onceKinds).eq("ok", true).limit(20000);
   const done = new Set((doneRows || []).map((d: Row) => `${d.kind}|${d.event_legacy_id}|${d.ref || ""}`));
   const results: Row[] = [];
@@ -188,6 +188,9 @@ Deno.serve(async (req) => {
          `the ${title} event${ev.city ? ` in ${ev.city}` : ""}`]);
     }
   }
+  // The 1st of the month: the office sends singers' monthly payouts (owner 2026-11-09: "1st of the month, I send").
+  if (!previewTo && officeTo && nyToday().endsWith("-01")) await once("office_payouts", "PAYOUTS", nyToday().slice(0, 7), officeTo, "office_alert",
+    ["it's the 1st: this month's singer payouts are ready to review and send (Financials → Monthly Payouts)."]);
   const notices = results.splice(0);
   if (!dryRun && fromCron) await createTemplates360().catch(() => null);   // submit any template Meta doesn't have yet
 
