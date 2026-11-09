@@ -3444,6 +3444,7 @@ function browserSupportsPasskeys(){
 }
 async function doRealSignInPasskey(){
   try{
+    faceIdUnlockedAt = Date.now();
     const { error } = await supabaseClient.auth.signInWithPasskey();
     if(error){ toast('Passkey sign-in failed: ' + error.message, 'system'); }
     // On success, onAuthStateChange's SIGNED_IN handler takes over from here.
@@ -3455,6 +3456,7 @@ async function doRealSignInPasskey(){
 // and a sign-out that happens elsewhere (another tab, expired session) all end in the same reset.
 // Business data in this browser's storage is deliberately kept -- it is still the only copy.
 function resetAfterSignOut(){
+  S.faceIdGate = null;
   stopSharedSync();
   stopClientSignatureWatch();
   stopArtistPortal();
@@ -3586,12 +3588,82 @@ function doEditRealUser(){
     if(f.kind!=='admin') syncArtistRoster();
   });
 }
+/* ---- Face ID on every app open (owner 2026-11-09: "i want the login to be super secure, faceid on every login",
+   "Office + singers", "Every app open") ----
+   A session only opens the app when it came from a passkey (Face ID / Touch ID) sign-in in the last 2 minutes --
+   so opening the app, or coming back after 15 minutes away, asks for Face ID again. An emailed code still signs
+   in, but only to reach "Set up Face ID". The database enforces the same (0086 strong_auth(): no office / singer /
+   crew data without a passkey sign-in in the last 24 hours), so this screen is not the only lock.
+   The test harness's own accounts (test-*@aspmgmt.com, password sign-in) are the one exception, as on the server. */
+const FACEID_FRESH_SECS = 120, FACEID_RELOCK_MS = 15*60*1000;
+function jwtClaims(token){ try{ return JSON.parse(atob(String(token).split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); }catch(e){ return {}; } }
+function passkeySignedInAt(session){ const p = (jwtClaims(session && session.access_token).amr || []).find(x=>x && x.method==='passkey'); return p ? Number(p.timestamp)||0 : 0; }
+function isHarnessAccount(email){ return /^test-[^@]*@aspmgmt\.com$/i.test(String(email||'')); }
+// Fresh = a passkey sign-in, either just made from this page (so a phone whose clock is off still gets in) or within
+// the last 2 minutes by the clock. A session restored when the app opens is neither, so it asks again.
+let faceIdUnlockedAt = 0;
+function faceIdFresh(session){ const t = passkeySignedInAt(session); return !!t && ((Date.now() - faceIdUnlockedAt) < 60000 || (Date.now()/1000 - t) < FACEID_FRESH_SECS); }
+async function openFaceIdGate(session){
+  S.faceIdGate = { email: session.user.email, hasPasskey: undefined, busy:false };
+  render();
+  try{ const { data, error } = await supabaseClient.auth.passkey.list(); S.faceIdGate.hasPasskey = error ? true : (data||[]).length > 0; }
+  catch(e){ S.faceIdGate.hasPasskey = true; }
+  if(S.faceIdGate) render();
+}
+async function doFaceIdUnlock(){
+  if(!S.faceIdGate) return;
+  S.faceIdGate.busy = true; S.faceIdGate.error = null; render();
+  try{
+    faceIdUnlockedAt = Date.now();
+    const { error } = await supabaseClient.auth.signInWithPasskey();
+    if(error){ faceIdUnlockedAt = 0; throw error; }
+  }catch(e){ faceIdUnlockedAt = 0; if(S.faceIdGate){ S.faceIdGate.busy = false; S.faceIdGate.error = 'Face ID didn\'t work. Try again.'; render(); } }
+}
+async function doFaceIdSetup(){
+  if(!S.faceIdGate) return;
+  S.faceIdGate.busy = true; S.faceIdGate.error = null; render();
+  try{
+    const { error } = await supabaseClient.auth.registerPasskey();
+    if(error) throw error;
+    S.faceIdGate.hasPasskey = true;
+    await doFaceIdUnlock();   // sign in with the new passkey right away
+  }catch(e){ if(S.faceIdGate){ S.faceIdGate.busy = false; S.faceIdGate.error = 'Couldn\'t set up Face ID: ' + String(e && e.message || e); render(); } }
+}
+function renderFaceIdGate(){
+  const g = S.faceIdGate;
+  const body = !browserSupportsPasskeys()
+    ? `<h2 style="font-size:1.05rem;margin:16px 0 6px;">Open in Safari or Chrome</h2><p style="color:var(--ink-2);font-size:13px;margin:0 0 22px;">ASP Bookings needs Face ID or Touch ID, which this browser can't do. Open app.aspmgmt.com in Safari (iPhone) or Chrome.</p>`
+    : g.hasPasskey===undefined ? `<p style="color:var(--ink-2);font-size:13px;margin:16px 0 22px;">One moment…</p>`
+    : g.hasPasskey ? `<h2 style="font-size:1.05rem;margin:16px 0 6px;">Unlock with Face ID</h2><p style="color:var(--ink-2);font-size:13px;margin:0 0 22px;">For your security, ASP Bookings asks for Face ID each time it opens.</p>
+        <button class="btn btn-primary btn-block" data-action="faceid-unlock" data-testid="faceid-unlock" ${g.busy?'disabled':''}>${ICO.key} ${g.busy?'Waiting for Face ID…':'Unlock with Face ID'}</button>`
+    : `<h2 style="font-size:1.05rem;margin:16px 0 6px;">Set up Face ID</h2><p style="color:var(--ink-2);font-size:13px;margin:0 0 22px;">ASP Bookings now signs in with Face ID or Touch ID only. Set it up once on this phone; after that you just look at your phone to open the app.</p>
+        <button class="btn btn-primary btn-block" data-action="faceid-setup" data-testid="faceid-setup" ${g.busy?'disabled':''}>${ICO.key} ${g.busy?'Waiting…':'Set up Face ID'}</button>`;
+  return `<div class="login-wrap"><div class="login-card" style="text-align:center;" data-testid="faceid-gate">
+    ${loginWordmark()}
+    ${body}
+    ${g.error? `<p style="color:var(--crit);font-size:12.5px;margin:10px 0 0;">${esc(g.error)}</p>` : ''}
+    <p style="color:var(--ink-3);font-size:12px;margin:14px 0 0;">${esc(g.email||'')}</p>
+    <button class="btn btn-block btn-ghost" style="margin-top:6px;" data-action="real-signout">Sign out</button>
+  </div></div>`;
+}
+// Away 15 minutes or more: lock again (send waiting edits first; the reload asks for Face ID).
+let faceIdHiddenAt = 0;
+document.addEventListener('visibilitychange', async ()=>{
+  if(document.visibilityState==='hidden'){ faceIdHiddenAt = Date.now(); return; }
+  if(!faceIdHiddenAt || Date.now() - faceIdHiddenAt < FACEID_RELOCK_MS || !S.user || !S.realSession || isHarnessAccount(S.realSession.email)) return;
+  try{ await flushAndStopSharedSync(); }catch(e){}
+  location.reload();
+});
 if(supabaseClient){
   supabaseClient.auth.onAuthStateChange((event, session)=>{
     // Outside the callback (setTimeout): Supabase holds its auth lock while this runs, and the roster queries
     // need that lock too -- calling them here now and then froze sign-in (Supabase's documented deadlock;
     // seen as an occasional 15s+ hang after signing in, 2026-11-02).
-    if((event==='SIGNED_IN' || event==='INITIAL_SESSION') && session && !S.user) setTimeout(()=>{ if(!S.user) linkRealSessionToRoster(session); }, 0);
+    if((event==='SIGNED_IN' || event==='INITIAL_SESSION') && session && !S.user){
+      if(!isHarnessAccount(session.user.email) && !faceIdFresh(session)){ setTimeout(()=>{ if(!S.user) openFaceIdGate(session); }, 0); return; }
+      S.faceIdGate = null;
+      setTimeout(()=>{ if(!S.user) linkRealSessionToRoster(session); }, 0);
+    }
     if(event==='SIGNED_OUT' && (S.user || S.realSession)) resetAfterSignOut();
   });
 }
@@ -3848,10 +3920,21 @@ function updateEvent(id, patch, opts={}){
       return { ok:false, error:'conflict', persisted };
     }
   }
+  const wasBooked = isConfirmed(ev);
   Object.assign(ev, patch, { updatedAt: new Date().toISOString() });
   const saved = saveEvents();
   if(!saved.ok) return { ok:false, error:'save_failed' };
+  if(!wasBooked && isConfirmed(ev)) setTimeout(()=>onGigBooked(id), 0);   // after the caller's own render
   return { ok:true, event: ev };
+}
+// A gig just became Booked (any way: deposit recorded or paid online, Book without a contract, the status picker).
+// Out of town -- "Flight needed" ticked, or its contract's travel clause has flights -- emails Rivky the travel
+// request (owner 2026-11-09: "Rivky, auto request"; autoRequestFlight sends one per gig, never twice).
+function onGigBooked(id){
+  const ev = getEvent(id); if(!ev || ev.unpaid || isPast(ev.date)) return;
+  const c = contractsForLead(id).find(x=>x.status!=='void');
+  const flights = c && c.travelClause && Number(c.travelClause.flightsCount) > 0;
+  if(ev.flightNeeded || flights) autoRequestFlight(id);
 }
 // Shared toast for the many updateEvent() call sites migrated in PR 14 -- one consistent message
 // shape instead of hand-writing the same conflict/failure text at each of them. Returns true on
@@ -4442,7 +4525,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.55'; // bump on every release so a phone can tell it has updated. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Cormorant Garamond at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.57'; // bump on every release so a phone can tell it has updated. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Cormorant Garamond at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4698,6 +4781,7 @@ function renderSettingsPage(){
 
   ${isAdmin && QBO_CLIENT_ID ? renderQuickBooksCard() : ''}
   ${isAdmin ? renderOnlinePaymentsCard() : ''}
+  ${isAdmin ? renderRidersCard() : ''}
   ${isAdmin ? renderMercuryCard() : ''}
 
   ${isAdmin ? renderGoogleCalendarSyncCard() : ''}
@@ -4767,6 +4851,7 @@ function loginWordmark(){
   return `<div class="wordmark" style="font-size:1.6rem;justify-content:center;"><span class="mark"><i></i><i></i><i></i><i></i><i></i></span>${esc(brand.name)}<small>${esc(tagline)}</small></div>`;
 }
 function renderLogin(){
+  if(S.faceIdGate) return renderFaceIdGate();
   if(S.showRealSignIn) return renderRealSignIn();
   if(S.realSignInNotFound) return renderRealSignInNotFound();
   if(S.realSignInError) return `<div class="login-wrap"><div class="login-card" style="text-align:center;">
@@ -4781,7 +4866,7 @@ function renderLogin(){
     <p style="color:var(--ink-2);font-size:13.5px;margin:16px 0 26px;">Sign in to view your schedule and bookings.</p>
     ${supabaseClient ? `
     ${browserSupportsPasskeys() ? `
-    <button class="btn btn-primary btn-block" data-action="real-signin-passkey">${ICO.key} Sign in with Passkey</button>
+    <button class="btn btn-primary btn-block" data-action="real-signin-passkey">${ICO.key} Sign in with Face ID</button>
     <button class="btn btn-block btn-ghost" style="margin-top:8px;" data-action="open-real-signin">Sign in with email</button>
     ` : `
     <button class="btn btn-primary btn-block" data-action="open-real-signin">Sign in with email</button>
@@ -4830,7 +4915,7 @@ function renderMgmtDashboard(){
   if(isCEO){
     return `
     ${renderWelcomeHeader((adminById(S.user).name||'').split(' ')[0])}
-    ${renderUpcomingGigsCard(S.events, {days:7, showArtist:true})}
+    ${renderThisWeekCard()}
     ${renderOpenLeadsCard(S.events)}
     `;
   }
@@ -4845,6 +4930,7 @@ function renderMgmtDashboard(){
 
   return `
   ${renderWelcomeHeader((adminById(S.user).name||'').split(' ')[0])}
+  ${renderThisWeekCard()}
   <div class="grid stat-row" style="margin-bottom:20px;">
     <div class="card stat-tile" style="cursor:pointer;" data-action="nav-today-gigs"><span class="u-label">Gigs Today</span><span class="val">${todayGigs.length}</span><span class="sub">${fmtDateShort(todayISO())}</span></div>
     <div class="card stat-tile" style="cursor:pointer;" data-action="nav" data-view="calendar"><span class="u-label">Upcoming Gigs · 30 days</span><span class="val">${upcoming30.length}</span><span class="sub">Booked or paid, next 30 days</span></div>
@@ -4872,6 +4958,32 @@ function renderMgmtDashboard(){
   <div class="section-head"><h2>Open Leads</h2><button class="btn btn-sm btn-ghost" data-action="nav" data-view="leads">View all ${ICO.chev('r')}</button></div>
   ${renderEventTable(open.slice(0,6), {showArtist:true})}
   `;
+}
+// The office's first view (owner 2026-11-09: "This week's gigs"): every booked gig in the next 7 days, each with
+// what's still missing -- the client's form, a start time, a venue, travel, the balance. Nothing missing = ready.
+function gigMissing(ev){
+  const out = [];
+  if(gigHasClientForm(ev) && !(ev.clientForm && ev.clientForm.submittedAt)) out.push('Client form not filled in');
+  if(!ev.time || ev.time==='00:00') out.push('No start time');
+  if(!ev.venue) out.push('No venue');
+  if((ev.flightNeeded && !ev.flightBooked) || (ev.groundTransportNeeded && !ev.groundTransportBooked)) out.push('Travel to arrange');
+  if(!ev.balanceReceived && isStandardPayment(ev) && clientBalanceDue(ev) > 0) out.push(`Balance due ${money(clientBalanceDue(ev))}`);
+  return out;
+}
+function renderThisWeekCard(){
+  const gigs = S.events.filter(e=>!e.unpaid && isConfirmed(e) && !isPast(e.date) && daysUntil(e.date) < 7)
+    .sort((a,b)=> a.date===b.date ? String(a.time||'').localeCompare(String(b.time||'')) : a.date.localeCompare(b.date));
+  return `<div class="section-head"><h2>This week</h2><button class="btn btn-sm btn-ghost" data-action="nav" data-view="calendar">Calendar ${ICO.chev('r')}</button></div>
+  ${gigs.length ? `<div class="card" data-testid="this-week" style="margin-bottom:20px;">${gigs.map(e=>{
+    const a = artistById(e.artistId) || {}, missing = gigMissing(e);
+    return `<div class="kv-row" data-action="open-event" data-id="${e.id}" style="cursor:pointer;padding:12px 16px;align-items:flex-start;gap:12px;">
+      <div style="min-width:0;"><strong style="display:block;">${esc(fmtDateWeekday(e.date))} · ${esc(fmtTimeRange(e.time, e.endTime))}</strong>
+        <span style="font-size:12.5px;color:var(--ink-2);">${esc(a.name||'')} — ${esc([e.type, e.clientName, e.venue].filter(Boolean).join(' · '))}</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;">${missing.length
+        ? missing.map(m=>`<span class="pill pill-warn pill-wrap">${esc(m)}</span>`).join('')
+        : `<span class="pill pill-good">Ready</span>`}</div>
+    </div>`; }).join('')}</div>`
+    : `<div class="card empty" data-testid="this-week" style="margin-bottom:20px;">No gigs in the next 7 days.</div>`}`;
 }
 function statTile(label, val, sub, view){
   const clickable = view ? `style="cursor:pointer;" data-action="nav" data-view="${view}"` : '';
@@ -7880,6 +7992,74 @@ function renderClientFormBlock(ev, isAdmin){
     ${open && cf? `<div style="margin-top:8px;font-size:12.5px;">${(cf.sections||[]).map(sec=>`<div class="u-label" style="margin:8px 0 4px;">${esc(sec.title)}</div>${(sec.rows||[]).map(r=>`<div class="kv-row" style="align-items:flex-start;"><span style="color:var(--ink-2);">${esc(r.label)}</span><strong style="text-align:right;white-space:pre-wrap;overflow-wrap:anywhere;">${esc(r.value)}</strong></div>`).join('')}`).join('')}</div>` : ''}
   </div>`;
 }
+// Riders (owner 2026-11-09: "a rider for each singer especially dj shmili that gets sent to client on request").
+// One PDF per singer in the public "riders" store (0085); which file is whose lives in office settings
+// (ORG_SETTINGS.riders[artistId] = { url, name, uploadedAt }), shared like the rest of Settings.
+function riderFor(artistId){ const r = (ORG_SETTINGS.riders||{})[artistId]; return r && /^https:\/\//.test(r.url||'') ? r : null; }
+function renderRidersCard(){
+  const list = ARTISTS.filter(a=>a && a.id);
+  return `<div class="card card-pad" style="margin-bottom:20px;" data-testid="riders-card">
+    <div class="u-label" style="margin-bottom:4px;">Riders</div>
+    <p style="font-size:12.5px;color:var(--ink-2);margin:0 0 10px;">Each singer's rider (PDF). "Send rider" on a gig emails it to the client.</p>
+    ${list.map(a=>{ const rd = riderFor(a.id), busy = S.riderBusy===a.id;
+      return `<div class="kv-row" style="gap:8px;flex-wrap:wrap;">
+        <span><strong>${esc(a.name)}</strong>${rd? ` <a href="${esc(rd.url)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--accent-ink);">${esc(rd.name||'Rider.pdf')}</a>` : ` <span style="font-size:12px;color:var(--ink-3);">No rider yet</span>`}</span>
+        <span style="display:flex;gap:6px;">
+          <label class="btn btn-sm" style="cursor:pointer;">${busy? 'Uploading…' : rd? 'Replace' : 'Upload PDF'}<input type="file" accept="application/pdf" data-rider-upload="${esc(a.id)}" style="display:none;" ${busy?'disabled':''}/></label>
+          ${rd? `<button class="btn btn-sm btn-ghost" data-action="remove-rider" data-id="${esc(a.id)}">Remove</button>` : ''}
+        </span></div>`; }).join('')}
+  </div>`;
+}
+async function uploadRider(artistId, file){
+  if(!supabaseClient || !S.realSession){ toast('Sign in with your ASP account to upload.', 'system'); return; }
+  if(file.type!=='application/pdf'){ toast('Upload the rider as a PDF.', 'system'); return; }
+  if(file.size > 15*1024*1024){ toast('That PDF is over 15 MB — use a smaller one.', 'system'); return; }
+  S.riderBusy = artistId; render();
+  const path = `${artistId}/${crypto.randomUUID()}.pdf`;
+  const { error } = await supabaseClient.storage.from('riders').upload(path, file, { contentType:'application/pdf', upsert:false });
+  S.riderBusy = null;
+  if(error){ toast('Upload failed: ' + error.message, 'system'); render(); return; }
+  const url = supabaseClient.storage.from('riders').getPublicUrl(path).data.publicUrl;
+  ORG_SETTINGS.riders = { ...(ORG_SETTINGS.riders||{}), [artistId]: { url, name: file.name.slice(0,120), uploadedAt: new Date().toISOString() } };
+  saveOrgSettings();
+  toast(`Rider saved for ${(artistById(artistId)||{}).name||'the singer'}.`, 'success'); render();
+}
+function renderRiderBlock(ev){
+  if(ev.unpaid) return '';
+  const ids = [ev.artistId, ...gigExtraArtists(ev).map(x=>x.artistId)].filter(Boolean);
+  const have = ids.filter(id=>riderFor(id));
+  if(!have.length) return '';
+  const busy = S.riderSendBusy===ev.id;
+  return `<div data-testid="rider-block" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12.5px;">
+    <span><span class="u-label" style="margin-right:6px;">Rider</span>${have.map(id=>`<a href="${esc(riderFor(id).url)}" target="_blank" rel="noopener" style="color:var(--accent-ink);">${esc((artistById(id)||{}).name||'')}</a>`).join(', ')}${ev.riderSentAt? ` <span style="color:var(--ink-3);">· sent ${esc(fmtDateShort(ev.riderSentAt.slice(0,10)))}</span>` : ''}</span>
+    <button class="btn btn-sm btn-ghost" data-action="send-rider" data-id="${ev.id}" data-testid="send-rider" style="padding:2px 6px;" ${busy||!ev.clientEmail?'disabled':''} title="${ev.clientEmail?'':'No client email on this gig'}">${busy? 'Sending…' : 'Send rider'}</button>
+  </div>`;
+}
+async function doSendRider(id){
+  const ev = getEvent(id); if(!ev || !ev.clientEmail) return;
+  const ids = [ev.artistId, ...gigExtraArtists(ev).map(x=>x.artistId)].filter(id=>riderFor(id));
+  if(!ids.length) return;
+  const names = ids.map(i=>(artistById(i)||{}).name||'').filter(Boolean);
+  if(!confirm(`Email ${names.join(' & ')}'s rider to ${ev.clientEmail}?`)) return;
+  S.riderSendBusy = id; render();
+  const lead = names.join(' & ');
+  const html = `<!doctype html><html><body style="margin:0;padding:24px;background:#F5F4EF;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17171A;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;">
+    <div style="padding:20px 24px 16px;border-bottom:1px solid #E3E3E8;"><style>@import url('${ARTIST_FONT_CSS}');</style>${brandLogoEmailHtml()}${artistNameHtml(lead)}</div>
+    <div style="padding:24px;font-size:14px;line-height:1.6;">
+      <p style="margin:0 0 12px;">Dear ${esc((ev.clientName||'').split(' ')[0] || 'there')},</p>
+      <p style="margin:0 0 12px;">Here ${ids.length>1?'are the riders':'is the rider'} for your event on <strong>${esc(fmtDate(ev.date))}</strong>: the stage, sound and hospitality needs. Please pass ${ids.length>1?'them':'it'} on to your venue and sound team.</p>
+      ${ids.map(i=>`<p style="margin:14px 0;"><a href="${esc(riderFor(i).url)}" style="display:inline-block;background:#4C6FA5;color:#fff;text-decoration:none;font-weight:700;padding:11px 18px;border-radius:8px;">${esc((artistById(i)||{}).name||'')} — rider (PDF)</a></p>`).join('')}
+      <p style="margin:18px 0 0;">Any questions, just reply to this email.<br/>Thank you,<br/>ASP Management</p>
+    </div>
+  </div></body></html>`;
+  const sent = await sendEmail({ to: ev.clientEmail, subject: viaAsp(lead, 'Rider'), html, brand:'asp' });
+  S.riderSendBusy = null;
+  if(!sent.ok){ toast('Could not send the rider: ' + (sent.error||'unknown error'), 'system'); render(); return; }
+  logEvent(ev, 'email', `Rider (${names.join(', ')}) emailed to ${ev.clientEmail}.`);
+  if(reportEventSave(updateEvent(id, { riderSentAt: new Date().toISOString() }), 'sending the rider')) toast('Rider sent.', 'success');
+  render();
+}
 async function doGigFormLink(id, send){
   const ev = getEvent(id); if(!ev) return;
   if(send && !confirm(`Send the event details form to ${ev.clientName||'the client'} now, by email and WhatsApp?`)) return;
@@ -7914,6 +8094,7 @@ function renderPrepAndGigInfoCard(ev, isAdmin){
         : `<label class="btn btn-sm btn-ghost" style="cursor:pointer;display:inline-flex;padding:2px 6px;">+ Upload docs<input type="file" data-action="upload-prep" data-id="${ev.id}" multiple style="display:none;"/></label>`) : ''}
     </div>
     ${renderClientFormBlock(ev, isAdmin)}
+    ${isAdmin ? renderRiderBlock(ev) : ''}
     ${!hasNotes && !files.length? `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No gig info yet.</p>` : ''}
     ${lineup.length? `<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">${lineup.map(([k,v])=>`<div class="kv-row"><span style="color:var(--ink-2);">${esc(k)}</span><strong style="text-align:right;">${esc(v)}</strong></div>`).join('')}</div>` : ''}
     ${(sheet.schedule||[]).length? `<div class="u-label" style="margin:6px 0 4px;">Run of the night</div><div style="font-size:12.5px;margin-bottom:10px;">${sheet.schedule.map(r=>`<div><span class="u-mono" style="color:var(--ink-3);display:inline-block;min-width:62px;">${r.time? esc(fmtTime(r.time)) : ''}</span>${esc(r.item)}</div>`).join('')}</div>` : ''}
@@ -11077,6 +11258,7 @@ function bindGlobal(){
     // Re-render once the user leaves the field (e.g. a cleared overtime rate shows the automatic one).
     if(el.dataset.renderOnChange!==undefined) el.addEventListener('change', ()=>render());
   });
+  document.querySelectorAll('[data-rider-upload]').forEach(inp=>inp.addEventListener('change', ()=>{ const f = inp.files && inp.files[0]; inp.value = ''; if(f) uploadRider(inp.dataset.riderUpload, f); }));
   document.querySelectorAll('[data-event-status]').forEach(el=>el.addEventListener('change', ()=>doSetEventStatus(el.dataset.id, el.value)));
   document.querySelectorAll('[data-outside-field]').forEach(el=>{
     const evt = (el.tagName==='SELECT' || el.type==='checkbox') ? 'change' : 'input';
@@ -11356,6 +11538,10 @@ function bindGlobal(){
       case 'migrate-payee-profiles': doMigratePayeeProfilesToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
       case 'migrate-contracts': doMigrateContractsToSupabase().then(()=>{ S.migrationPreview = computeMigrationCounts(); render(); }); break;
       case 'open-send-contract': { const c=getContract(id); if(c){ const figures=contractPaymentFigures(c); S.contractBuilderId=id; S.showSendContractConfirm=true; S.sendContractPayOnline=!!contractDepositPayment(c); S.sendContractInvoice=!S.sendContractPayOnline; S.sendContractForm={ to:c.snapshot.clientEmail||'', subject: viaAsp(contractPerformerName(c)), qboAmount: figures.deposit||'', qboDescription: `Deposit — ${c.snapshot.venue||'Your Event'}${c.snapshot.eventDate?` (${fmtDateShort(c.snapshot.eventDate)})`:''}` }; } render(); break; }
+      case 'send-rider': doSendRider(id); break;
+      case 'faceid-unlock': doFaceIdUnlock(); break;
+      case 'faceid-setup': doFaceIdSetup(); break;
+      case 'remove-rider': if(confirm('Remove this rider?')){ const rd = { ...(ORG_SETTINGS.riders||{}) }; delete rd[id]; ORG_SETTINGS.riders = rd; saveOrgSettings(); render(); } break;
       case 'close-send-contract-confirm': if(!S.sendContractBusy){ S.showSendContractConfirm=false; S.sendContractForm={}; render(); } break;
       case 'sendcontract-overlay-close': if(e.target===t && !S.sendContractBusy){ S.showSendContractConfirm=false; S.sendContractForm={}; render(); } break;
       case 'confirm-send-contract': doSendContractEmail(); break;

@@ -127,3 +127,49 @@ def test_admin_changes_gig_status_from_the_gig_page(live_server, page):
     assert page.locator('.sheet [data-testid="gig-status-select"]').input_value() == "booked"
     assert "Booked" in page.locator('.sheet .sheet-head').inner_text()
     assert not errors, f"console errors: {errors}"
+
+
+def test_home_shows_this_weeks_gigs_with_whats_missing(live_server, page):
+    # Owner 2026-11-09: the first thing on the home screen is "This week's gigs" with what's still missing.
+    import datetime
+    soon = (datetime.date.today() + datetime.timedelta(days=3)).isoformat()
+    seed_events(page, [
+        fake_gig("EV-9811", "benny", soon, clientName="Missing Bits Client", time="00:00", balanceReceived=False),
+        fake_gig("EV-9812", "benny", soon, clientName="Ready Client", type="Concert", balanceReceived=True, status="paid"),
+    ])
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    card = page.locator('[data-testid="this-week"]')
+    card.wait_for(state='visible')
+    text = card.inner_text()
+    assert "Missing Bits Client" in text and "Client form not filled in" in text and "No start time" in text
+    assert "Ready Client" in text and "Ready" in text
+
+
+def test_riders_card_and_send_rider_on_the_gig(live_server, page):
+    # Owner 2026-11-09: a rider per singer (esp. DJ Shmili), sent to the client on request from the gig.
+    import json
+    errors = collect_console_errors(page)
+    seed_events(page, [fake_gig("EV-9821", "benny", "2099-07-01", clientName="Rider Client", clientEmail="rider@example.com"),
+                       fake_gig("EV-9822", "eli", "2099-07-02", clientName="No Rider Client", clientEmail="x@example.com")])
+    riders = {"benny": {"url": "https://example.com/benny-rider.pdf", "name": "Benny rider.pdf", "uploadedAt": "2026-11-09T00:00:00Z"}}
+    page.context.add_init_script("(() => { const k = 'asp_mock_org_settings_v1'; let o = {}; try { o = JSON.parse(localStorage.getItem(k) || '{}'); } catch (e) {} "
+                                 f"if (!o.riders) {{ o.riders = {json.dumps(riders)}; localStorage.setItem(k, JSON.stringify(o)); }} }})()")
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    goto_nav(page, "settings")
+    card = page.locator('[data-testid="riders-card"]')
+    card.wait_for(state='visible', timeout=15000)
+    assert card.locator('input[data-rider-upload="eli"]').count() == 1
+    assert "Benny rider.pdf" in card.inner_text()
+    goto_nav(page, "leads")
+    page.locator('[data-action="open-event"][data-id="EV-9821"]').first.click()
+    block = page.locator('.sheet [data-testid="rider-block"]')
+    block.wait_for(state='visible')
+    assert block.locator('[data-testid="send-rider"]').is_enabled()
+    page.locator('.sheet [data-action="close-sheet"]').first.click()
+    page.locator('.sheet').wait_for(state='hidden')
+    page.locator('[data-action="open-event"][data-id="EV-9822"]').first.click()
+    page.locator('.sheet').wait_for(state='visible')
+    assert page.locator('.sheet [data-testid="rider-block"]').count() == 0, "a gig with no rider on file shows the rider block"
+    assert not errors, f"console errors: {errors}"
