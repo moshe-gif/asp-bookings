@@ -71,13 +71,13 @@ function brandLogoEmailHtml(width=120){
   return `<img src="${BRAND_ASSET_BASE}asp-horizontal-dark.png" alt="ASP Management" width="${width}" style="display:block;width:${width}px;max-width:100%;height:auto;border:0;"/>`;
 }
 // The artist's name, big, at the top of everything a client sees (owner 2026-11-09: "add the artists name in
-// big at the top of the page in a classy font"). Cormorant Garamond (Google Fonts) where it loads -- the app,
-// the client pages, Apple Mail -- else Didot / Georgia. Inline styles, so emails and the frozen contract HTML
+// big at the top of the page in a classy font"). Archivo light + wide (Google Fonts; the owner turned down a serif) where
+// it loads -- the app, the client pages, Apple Mail -- else Helvetica. Inline styles, so emails and the frozen contract HTML
 // look the same. The server side has the same in supabase/functions/_shared/config.ts (artistNameHtml).
-const ARTIST_FONT = "'Cormorant Garamond',Didot,'Bodoni 72',Georgia,'Times New Roman',serif";
-const ARTIST_FONT_CSS = 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&display=swap';
+const ARTIST_FONT = "Archivo,'Helvetica Neue',Helvetica,Arial,sans-serif";
+const ARTIST_FONT_CSS = 'https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,300..700&display=swap';
 function artistNameHtml(name, { size=38, align='left' } = {}){
-  return name ? `<div class="artist-name" style="font-family:${ARTIST_FONT};font-size:${size}px;font-weight:600;line-height:1.1;letter-spacing:.01em;color:#17171A;text-align:${align};margin:8px 0 2px;overflow-wrap:anywhere;">${esc(name)}</div>` : '';
+  return name ? `<div class="artist-name" style="font-family:${ARTIST_FONT};font-size:${size}px;font-weight:300;font-stretch:112%;line-height:1.1;letter-spacing:-.02em;color:#0B1B2B;text-align:${align};margin:8px 0 2px;overflow-wrap:anywhere;">${esc(name)}</div>` : '';
 }
 // Client email subjects lead with the artist (owner 2026-11-09: "benny friedman via asp").
 function viaAsp(artistName, what=''){ return `${artistName ? `${artistName} via ASP` : 'ASP Management'}${what ? ` — ${what}` : ''}`; }
@@ -4458,6 +4458,8 @@ function appHtml(){
           </div>
           <div style="display:flex;align-items:center;gap:10px;flex:none;">
             ${crewUser() ? '' : `<button class="btn askai-btn" data-action="open-ask-ai" title="Ask AI" style="background:var(--accent-wash);color:var(--accent-ink);border-color:transparent;">${ICO.sparkle}<span class="btn-label">Ask AI</span></button>`}
+            ${isAdmin ? `<select class="viewas" data-view-as aria-label="View the app as a singer" title="See the app exactly as a singer sees it" style="max-width:150px;padding:8px 12px;border-radius:999px;border:1px solid var(--border-strong);background:var(--surface);color:var(--ink);font:inherit;font-size:13px;font-weight:600;">
+              <option value="">View as singer…</option>${ARTISTS.map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select>` : ''}
             ${isAdmin ? `<button class="btn btn-primary newlead-btn" data-action="open-new-lead">${ICO.leads}<span class="btn-label">New Lead</span></button>` : ''}
             ${renderUserChip()}
           </div>
@@ -4600,7 +4602,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.58'; // bump on every release so a phone can tell it has updated. v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Cormorant Garamond at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.60'; // bump on every release so a phone can tell it has updated. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -5080,6 +5082,12 @@ function renderHomeSearch(){
         <span class="pill ${sm.cls}">${esc(sm.label)}</span></div>`; }).join('')}</div>`
       : `<div class="card empty" style="margin-top:8px;">Nothing matches “${esc(q.trim())}”.</div>`) : ''}
   </div>`;
+}
+// The office sees a singer's app (read-only, from the office's copy of their gigs) -- Artists -> Preview their app,
+// and the top bar's "View as singer".
+function startArtistPreview(id){
+  if(!id || !isAdminUser(S.user) || !artistById(id)) return;
+  closeAllOverlays(); S.previewFrom = { user:S.user }; S.user = id; S.view = 'a_dashboard'; pendingViewTransition = true; syncURL(); render();
 }
 function renderThisWeekCard(){
   const gigs = S.events.filter(e=>!e.unpaid && isConfirmed(e) && !isPast(e.date) && daysUntil(e.date) < 7)
@@ -7400,11 +7408,14 @@ function renderLeadChargesSection(f){
 // is a free-text field rather than a dropdown -- swap in a real list here if one gets added.
 // Shared by both the new-lead form (f = S.newLeadForm) and the edit-details form (f =
 // S.editEventForm, ev = the event being edited, for its saved values).
+// Bands already on gigs -- suggested as you type (owner 2026-11-09: "band should autofill as you type"). The client
+// form gets the same list from gig-form.
+function knownBands(){ return [...new Set(S.events.map(e=>String(e.band||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b)); }
 function renderBandFieldsSection(f, ev){
   const band = f.band!==undefined ? f.band : (ev? (ev.band||'') : '');
   const bandSize = f.bandSize!==undefined ? f.bandSize : (ev? (ev.bandSize||'') : '');
   return `<div class="field-row">
-    <div class="field"><label>Which Band Is Playing</label><input data-field="band" value="${esc(band)}" placeholder="e.g. Simcha Players"/></div>
+    <div class="field"><label>Which Band Is Playing</label><input data-field="band" list="knownBands" autocomplete="off" value="${esc(band)}" placeholder="Start typing — e.g. Freilach"/><datalist id="knownBands">${knownBands().map(b=>`<option value="${esc(b)}"></option>`).join('')}</datalist></div>
     <div class="field"><label>Band Size (optional)</label><input type="number" min="0" data-field="bandSize" value="${esc(bandSize)}" placeholder="e.g. 5"/></div>
   </div>`;
 }
@@ -8088,8 +8099,11 @@ function renderClientFormBlock(ev, isAdmin){
   const cf = ev.clientForm;
   const open = S.clientFormOpenId===ev.id;
   const busy = S.gigFormBusy===ev.id;
+  // Sent from an email that isn't the client's (owner 2026-11-09: "flag it if not").
+  const by = cf && cf.submittedBy;
+  const flag = by && !by.matches ? ` <span class="pill pill-warn pill-wrap" data-testid="form-sender-flag" title="Check this came from the client">⚠ Sent from ${esc(by.email || 'an unknown email')}</span>` : '';
   const status = cf && cf.submittedAt
-    ? `<strong style="color:var(--good);">Filled in by the client</strong> <span style="color:var(--ink-3);">${esc(fmtDateShort(cf.submittedAt.slice(0,10)))}</span>`
+    ? `<strong style="color:var(--good);">Filled in by the client</strong> <span style="color:var(--ink-3);">${esc(fmtDateShort(cf.submittedAt.slice(0,10)))}</span>${flag}`
     : `<span style="color:var(--ink-2);">${ev.depositReceived? 'Not filled in yet' : 'Goes to the client by itself once the deposit is in'}</span>`;
   return `<div data-testid="client-form-block" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:10px;">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12.5px;">
@@ -8277,31 +8291,66 @@ function renderGigInfoFormOverlay(){
   </div>`;
 }
 // The ASP gig sheet (owner 2026-10-14): what the artist needs on the day, branded like the contract.
+// The singer's gig sheet (owner 2026-11-09: "the gig info sheet for the singer should be super easy to read"): the
+// essentials in big type first (date, band starts, chuppah, hall), the run of the night, the music in order (the
+// song big; whose version / sung or instrumental under it; a note for the singer highlighted), the yes/no requests as
+// tags, then who to call. Inline styles so it prints and emails the same; the email twin is gigSheetEmailHtml()
+// in supabase/functions/_shared/gigsheet.ts.
+const SONG_HOWS = ['Sung','Instrumental',"We'll send a track"];
+function splitSongLine(line){
+  const parts = String(line||'').split(' · ').map(x=>x.trim()).filter(Boolean);
+  const [title, version] = String(parts[0]||'').split(' — ');
+  const how = parts.slice(1).find(p=>SONG_HOWS.includes(p)) || '';
+  const notes = parts.slice(1).filter(p=>!SONG_HOWS.includes(p));
+  return { title: title||'', version: version||'', how, notes };
+}
 function gigSheetDocHtml(ev){
   const artist = artistById(ev.artistId) || {name:''};
   const sheet = gigInfoSheetOf(ev);
-  const lineup = gigLineupRows(ev, sheet);
-  const mute = '#6B6B72', accent = '#5B78A8';
-  const label = t=>`<div style="font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:${accent};font-weight:700;margin:22px 0 8px;padding-bottom:6px;border-bottom:2px solid #17171A;">${t}</div>`;
-  const cell = 'padding:7px 12px 7px 0;border:none;border-bottom:1px solid #E3E3E8;background:none;font-size:12.5px;vertical-align:top;';
-  const where = [ev.venue, ev.address, [ev.city, ev.state].filter(Boolean).join(', ')].filter(Boolean).join(', ');
-  const facts = [['Date', ev.date? fmtDate(ev.date) : 'TBD'], ['Time', fmtTimeRange(ev.time, ev.endTime)], ['Venue', where || 'TBD'], ...lineup];
-  // The client's form answers that have no place above (yes/no questions, names, notes); songs, times, contacts
-  // and singers are already in their own sections.
-  const clientExtras = ((ev.clientForm||{}).sections||[]).flatMap(sec=>sec.rows||[]).filter(r=>!r.placed);
-  const empty = !lineup.length && !(sheet.schedule||[]).length && !(sheet.songs||[]).length && !sheet.text && !(sheet.contacts||[]).length && !clientExtras.length;
-  return `<div style="background:#fff;color:#17171A;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.55;">
-    ${aspDocHeaderHtml({ light:true, kicker:'GIG SHEET', title:esc(artist.name), subtitle:[esc(ev.type||''), ev.unpaid? '' : esc(ev.clientName||''), ev.date? esc(fmtDateShort(ev.date)) : ''].filter(Boolean).join(' &middot; ') })}
-    <table role="presentation" style="border-collapse:collapse;width:100%;margin-top:6px;border:none;background:none;">
-      ${facts.map(([k,v])=>`<tr><td style="${cell}color:${mute};white-space:nowrap;width:130px;">${esc(k)}</td><td style="${cell}font-weight:700;">${esc(v)}</td></tr>`).join('')}
-    </table>
-    ${(sheet.schedule||[]).length? `${label('Run of the night')}<table role="presentation" style="border-collapse:collapse;width:100%;border:none;background:none;">${sheet.schedule.map(r=>`<tr><td style="${cell}color:${mute};white-space:nowrap;width:90px;">${r.time? esc(fmtTime(r.time)) : ''}</td><td style="${cell}">${esc(r.item)}</td></tr>`).join('')}</table>` : ''}
-    ${(sheet.songs||[]).length? `${label('Songs')}<table role="presentation" style="border-collapse:collapse;width:100%;border:none;background:none;">${sheet.songs.map(r=>`<tr><td style="${cell}color:${mute};width:180px;">${esc(r.moment||'')}</td><td style="${cell}font-weight:700;">${esc(r.song)}</td></tr>`).join('')}</table>` : ''}
-    ${sheet.text? `${label('Notes')}<p style="font-size:12.5px;white-space:pre-wrap;margin:0;">${esc(sheet.text)}</p>` : ''}
-    ${clientExtras.length? `${label("From the client's form")}<table role="presentation" style="border-collapse:collapse;width:100%;border:none;background:none;">${clientExtras.map(r=>`<tr><td style="${cell}color:${mute};width:180px;">${esc(r.label)}</td><td style="${cell}font-weight:700;white-space:pre-wrap;">${esc(r.value)}</td></tr>`).join('')}</table>` : ''}
-    ${(sheet.contacts||[]).length? `${label('Contacts')}<table role="presentation" style="border-collapse:collapse;width:100%;border:none;background:none;">${sheet.contacts.map(c=>`<tr><td style="${cell}font-weight:700;">${esc(c.name)}${c.role?` <span style="color:${mute};font-weight:400;">(${esc(c.role)})</span>`:''}</td><td style="${cell}">${esc(c.phone||'')}${c.phone&&c.email?' &middot; ':''}${esc(c.email||'')}</td></tr>`).join('')}</table>` : ''}
-    ${empty? `<p style="font-size:13px;color:${mute};margin-top:16px;">No gig info added yet.</p>` : ''}
-    <div style="margin-top:22px;padding-top:10px;border-top:1px solid #E3E3E8;font-size:10.5px;color:${mute};">ASP Management${getBrandConfig('asp').phone? ` &middot; ${esc(getBrandConfig('asp').phone)}` : ''}</div>
+  const ink = '#0B1B2B', mute = '#5A6573', rule = '#DDE1E6', navy = '#0F2D52';
+  const label = t=>`<div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:${mute};font-weight:700;margin:26px 0 10px;padding-bottom:8px;border-bottom:2px solid ${ink};">${t}</div>`;
+  const sched = (sheet.schedule||[]).slice().sort((a,b)=>String(a.time||'99').localeCompare(String(b.time||'99')));
+  const chuppah = sched.find(r=>/chuppah|chupa/i.test(r.item||''));
+  const start = sheet.startTime || ev.time;
+  const where = [ev.address, [ev.city, ev.state].filter(Boolean).join(', ')].filter(Boolean).join(', ');
+  const tile = (k, v, sub='')=>`<td style="width:50%;padding:12px 14px;border:1px solid ${rule};vertical-align:top;background:#fff;">
+      <div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:${mute};font-weight:700;">${k}</div>
+      <div style="font-size:21px;font-weight:600;line-height:1.25;margin-top:4px;color:${ink};">${v}</div>${sub?`<div style="font-size:13px;color:${mute};margin-top:2px;">${sub}</div>`:''}</td>`;
+  const facts = `<table role="presentation" style="width:100%;border-collapse:collapse;margin-top:14px;">
+    <tr>${tile('Date', esc(ev.date? fmtDate(ev.date) : 'TBD'))}${tile('Band starts', esc(start && start!=='00:00'? fmtTime(start) : 'TBD'))}</tr>
+    <tr>${chuppah? tile('Chuppah', esc(chuppah.time? fmtTime(chuppah.time) : 'TBD')) : tile('Event', esc(ev.type||''))}${tile('Hall', esc(ev.venue||'TBD'), `${esc(where)}${hasLocation(ev)? ` · <a href="${gmapsUrl(ev)}" style="color:${navy};font-weight:600;">Maps</a>` : ''}`)}</tr>
+  </table>`;
+  const who = [ev.band && ['Band', `${ev.band}${ev.bandSize?` (${ev.bandSize} piece${Number(ev.bandSize)===1?'':'s'})`:''}`], sheet.choir && ['Choir', sheet.choir], sheet.otherSingers && ['Also singing', sheet.otherSingers], ev.dressCode && ['Dress code', ev.dressCode]].filter(Boolean);
+  const whoHtml = who.length ? `<div style="margin-top:12px;font-size:15px;line-height:1.6;">${who.map(([k,v])=>`<div><span style="color:${mute};">${esc(k)}:</span> <strong>${esc(v)}</strong></div>`).join('')}</div>` : '';
+  const runHtml = sched.length ? label('Run of the night') + sched.map(r=>`<div style="display:flex;gap:16px;padding:8px 0;border-bottom:1px solid ${rule};font-size:16px;">
+      <strong style="width:84px;flex:none;color:${navy};">${esc(r.time? fmtTime(r.time) : '')}</strong><span>${esc(r.item||'')}</span></div>`).join('') : '';
+  const songsHtml = (sheet.songs||[]).length ? label('Music — in order') + sheet.songs.map((r, i)=>{
+      const p = splitSongLine(r.song);
+      return `<div style="padding:10px 0;border-bottom:1px solid ${rule};">
+        <div style="font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:${mute};font-weight:700;">${esc(r.moment||'')}</div>
+        <div style="font-size:18px;font-weight:700;line-height:1.3;color:${ink};margin-top:2px;white-space:pre-wrap;">${esc(p.title)}</div>
+        ${p.version || p.how ? `<div style="font-size:14px;color:${mute};margin-top:1px;">${[p.version, p.how].filter(Boolean).map(esc).join(' · ')}</div>` : ''}
+        ${p.notes.map(n=>`<div style="margin-top:6px;background:#FFF2D6;color:#7A4E08;font-size:14px;font-weight:600;padding:6px 10px;border-radius:6px;">${esc(n)}</div>`).join('')}
+      </div>`; }).join('') : '';
+  // The client's form answers with no other place: yes/no requests as tags, links clickable, the rest as lines.
+  const extras = ((ev.clientForm||{}).sections||[]).flatMap(sec=>sec.rows||[]).filter(r=>!r.placed);
+  const yn = extras.filter(r=>['Yes','No','Not sure'].includes(r.value));
+  const rest = extras.filter(r=>!['Yes','No','Not sure'].includes(r.value));
+  const tag = r=>{ const yes = r.value==='Yes', no = r.value==='No';
+    return `<span style="display:inline-block;margin:0 6px 6px 0;padding:6px 12px;border-radius:999px;font-size:14px;font-weight:600;${yes?`background:${navy};color:#fff;`:no?`background:#EEF0F3;color:${mute};text-decoration:line-through;`:`background:#FFF2D6;color:#7A4E08;`}">${esc(r.label)}${yes?' ✓':no?'':' ?'}</span>`; };
+  const extrasHtml = extras.length ? label("From the client's form") + (yn.length ? `<div>${yn.map(tag).join('')}</div>` : '') + rest.map(r=>`<div style="padding:8px 0;border-bottom:1px solid ${rule};font-size:15px;">
+      <div style="font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:${mute};font-weight:700;">${esc(r.label)}</div>
+      <div style="margin-top:2px;white-space:pre-wrap;">${/^https?:\/\//.test(r.value)? `<a href="${esc(r.value)}" style="color:${navy};font-weight:600;word-break:break-all;">${esc(r.value)}</a>` : esc(r.value)}</div></div>`).join('') : '';
+  const notesHtml = sheet.text ? label('Notes') + `<p style="font-size:15px;white-space:pre-wrap;margin:0;line-height:1.55;">${esc(sheet.text)}</p>` : '';
+  const contactsHtml = (sheet.contacts||[]).length ? label('Who to call') + sheet.contacts.map(c=>`<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid ${rule};">
+      <div><strong style="font-size:16px;">${esc(c.name)}</strong>${c.role?`<div style="font-size:13px;color:${mute};">${esc(c.role)}</div>`:''}</div>
+      ${c.phone? `<a href="tel:${esc(String(c.phone).replace(/[^\d+]/g,''))}" style="font-size:17px;font-weight:700;color:${navy};text-decoration:none;white-space:nowrap;">${esc(c.phone)}</a>` : ''}</div>`).join('') : '';
+  const empty = !sched.length && !(sheet.songs||[]).length && !sheet.text && !(sheet.contacts||[]).length && !extras.length;
+  return `<div style="background:#fff;color:${ink};font-family:Archivo,-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.45;">
+    ${aspDocHeaderHtml({ light:true, kicker:'GIG SHEET', title:esc(artist.name), subtitle:[esc(ev.type||''), ev.unpaid? '' : esc(ev.clientName||'')].filter(Boolean).join(' &middot; ') })}
+    ${facts}${whoHtml}${runHtml}${songsHtml}${extrasHtml}${notesHtml}${contactsHtml}
+    ${empty? `<p style="font-size:14px;color:${mute};margin-top:18px;">No gig info added yet.</p>` : ''}
+    <div style="margin-top:24px;padding-top:10px;border-top:1px solid ${rule};font-size:11px;color:${mute};">ASP Management${getBrandConfig('asp').phone? ` &middot; ${esc(getBrandConfig('asp').phone)}` : ''}</div>
   </div>`;
 }
 function renderGigInfoDoc(){
@@ -9362,7 +9411,7 @@ function aspDocHeaderHtml({ kicker, title, subtitle, bsd, light }){
       ${bsd? `<div style="position:absolute;top:${light ? '0' : '12px'};right:${light ? '0' : '16px'};font-size:11px;color:#5B78A8;">BS"D</div>` : ''}
       <img src="${BRAND_ASSET_BASE}asp-horizontal-dark.png" alt="ASP Management" width="110" style="display:block;width:110px;max-width:100%;height:auto;border:0;margin:0 0 12px;"/>
       <div style="font-size:10.5px;letter-spacing:.22em;color:#5B78A8;font-weight:700;">${kicker}</div>
-      <div class="artist-name" style="font-family:${ARTIST_FONT};font-size:40px;font-weight:600;line-height:1.1;letter-spacing:.01em;margin:2px 0 4px;overflow-wrap:anywhere;">${title}</div>
+      <div class="artist-name" style="font-family:${ARTIST_FONT};font-size:40px;font-weight:300;font-stretch:112%;line-height:1.1;letter-spacing:-.02em;margin:2px 0 4px;overflow-wrap:anywhere;">${title}</div>
       <div style="font-size:12.5px;color:#6B6B72;">${subtitle}</div>
     </div>`;
 }
@@ -11379,6 +11428,9 @@ function bindGlobal(){
     // Re-render once the user leaves the field (e.g. a cleared overtime rate shows the automatic one).
     if(el.dataset.renderOnChange!==undefined) el.addEventListener('change', ()=>render());
   });
+  // "View as singer" (owner 2026-11-09: "make me a singer login so I can see what they will see"): the same read-only
+  // preview as Artists -> Preview their app, from the top bar.
+  document.querySelectorAll('[data-view-as]').forEach(el=>el.addEventListener('change', ()=>startArtistPreview(el.value)));
   document.querySelectorAll('[data-cq]').forEach(el=>el.addEventListener('input', ()=>{ if(S.contractQuestions) S.contractQuestions[el.dataset.cq] = el.value; }));
   document.querySelectorAll('[data-home-search]').forEach(el=>el.addEventListener('input', ()=>{ S.homeSearch = el.value; renderPreservingFocus(); }));
   document.querySelectorAll('[data-rider-upload]').forEach(inp=>inp.addEventListener('change', ()=>{ const f = inp.files && inp.files[0]; inp.value = ''; if(f) uploadRider(inp.dataset.riderUpload, f); }));
@@ -11762,7 +11814,7 @@ function bindGlobal(){
       // Owner 2026-10-29: "a singer login profile so i can see what their login will look like". The
       // office session shows the singer's own pages (their gigs from the office's copy). Read-only: with
       // S.user a singer, artistReadOnly() refuses every save and shared sync pauses until Exit.
-      case 'preview-as-artist': if(isAdminUser(S.user) && artistById(id)){ closeAllOverlays(); S.previewFrom = { user:S.user }; S.user = id; S.view = 'a_dashboard'; pendingViewTransition = true; syncURL(); render(); } break;
+      case 'preview-as-artist': startArtistPreview(id); break;
       case 'exit-preview': if(S.previewFrom){ const back = S.previewFrom.user, a = S.user; closeAllOverlays(); S.previewFrom = null; S.user = back; S.artistDetailId = a; S.view = 'artist_detail'; syncURL(); render(); } break;
       case 'crew-assign': doCrewCall({ action:'assign', eventId:id, crewId:t.getAttribute('data-crew') }, 'Asked.'); break;
       case 'crew-unassign': doCrewCall({ action:'unassign', eventId:id, crewId:t.getAttribute('data-crew') }, 'Taken back.'); break;

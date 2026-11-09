@@ -20,7 +20,7 @@ type Doc = Record<string, any>;
 //   c:<role>:<part>      a contact (part = name | phone | email)
 //   band                 the band (weddings)
 //   singers              "other singers"
-export type Field = { k: string; label: string; t: string; ph?: string; hint?: string; to?: string; half?: boolean };
+export type Field = { k: string; label: string; t: string; ph?: string; hint?: string; to?: string; half?: boolean; show?: string };
 export type Section = { title: string; intro?: string; fields: Field[] };
 export type FormDef = { kind: string; title: string; intro: string; sections: Section[] };
 
@@ -40,44 +40,60 @@ const extras = (more: Field[] = []): Section => ({ title: "Anything else", field
 const contacts = (): Section => ({ title: "Who to call on the day", intro: "So the singer and band can reach the right person at the event.",
   fields: [...contactFields("dayof", "Contact on the day", "Their phone"), ...contactFields("planner", "Party planner (if any)", "Planner phone")] });
 
-const WEDDING: FormDef = { kind: "wedding", title: "Wedding details", intro: "Tell us about the wedding so the music is just right. Fill in what you know now; you can come back to this same link to add or change anything.", sections: [
-  { title: "The couple", fields: [
-    { k: "chossonFirst", label: "Chosson first name", t: "text", half: true }, { k: "chossonLast", label: "Chosson last name", t: "text", half: true },
-    { k: "chossonPhone", label: "Chosson phone", t: "tel", to: "c:chosson:phone", half: true }, { k: "chossonEmail", label: "Chosson email", t: "email", to: "c:chosson:email", half: true },
-    { k: "kallahFirst", label: "Kallah first name", t: "text", half: true }, { k: "kallahLast", label: "Kallah last name", t: "text", half: true },
-    { k: "kallahPhone", label: "Kallah phone", t: "tel", to: "c:kallah:phone", half: true }, { k: "kallahEmail", label: "Kallah email", t: "email", to: "c:kallah:email", half: true },
+// The wedding form follows the office's own prep sheet and how clients actually send it (owner 2026-11-09: "the
+// wedding form is terrible, it does not reflect the ones i sent you"): names, band, who sings; the times; then the
+// chuppah IN ORDER, each part a "song" field (the song, whose version, sung / instrumental / a track they send, and a
+// note for the singer); then the reception.
+const song = (k: string, label: string, ph = "Song"): Field => ({ k, label, t: "song", ph, to: "song" });
+const WEDDING: FormDef = { kind: "wedding", title: "Wedding prep form", intro: "Everything the singer and band need for the chuppah and the wedding. Fill in what you know now; you can come back to this same link to add or change anything.", sections: [
+  { title: "The wedding", fields: [
+    { k: "familyNames", label: "Family names", t: "text", ph: "e.g. Groman – Kohn" },
+    { k: "chossonFirst", label: "Chosson's first name", t: "text", half: true }, { k: "kallahFirst", label: "Kallah's first name", t: "text", half: true },
+    { k: "chossonLast", label: "Chosson's last name", t: "text", half: true }, { k: "kallahLast", label: "Kallah's last name", t: "text", half: true },
+    { k: "band", label: "Band", t: "text", ph: "Who is playing", to: "band", half: true },
+    // Our singer sings both unless the client ticks the box (owner 2026-11-09: "should assume the singer, and a check box if
+    // there is someone else").
+    { k: "chuppahOther", label: "Someone else is singing at the chuppah too", t: "check" },
+    { k: "chuppahSinger", label: "Who else sings at the chuppah", t: "text", ph: "e.g. a friend of the chosson", to: "singers", show: "chuppahOther" },
+    { k: "weddingOther", label: "Someone else is singing at the wedding too", t: "check" },
+    { k: "weddingSinger", label: "Who else sings at the wedding", t: "text", ph: "Name, and which songs", to: "singers", show: "weddingOther" },
   ] },
   { title: "Times", fields: [
-    { k: "inviteTime", label: "Invite time (kabbalas panim)", t: "time", to: "sched:Kabbalas Panim", half: true },
-    { k: "musicStart", label: "Music starts", t: "time", to: "start", half: true },
+    { k: "inviteTime", label: "Invite time / Kabbalas Panim", t: "time", to: "sched:Kabbalas Panim", half: true },
+    { k: "roomOpens", label: "Room opens", t: "time", to: "sched:Room opens", half: true },
+    { k: "musicStart", label: "Band starts", t: "time", to: "start", half: true },
     { k: "chuppahTime", label: "Chuppah", t: "time", to: "sched:Chuppah", half: true },
-    { k: "band", label: "Band", t: "text", ph: "Who is playing", to: "band", half: true },
-    { k: "chuppahSinger", label: "Who sings the chuppah", t: "text", ph: "Our singer, or with a friend / relative", to: "singers" },
   ] },
-  { title: "Chuppah songs", intro: "For each moment, the song and (if it matters) whose version, and whether it's sung or instrumental. Not decided yet? Leave it blank and come back later.", fields: [
-    { k: "sOpening", label: "Opening / prelude", t: "text", ph: SONG_PH, to: "song" },
-    { k: "sKids", label: "Little kids / flower girls", t: "text", ph: "Usually instrumental", to: "song" },
-    { k: "familyProcession", label: "Family procession", t: "textarea", ph: "Names in order, and how many sets walk to each song", hint: "Please list everyone walking, with names and how many sets walk by each song.", to: "song" },
-    { k: "sChosson", label: "Chosson walking down", t: "text", ph: SONG_PH, to: "song" },
-    { k: "sMiAdir", label: "Mi Adir", t: "text", ph: SONG_PH, to: "song" },
-    { k: "sKallah", label: "Kallah walking down", t: "text", ph: SONG_PH, to: "song" },
-    { k: "sMiBon", label: "Mi Bon Siach (circling)", t: "text", ph: SONG_PH, to: "song" },
-    { k: "sAfterCircling", label: "After circling", t: "text", ph: SONG_PH, to: "song" },
-    { k: "sImEshkachech", label: "Im Eshkachech / Shir Hamaalos", t: "text", ph: SONG_PH, to: "song" },
-    { k: "sAfterBrachos", label: "Songs after the brachos", t: "textarea", ph: "One per line", to: "song" },
-    { k: "sEnd", label: "End of chuppah", t: "text", ph: "e.g. Od Yishama", to: "song" },
+  { title: "The chuppah, in order", intro: "For each part: the song, whose version, and whether it's sung, instrumental or a track you'll send. Skip any part you don't need.", fields: [
+    song("sOpening", "1. Chuppah opening", "Usually instrumental"),
+    song("sPrelude", "2. Prelude"),
+    { k: "announcement", label: "3. Announcement after the prelude", t: "text", ph: "What to announce, if anything" },
+    song("sKids", "4. Little kids walking down"),
+    song("sChosson", "5. Chosson walking down"),
+    song("sMiAdir", "6. Mi Adir"),
+    { k: "familyProcession", label: "7. Family procession", t: "textarea", ph: "Names in order, and how many sets walk to each song", hint: "Please list the family processions fully, with names and how many sets walk by each song." },
+    song("sFlower", "8. Flower girls", "Usually instrumental"),
+    song("sKallah", "9. Kallah walking down"),
+    song("sMiBon", "10. Mi Bon Siach (circling)"),
+    song("sAfterCircling", "11. After circling", "e.g. Is Bonim"),
+    song("sMedley", "12. Chuppah medley"),
+    song("sImEshkachech", "13. Im Eshkachech (or Shir Hamaalos)"),
+    { k: "sAfterBrachos", label: "14. Songs after the brachos", t: "textarea", ph: "One per line: song – whose version", to: "song" },
+    { k: "sEnd", label: "15. End of chuppah", t: "text", ph: "e.g. Od Yishama — continue 5 extra minutes", to: "song" },
   ] },
   { title: "Reception", fields: [
-    { k: "intro", label: "Intro and name announcement", t: "textarea", ph: "Intro song, and exactly how to announce the couple", to: "song" },
+    song("sIntro", "Intro (couple's entrance)", "Song, or 'we'll send the track'"),
+    { k: "introAnnounce", label: "Name announcement — exactly how to say it", t: "text", ph: "e.g. Motty & Chay" },
     { k: "dinnerMusic", label: "Dinner music requests", t: "textarea", to: "song" },
-    { k: "danceRequests", label: "Dance requests", t: "textarea", ph: "Songs, styles, a medley for the third dance…", to: "song" },
-    { k: "flashMob", label: "Flash mob", t: "yesno" },
-    { k: "flashMobDetails", label: "Flash mob song and when", t: "text", ph: "If there is one" },
+    { k: "danceRequests", label: "Dance requests", t: "textarea", ph: "3rd dance, Israeli, Chassidish, a medley…", to: "song" },
+    { k: "flashMob", label: "Flash mob", t: "yesno", half: true },
     { k: "keitzad", label: "Keitzad Merakdim", t: "yesno", half: true },
+    { k: "flashMobDetails", label: "Flash mob song and when", t: "text", ph: "Song, and when in the evening", show: "flashMob" },
+    { k: "flashMobLink", label: "Link to the flash mob song or video", t: "url", ph: "Paste a YouTube, Drive or WeTransfer link", show: "flashMob" },
     { k: "kumzitz", label: "Kumzitz", t: "yesno", half: true },
     { k: "mezinka", label: "Mezinka", t: "yesno", half: true },
     { k: "mitzvaTantz", label: "Mitzva tantz", t: "yesno", half: true },
-    { k: "guestSingers", label: "Guest singers", t: "text", ph: "Anyone else singing a song?", to: "singers" },
+    { k: "guestSingers", label: "Guest singers", t: "text", ph: "Anyone else singing a song?", to: "singers", half: true },
     { k: "announcements", label: "Special announcements", t: "textarea" },
   ] },
   contacts(),
@@ -179,17 +195,34 @@ export function cleanAnswers(def: FormDef, raw: unknown): Record<string, string>
     let v = typeof src[f.k] === "string" ? String(src[f.k]).replace(/\r\n/g, "\n").trim() : "";
     if (f.t === "time" && v && !/^\d{2}:\d{2}$/.test(v)) v = "";
     if (f.t === "yesno" && v && !["Yes", "No", "Not sure"].includes(v)) v = "";
+    if (f.t === "check" && v !== "Yes") v = "";
+    if (f.t === "url" && v && !/^https?:\/\/\S+$/i.test(v)) v = /^[\w.-]+\.[a-z]{2,}\/?\S*$/i.test(v) ? "https://" + v : "";
+    if (f.show && src[f.show] !== "Yes") v = "";   // only when its box is ticked
     v = v.slice(0, f.t === "textarea" ? 4000 : 300);
     if (v) out[f.k] = v;
+    if (f.t === "song") for (const part of SONG_PARTS) {
+      let p = typeof src[f.k + part] === "string" ? String(src[f.k + part]).trim().slice(0, 300) : "";
+      if (part === "~how" && p && !SONG_HOW.includes(p)) p = "";
+      if (p) out[f.k + part] = p;
+    }
   }
   return out;
 }
 
+// A "song" field's other parts: whose version, how (sung / instrumental / a track the client sends), a note.
+const SONG_PARTS = ["~by", "~how", "~note"];
+const SONG_HOW = ["Sung", "Instrumental", "We'll send a track"];
+// One line for a song answer: "Aheim — Beri Weber · Sung · modulate for the high part".
+export function answerValue(f: Field, a: Record<string, string>): string {
+  if (f.t !== "song") return a[f.k] || "";
+  const head = [a[f.k], a[f.k + "~by"]].filter(Boolean).join(" — ");
+  return [head, a[f.k + "~how"], a[f.k + "~note"]].filter(Boolean).join(" · ");
+}
 // Name halves that become a contact's name (applyAnswers).
 const NAME_PARTS = new Set(["chossonFirst", "chossonLast", "kallahFirst", "kallahLast"]);
 // The answers as labelled sections (placed: it also landed in Gig Info's songs / times / contacts / singers) (what the app shows under Gig Info → Client form).
 export function answerSections(def: FormDef, a: Record<string, string>) {
-  return def.sections.map((s) => ({ title: s.title, rows: s.fields.filter((f) => a[f.k]).map((f) => ({ label: f.label, value: a[f.k], ...(f.to || NAME_PARTS.has(f.k) ? { placed: true } : {}) })) }))
+  return def.sections.map((s) => ({ title: s.title, rows: s.fields.filter((f) => answerValue(f, a)).map((f) => ({ label: f.label, value: answerValue(f, a), ...(f.to || NAME_PARTS.has(f.k) ? { placed: true } : {}) })) }))
     .filter((s) => s.rows.length);
 }
 
@@ -204,7 +237,7 @@ export function applyAnswers(ev: Doc, def: FormDef, a: Record<string, string>, a
   const fields = def.sections.flatMap((s) => s.fields);
 
   const schedule = fields.filter((f) => f.to?.startsWith("sched:") && a[f.k]).map((f) => ({ time: a[f.k], item: f.to!.slice(6) }));
-  const songs = fields.filter((f) => f.to === "song" && a[f.k]).map((f) => ({ moment: f.label, song: a[f.k] }));
+  const songs = fields.filter((f) => f.to === "song" && answerValue(f, a)).map((f) => ({ moment: f.label.replace(/^\d+\.\s*/, ""), song: answerValue(f, a) }));
   const byRole: Record<string, Doc> = {};
   for (const f of fields) {
     const m = /^c:(\w+):(\w+)$/.exec(f.to || "");

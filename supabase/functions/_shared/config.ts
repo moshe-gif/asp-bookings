@@ -13,13 +13,13 @@ export function brandLogoHtml(width = 110): string {
   return `<img src="${appUrl()}/assets/brand/asp-horizontal-dark.png" alt="ASP Management" width="${width}" style="display:block;width:${width}px;max-width:100%;height:auto;border:0;"/>`;
 }
 
-// The artist's name in big type at the top of everything a client gets (owner 2026-11-09). Cormorant
-// Garamond where the mail app loads web fonts (Apple Mail does), else Didot / Georgia -- all serif.
-export const ARTIST_FONT = "'Cormorant Garamond',Didot,'Bodoni 72',Georgia,'Times New Roman',serif";
-export const ARTIST_FONT_CSS = "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&display=swap";
+// The artist's name in big type at the top of everything a client gets (owner 2026-11-09): Archivo light + wide
+// (the owner turned down a serif) where the mail app loads web fonts (Apple Mail does), else Helvetica.
+export const ARTIST_FONT = "Archivo,'Helvetica Neue',Helvetica,Arial,sans-serif";
+export const ARTIST_FONT_CSS = "https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,300..700&display=swap";
 const escB = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 export function artistNameHtml(name: string, size = 34): string {
-  return name ? `<div style="font-family:${ARTIST_FONT};font-size:${size}px;font-weight:600;line-height:1.1;letter-spacing:.01em;color:#17171A;margin:10px 0 0;overflow-wrap:anywhere;">${escB(name)}</div>` : "";
+  return name ? `<div style="font-family:${ARTIST_FONT};font-size:${size}px;font-weight:300;font-stretch:112%;line-height:1.1;letter-spacing:-.02em;color:#0B1B2B;margin:10px 0 0;overflow-wrap:anywhere;">${escB(name)}</div>` : "";
 }
 // The top of a client email: the small dark logo, then the artist's name (if any).
 export function emailHeaderHtml(artist = ""): string {

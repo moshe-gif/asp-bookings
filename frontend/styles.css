@@ -1,21 +1,21 @@
 /* ============ TOKENS ============ */
 :root{
   color-scheme: light;
-  --page:#EEEEF1; --surface:#FFFFFF; --surface-2:#F8F8FA; --surface-3:#E6E6EA;
-  --ink:#17171A; --ink-2:#67676D; --ink-3:#9A9AA1;
-  --border:#E1E1E6; --border-strong:#D1D1D8;
-  --accent:#4C6FA5; --accent-hover:#3D5C8C; --accent-wash:#E4EAF3; --accent-ink:#33517A;
+  --page:#F6F7F9; --surface:#FFFFFF; --surface-2:#FFFFFF; --surface-3:#EEF0F3;
+  --ink:#0B1B2B; --ink-2:#4F5B69; --ink-3:#6B7480;
+  --border:#DDE1E6; --border-strong:#C7CDD5;
+  --accent:#0F2D52; --accent-hover:#081A31; --accent-wash:#E6ECF4; --accent-ink:#0F2D52;
   --good:#1F8A54; --good-wash:#E5F5EC; --good-ink:#146B3F;
   --warn:#C6860B; --warn-wash:#FFF2D6; --warn-ink:#8F5E0A;
   --crit:#D64444; --crit-wash:#FDE9E9; --crit-ink:#A32E2E;
   --cat-1:#5B7FA6; --cat-2:#5C8A6B; --cat-3:#B87F94; --cat-4:#AD8B57; --cat-5:#4F9488; --cat-6:#BC7355; --cat-7:#7A6FA0;
-  --shadow-sm:0 1px 3px rgba(20,20,26,.05),0 1px 1px rgba(20,20,26,.04);
-  --shadow-md:0 16px 40px rgba(20,20,26,.10),0 2px 8px rgba(20,20,26,.05);
-  --shadow-lg:0 24px 64px rgba(20,20,26,.16),0 4px 14px rgba(20,20,26,.06);
+  --shadow-sm:none;
+  --shadow-md:0 12px 32px rgba(11,27,43,.10),0 1px 3px rgba(11,27,43,.06);
+  --shadow-lg:0 20px 48px rgba(11,27,43,.14),0 2px 6px rgba(11,27,43,.06);
   --glass-sheen:rgba(255,255,255,.55); --glass-edge:rgba(255,255,255,.75);
-  --r-sm:8px; --r-md:12px; --r-lg:20px; --r-xl:28px;
-  --font-display:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  --font-body:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --r-sm:6px; --r-md:8px; --r-lg:10px; --r-xl:14px;
+  --font-display:Archivo,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --font-body:Archivo,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   --font-mono:ui-monospace,"SF Mono","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;
 }
 /* The dark palette appears twice -- once for "system is dark" (unless the user picked light) and once
@@ -24,10 +24,10 @@
 @media (prefers-color-scheme: dark){
   :root:where(:not([data-theme="light"])){
     color-scheme: dark;
-    --page:#14161C; --surface:#1C2029; --surface-2:#232733; --surface-3:#2B303D;
-    --ink:#F5F4EF; --ink-2:#C2C4CC; --ink-3:#8C8F99;
-    --border:#333947; --border-strong:#414858;
-    --accent:#7FA0D1; --accent-hover:#93B0DA; --accent-wash:#24344A; --accent-ink:#B9CEEA;
+    --page:#0B1119; --surface:#111925; --surface-2:#111925; --surface-3:#1B2533;
+    --ink:#F2F4F7; --ink-2:#B8C0CB; --ink-3:#8C96A3;
+    --border:#243041; --border-strong:#33415A;
+    --accent:#9DB8E0; --accent-hover:#B5CBEA; --accent-wash:#1A2B44; --accent-ink:#C3D4EE;
     --good:#3CC989; --good-wash:#173420; --good-ink:#8CEBB8;
     --warn:#F0B94A; --warn-wash:#3F2F10; --warn-ink:#F5CE7E;
     --crit:#F07A7A; --crit-wash:#3F1C1C; --crit-ink:#F5A8A8;
@@ -38,10 +38,10 @@
 }
 :root[data-theme="dark"]{
   color-scheme: dark;
-  --page:#14161C; --surface:#1C2029; --surface-2:#232733; --surface-3:#2B303D;
-  --ink:#F5F4EF; --ink-2:#C2C4CC; --ink-3:#8C8F99;
-  --border:#333947; --border-strong:#414858;
-  --accent:#7FA0D1; --accent-hover:#93B0DA; --accent-wash:#24344A; --accent-ink:#B9CEEA;
+  --page:#0B1119; --surface:#111925; --surface-2:#111925; --surface-3:#1B2533;
+  --ink:#F2F4F7; --ink-2:#B8C0CB; --ink-3:#8C96A3;
+  --border:#243041; --border-strong:#33415A;
+  --accent:#9DB8E0; --accent-hover:#B5CBEA; --accent-wash:#1A2B44; --accent-ink:#C3D4EE;
   --good:#3CC989; --good-wash:#173420; --good-ink:#8CEBB8;
   --warn:#F0B94A; --warn-wash:#3F2F10; --warn-ink:#F5CE7E;
   --crit:#F07A7A; --crit-wash:#3F1C1C; --crit-ink:#F5A8A8;
@@ -732,3 +732,46 @@ html{ touch-action:pan-x pan-y; -webkit-text-size-adjust:100%; text-size-adjust:
   .cal-cell .cal-evt, .cal-cell .cal-more{ pointer-events:none; }
   .cal-cell .cal-add-btn{ display:none; }
 }
+
+/* ============ THE ASP LOOK (owner 2026-11-09: look "B · Private Bank" with rounded buttons and C's type) ============
+   White paper, near-black ink, one deep navy for actions, hairline rules instead of shadows; Archivo throughout,
+   LIGHT + WIDE for titles and figures (font-stretch 112%, weight 300). Colors and fonts come from the tokens above;
+   this layer only reshapes components. Documents keep their own inline styles (emails/contracts look the same). */
+body{ font-feature-settings:"tnum" 1; letter-spacing:.005em; }
+h1,h2,h3{ font-weight:400; font-stretch:112%; letter-spacing:-.02em; }
+h1{ font-weight:300; }
+h4{ font-weight:600; }
+.topbar h1{ font-size:1.65rem; font-weight:300; }
+.section-head h2{ font-size:1.15rem; font-weight:400; }
+.u-label, th{ letter-spacing:.09em; font-weight:600; color:var(--ink-3); }
+.u-mono{ font-family:var(--font-body); font-variant-numeric:tabular-nums; }   /* money in the app's own type, figures aligned */
+.ledger{ font-family:var(--font-body); font-variant-numeric:tabular-nums; }
+
+/* Buttons: rounded pills, flat navy, no glow. */
+.btn{ border-radius:999px; font-weight:600; padding:9px 16px; box-shadow:none; }
+.btn-sm{ border-radius:999px; }
+.btn-primary{ box-shadow:none; }
+.btn:active{ transform:none; }
+.icon-btn{ border-radius:999px; }
+
+/* Cards: white with a hairline, small corners, no shadow; the page is a faint grey behind them. */
+.card{ border-radius:var(--r-md); box-shadow:none; }
+.modal, .doc{ border-radius:var(--r-lg); }
+.stat-tile{ padding:18px 20px 16px; gap:4px; }
+.stat-tile .val{ font-weight:300; font-stretch:112%; letter-spacing:-.02em; font-size:2.25rem; }
+.stat-tile:hover, .stat-tile[style*="cursor:pointer"]:hover{ transform:none; box-shadow:none; border-color:var(--accent); }
+
+/* Side menu: part of the page, divided by a rule -- not a floating card. The active item is a navy pill. */
+.rail{ background:var(--surface); border:0; border-right:1px solid var(--border); border-radius:0; box-shadow:none; top:0; height:100vh; }
+.rail-link{ border-radius:999px; font-weight:500; }
+.rail-slider{ border-radius:999px; box-shadow:none; }
+
+/* Status pills: quieter, small caps feel. */
+.pill{ font-weight:600; letter-spacing:.03em; }
+
+/* Tables: ruled, no zebra; the header carries a stronger rule like a statement. */
+th{ border-bottom:1px solid var(--ink); }
+.filter-chip{ font-weight:600; }
+.filter-chip.sel{ background:var(--accent); border-color:var(--accent); color:#fff; }
+/* The gig's singer name at the top of its window: light + wide like every title. */
+.sheet-head strong[style*="font-display"]{ font-weight:400 !important; font-stretch:112%; font-size:1.45rem !important; letter-spacing:-.02em; }

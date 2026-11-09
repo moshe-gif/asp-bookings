@@ -53,7 +53,7 @@ def test_contract_header_is_light_with_small_logo_and_artist_name(live_server, p
     name = body.locator('.artist-name').first
     assert name.is_visible()
     style = name.get_attribute("style") or ""   # inline on purpose: emails and the frozen contract HTML carry it too
-    assert 'Cormorant' in style and 'font-size:40px' in style, style
+    assert 'Archivo' in style and 'font-weight:300' in style and 'font-size:40px' in style, style
     widths = page.evaluate("() => [...document.querySelectorAll('.doc-body img[src*=\"asp-horizontal\"]')].map(i => i.getBoundingClientRect().width)")
     assert widths and max(widths) <= 120, f"logo too big: {widths}"
     # Paper stays white in the dark theme.

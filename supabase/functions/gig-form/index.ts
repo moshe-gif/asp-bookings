@@ -80,9 +80,12 @@ Deno.serve(async (req) => {
   const closed = String(g.e.date) < nyToday();
 
   if (body.action === "view") {
+    // Bands already on gigs, so the band question suggests them as the client types (owner 2026-11-09).
+    const { data: bandRows } = await sb.from("events").select("band:app_doc->>band").not("app_doc->>band", "is", null).limit(2000);
+    const bands = [...new Set((bandRows || []).map((b: Row) => String(b.band || "").trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y)).slice(0, 300);
     if (!link.first_viewed_at) await sb.from("gig_form_links").update({ first_viewed_at: new Date().toISOString() }).eq("id", link.id);
     const ev = g.ev;
-    return json({ ok: true, form: def, closed,
+    return json({ ok: true, form: def, closed, bands,
       gig: { when: g.when, singers: g.singers, venue: [ev.venue, ev.city].filter(Boolean).join(", "), clientFirst: String(ev.clientName || "").trim().split(/\s+/)[0] || "", type: ev.type || "" },
       answers: ev.clientForm?.kind === def.kind ? ev.clientForm.answers || {} : {}, submittedAt: ev.clientForm?.submittedAt || null });
   }
@@ -90,11 +93,22 @@ Deno.serve(async (req) => {
   if (body.action === "submit") {
     if (closed) return json({ ok: false, error: "closed" }, 410);
     if ((link.submit_count || 0) >= MAX_SUBMITS) return json({ ok: false, error: "too_many" }, 429);
+    // Who sent it (owner 2026-11-09: "anyone can [open it] but we should double check that the response is coming
+    // from the correct email address, and flag it if not"): the form asks for the sender's email; it is compared
+    // with the client's email(s) on the gig. A mismatch is saved anyway and flagged to the office.
+    const by = String(body.submitterEmail || "").trim().toLowerCase().slice(0, 200);
+    if (by && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(by)) return json({ ok: false, error: "email" }, 400);
+    const onFile = String(g.ev.clientEmail || "").toLowerCase().split(/[;,\s]+/).filter((x) => x.includes("@"));
+    const matches = !!by && onFile.includes(by);   // no email given (an older copy of the page) = not verified
     const answers = cleanAnswers(def, body.answers);
     const at = new Date().toISOString();
     const first = !g.ev.clientForm?.submittedAt;
     const next = applyAnswers(g.ev, def, answers, at);
-    next.log = [...(Array.isArray(g.ev.log) ? g.ev.log : []), { ts: at, type: "success", text: first ? "The client filled in the event details form." : "The client updated the event details form." }];
+    next.clientForm.submittedBy = { email: by, matches, onFile: onFile.length > 0 };
+    const verb = first ? "filled in" : "updated";
+    next.log = [...(Array.isArray(g.ev.log) ? g.ev.log : []), matches
+      ? { ts: at, type: "success", text: `The client ${verb} the event details form (${by}).` }
+      : { ts: at, type: "system", text: `⚠ The event details form was ${verb} from ${by || "an unknown sender (no email given)"}, which isn't the client's email on file${onFile.length ? ` (${onFile.join(", ")})` : " (none on file)"}. Check it's from the client.` }];
     const { error: upErr } = await sb.from("events").update({ app_doc: next }).eq("legacy_id", g.e.legacy_id);
     if (upErr) { console.error("gig-form save", upErr.message); return json({ ok: false, error: "server" }, 500); }
     await sb.from("gig_form_links").update({ submitted_at: at, submit_count: (link.submit_count || 0) + 1 }).eq("id", link.id);
@@ -106,12 +120,14 @@ Deno.serve(async (req) => {
       if (brand.replyTo) {
         const rows = answerSections(def, answers).map((s) => `<h3 style="font-size:13px;margin:16px 0 6px;text-transform:uppercase;letter-spacing:.06em;color:#67676D;">${esc(s.title)}</h3>` +
           s.rows.map((r) => `<div style="margin:0 0 6px;"><span style="color:#67676D;">${esc(r.label)}:</span> <strong style="white-space:pre-wrap;">${esc(r.value)}</strong></div>`).join("")).join("");
-        await sendRelayEmail(sb, { to: brand.replyTo, brand: "asp", subject: `${first ? "Event details in" : "Event details updated"}: ${who} — ${g.when}`,
-          html: `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;line-height:1.5;color:#17171A;max-width:640px;"><p>${esc(who)} ${first ? "filled in" : "updated"} the event details for <strong>${esc(g.singers)}</strong> on <strong>${esc(g.when)}</strong> (${esc(g.e.legacy_id)}). It's in the app under Gig Info.</p>${rows}</div>` });
+        await sendRelayEmail(sb, { to: brand.replyTo, brand: "asp", subject: `${matches ? "" : "⚠ Check sender — "}${first ? "Event details in" : "Event details updated"}: ${who} — ${g.when}`,
+          html: `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;line-height:1.5;color:#17171A;max-width:640px;">${matches ? "" : `<p style="background:#FFF2D6;color:#8F5E0A;padding:10px 12px;border-radius:8px;"><strong>Check the sender:</strong> this was sent from ${esc(by)}, which isn't the client's email on file${onFile.length ? ` (${esc(onFile.join(", "))})` : ""}.</p>`}<p>${esc(who)} ${first ? "filled in" : "updated"} the event details for <strong>${esc(g.singers)}</strong> on <strong>${esc(g.when)}</strong> (${esc(g.e.legacy_id)}). It's in the app under Gig Info.</p>${rows}</div>` });
       }
       const { data: orgRow } = await sb.from("app_records").select("app_doc").eq("collection", "settings").eq("legacy_id", "org").maybeSingle();
       const officeTo = String(orgRow?.app_doc?.value?.alertsWhatsApp || "");
-      if (first && waNumber(officeTo).length >= 10) await sendTemplate(officeTo, "office_alert", [`${who} filled in the event details for ${g.singers} on ${g.when}.`]);
+      if ((first || !matches) && waNumber(officeTo).length >= 10) await sendTemplate(officeTo, "office_alert", [matches
+        ? `${who} filled in the event details for ${g.singers} on ${g.when}.`
+        : `⚠ the event details for ${g.singers} on ${g.when} (${who}) were sent from ${by}, not the client's email. Please check.`]);
     } catch (err) { console.error("gig-form notice", String(err)); }
     return json({ ok: true, submittedAt: at });
   }
