@@ -65,6 +65,7 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0083_gig_form_reminders | Applied 2026-11-09 — client_followups kind `gig_form_nudge` (ref 28/14): the event form link resent 4 and 2 weeks before the gig if not filled in. |
 | 0084_singer_gig_sheet_and_more | Applied 2026-11-09 — client_followups kinds `gig_sheet` (singers, 7 days before), `thank_you` (client, day after), `travel_request` (Rivky, out-of-town gig booked). |
 | 0085_riders | Applied 2026-11-09 — public-read `riders` storage bucket (PDF, 15 MB, admin write) for each singer's rider; Send rider on a gig emails the link. |
+| 0087_singer_week_cash_report | Applied 2026-11-09 — client_followups kinds `singer_week` (Sunday email), `office_unpaid` (3 days before), `cash_confirm` / `cash_dayof`, `office_report` (outstanding on the 1st). |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in

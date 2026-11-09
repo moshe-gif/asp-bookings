@@ -23,10 +23,10 @@
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 import { sendRelayEmail } from "../_shared/mail.ts";
-import { emailHeaderHtml, viaAsp } from "../_shared/config.ts";
+import { brandFor, emailHeaderHtml, viaAsp } from "../_shared/config.ts";
 import { gigSheetEmailHtml } from "../_shared/gigsheet.ts";
 import { mintContractLink, mintBalanceLink } from "../_shared/paylinks.ts";
-import { clientOwedCentsOf, gigContracts } from "../_shared/connect.ts";
+import { clientOwedCentsOf, depositCentsOf, gigContracts } from "../_shared/connect.ts";
 import { paymentOptionsHtml, depositZelle, balanceZelle, officePhone } from "../_shared/payblock.ts";
 import { createTemplates360, sendTemplate, waNumber } from "../_shared/whatsapp.ts";
 import { formKindFor, sendGigForm } from "../_shared/gigform.ts";
@@ -96,7 +96,7 @@ Deno.serve(async (req) => {
   const nameOf = (ref: string) => artistOf(ref)?.name;
   const singersOf = (e: Row) => [e.artist_id || e.app_doc?.artistId, ...(((e.app_doc || {}).additionalArtists || []).map((x: Row) => x?.artistId))].filter(Boolean).map(String);
   const singerNames = (e: Row) => singersOf(e).map((r) => nameOf(r)).filter(Boolean).join(" & ") || "your event";
-  const onceKinds = ["deposit_confirmed", "contract_sent", "balance_paid", "gig_reminder", "flight_reminder", "office_signed", "office_deposit", "office_balance", "gig_form", "gig_form_wa", "office_payouts", "gig_form_nudge", "gig_sheet", "thank_you"];
+  const onceKinds = ["deposit_confirmed", "contract_sent", "balance_paid", "gig_reminder", "flight_reminder", "office_signed", "office_deposit", "office_balance", "gig_form", "gig_form_wa", "office_payouts", "gig_form_nudge", "gig_sheet", "thank_you", "singer_week", "office_unpaid", "cash_confirm", "cash_dayof", "office_report"];
   const { data: doneRows } = await sb.from("client_followups").select("event_legacy_id, kind, ref").in("kind", onceKinds).eq("ok", true).limit(20000);
   const done = new Set((doneRows || []).map((d: Row) => `${d.kind}|${d.event_legacy_id}|${d.ref || ""}`));
   // When each gig's form was really sent (not the 'baseline' rows for gigs from before the form existed).
@@ -184,30 +184,20 @@ Deno.serve(async (req) => {
     return json({ ok: true, sent: results.filter((r) => r.ok && !r.dryRun).length, failed: results.filter((r) => !r.ok).length, results });
   }
 
-  // Daily: singers' gig reminders and flight reminders, 3 days ahead (New York dates).
-  const inThree = plusDays(nyToday(), 3);
+  // Singers (owner 2026-11-09: "he should only get on sunday for the next week to email and day of whatsapp with link
+  // to the gig in the app"): the morning of a gig, a WhatsApp with a link to the app; on Sundays, one email with the
+  // week's gigs (below). Flight reminders still go 3 days ahead.
+  const inThree = plusDays(nyToday(), 3), nyDay = nyToday();
   for (const e of previewTo ? [] : events || []) {
     const ev: Row = e.app_doc || {};
     if (e.status !== "booked" && e.status !== "paid") continue;
     const title = String(ev.clientName || ev.type || "your gig").trim();
     const place = [ev.venue, ev.address, ev.city].filter(Boolean).join(", ") || "the venue (in the app)";
-    if (e.date === inThree) {
+    if (e.date === nyDay && !ev.unpaid) {
       for (const ref of singersOf(e)) {
         const a = artistOf(ref);
         if (a && hasPhone(a.whatsapp)) await once("gig_reminder", e.legacy_id, String(a.id), a.whatsapp, "gig_reminder",
-          [firstName(a.name), title, `${fmtDate(e.date)}${fmtTime(ev.time) ? `, ${fmtTime(ev.time)}` : ""}`, place]);
-      }
-    }
-    // A week before: the gig sheet by email to each singer on the gig (owner 2026-11-09), once per singer.
-    if (e.date === plusDays(nyToday(), 7) && !ev.unpaid) {
-      for (const ref of singersOf(e)) {
-        const a = artistOf(ref), key = `gig_sheet|${e.legacy_id}|${a?.id || ""}`;
-        if (!a?.email || done.has(key) || results.length >= MAX_SENDS_PER_RUN) continue;
-        done.add(key);
-        if (dryRun) { results.push({ kind: "gig_sheet", gig: e.legacy_id, to: a.email, dryRun: true, ok: true }); continue; }
-        const sent = await sendRelayEmail(sb, { to: a.email, subject: `Gig sheet — ${ev.type || "Gig"}, ${fmtDate(e.date)}`, html: gigSheetEmailHtml(ev, a.name, fmtDate(e.date), phone), brand: "asp" });
-        await sb.from("client_followups").insert({ event_legacy_id: e.legacy_id, kind: "gig_sheet", ref: String(a.id), sent_to: a.email, ok: sent.ok, error: sent.ok ? null : sent.error });
-        results.push({ kind: "gig_sheet", gig: e.legacy_id, ok: sent.ok, error: sent.error });
+          [firstName(a.name), title, `nyDay${fmtTime(ev.time) ? `, ${fmtTime(ev.time)}` : ""}`, place]);
       }
     }
     const f = ev.flight || {};
@@ -218,6 +208,88 @@ Deno.serve(async (req) => {
       if (a && hasPhone(a.whatsapp)) await once("flight_reminder", e.legacy_id, String(a.id), a.whatsapp, "flight_reminder",
         [firstName(a.name), [f.flightNumber, f.airline ? `(${f.airline})` : ""].filter(Boolean).join(" "), `${fmtDate(departDay)}${fmtTime(hm) ? `, ${fmtTime(hm)}` : ""}`,
          `the ${title} event${ev.city ? ` in ${ev.city}` : ""}`]);
+    }
+  }
+  // Sunday: each singer's gigs for the coming week (Mon-Sun), one email with every gig sheet.
+  if (!previewTo && new Date(nyDay + "T12:00:00Z").getUTCDay() === 0) {
+    const weekEnd = plusDays(nyDay, 7);
+    const byArtist = new Map<string, Row[]>();
+    for (const e of events || []) {
+      const ev: Row = e.app_doc || {};
+      if ((e.status !== "booked" && e.status !== "paid") || ev.unpaid || e.date <= nyDay || e.date > weekEnd) continue;
+      for (const ref of singersOf(e)) { const a = artistOf(ref); if (a?.email) byArtist.set(String(a.id), [...(byArtist.get(String(a.id)) || []), e]); }
+    }
+    for (const [artistId, gigs] of byArtist) {
+      const a = artistOf(artistId)!, key = `singer_week|WEEK|${artistId}@${nyDay}`;
+      if (done.has(key) || results.length >= MAX_SENDS_PER_RUN) continue;
+      done.add(key);
+      gigs.sort((x, y) => String(x.date).localeCompare(String(y.date)));
+      if (dryRun) { results.push({ kind: "singer_week", to: a.email, gigs: gigs.length, dryRun: true, ok: true }); continue; }
+      const sheets = gigs.map((g) => gigSheetEmailHtml(g.app_doc || {}, a.name, fmtDate(g.date), phone)).join('<div style="height:24px"></div>');
+      const sent = await sendRelayEmail(sb, { to: a.email, brand: "asp", subject: `Your week — ${gigs.length} gig${gigs.length === 1 ? "" : "s"} from ${fmtDate(gigs[0].date)}`, html: sheets });
+      await sb.from("client_followups").insert({ event_legacy_id: "WEEK", kind: "singer_week", ref: `${artistId}@${nyDay}`, sent_to: a.email, ok: sent.ok, error: sent.ok ? null : sent.error });
+      results.push({ kind: "singer_week", to: a.email, ok: sent.ok, error: sent.error });
+    }
+  }
+  // 3 days before: the balance still isn't in -> tell the owner (owner 2026-11-09: "Alert me 3 days before").
+  // Cash gigs: 2 days before, ask the client to confirm the cash goes to the singer on arrival; that morning, remind.
+  for (const e of previewTo ? [] : events || []) {
+    const ev: Row = e.app_doc || {};
+    if (e.status !== "booked" || ev.unpaid || ev.balanceReceived) continue;
+    const singers = singerNames(e), when = fmtDate(e.date), who = firstName(ev.clientName);
+    if (e.date === inThree && officeTo) {
+      const owed = clientOwedCentsOf(ev, await gigContracts(sb, e.legacy_id));
+      if (Number.isFinite(owed) && owed > 0) await once("office_unpaid", e.legacy_id, "", officeTo, "office_alert",
+        [`the balance of ${money(owed / 100)} from ${ev.clientName || "a client"} (${singers}, ${when}) isn't in yet, 3 days before the gig.`]);
+    }
+    if (ev.paymentMethod === "cash") {
+      const owed = clientOwedCentsOf(ev, await gigContracts(sb, e.legacy_id));
+      const amount = Number.isFinite(owed) && owed > 0 ? money(owed / 100) : "the balance";
+      const to = String(ev.clientEmail || "").trim();
+      if (e.date === plusDays(nyDay, 2) && !done.has(`cash_confirm|${e.legacy_id}|`) && results.length < MAX_SENDS_PER_RUN) {
+        done.add(`cash_confirm|${e.legacy_id}|`);
+        if (dryRun) results.push({ kind: "cash_confirm", gig: e.legacy_id, dryRun: true, ok: true });
+        else {
+          let ok = true, err: string | undefined;
+          if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
+            const sent = await sendRelayEmail(sb, { to, brand: "asp", subject: viaAsp(singers === "your event" ? "" : singers, `Cash on ${when}`), html: emailHtml({
+              artist: singers === "your event" ? "" : singers, greeting: `Dear ${who},`, phone,
+              lines: [`Your event with <strong>${esc(singers)}</strong> is on <strong>${esc(when)}</strong>.`,
+                `As arranged, the balance of <strong>${esc(amount)}</strong> is paid in cash, handed to ${esc(singers)} when ${singers.includes("&") ? "they arrive" : "he arrives"} at the hall.`,
+                "Please reply to confirm, or let us know if anything changed."] }) });
+            ok = sent.ok; err = sent.error;
+          }
+          if (hasPhone(ev.clientPhone)) await sendTemplate(ev.clientPhone, "cash_confirm", [who, amount, singers, when]);
+          await sb.from("client_followups").insert({ event_legacy_id: e.legacy_id, kind: "cash_confirm", sent_to: to || "whatsapp", ok, error: ok ? null : err });
+          results.push({ kind: "cash_confirm", gig: e.legacy_id, ok });
+        }
+      }
+      if (e.date === nyDay && hasPhone(ev.clientPhone)) await once("cash_dayof", e.legacy_id, "", ev.clientPhone, "cash_dayof", [who, amount, singers]);
+    }
+  }
+  // The 1st: the outstanding report to the office (owner 2026-11-09: "Outstanding") -- deposits and balances owed.
+  if (!previewTo && nyDay.endsWith("-01") && !done.has(`office_report|REPORT|${nyDay.slice(0, 7)}`)) {
+    done.add(`office_report|REPORT|${nyDay.slice(0, 7)}`);
+    const brand = await brandFor(sb, "asp");
+    const deposits: string[] = [], balances: string[] = [];
+    let depTot = 0, balTot = 0;
+    for (const e of events || []) {
+      const ev: Row = e.app_doc || {};
+      if (ev.unpaid) continue;
+      const row = (amt: number) => `<tr><td style="padding:6px 8px 6px 0;border-top:1px solid #E1E1E6;">${esc(fmtDate(e.date))}</td><td style="padding:6px 8px;border-top:1px solid #E1E1E6;">${esc(ev.clientName || "")} · ${esc(singerNames(e))}</td><td style="padding:6px 0;border-top:1px solid #E1E1E6;text-align:right;">${money(amt)}</td></tr>`;
+      if (e.status === "contract_sent" && !ev.depositReceived) {
+        const dep = depositCentsOf(ev, await gigContracts(sb, e.legacy_id)) / 100;
+        if (dep > 0) { depTot += dep; deposits.push(row(dep)); }
+      } else if (e.status === "booked" && !ev.balanceReceived) {
+        const owed = clientOwedCentsOf(ev, await gigContracts(sb, e.legacy_id));
+        if (Number.isFinite(owed) && owed > 0) { balTot += owed / 100; balances.push(row(owed / 100)); }
+      }
+    }
+    const table = (title: string, rows: string[], tot: number) => `<h3 style="font-size:14px;margin:18px 0 6px;">${title} — ${money(tot)} (${rows.length})</h3>${rows.length ? `<table style="width:100%;border-collapse:collapse;font-size:13px;">${rows.join("")}</table>` : '<p style="color:#67676D;font-size:13px;">None.</p>'}`;
+    if (brand.replyTo && !dryRun) {
+      const sent = await sendRelayEmail(sb, { to: brand.replyTo, brand: "asp", subject: `Outstanding on ${fmtDate(nyDay)}: ${money(depTot + balTot)}`,
+        html: `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17171A;max-width:640px;">${emailHeaderHtml()}<h2 style="font-size:18px;margin:16px 0 0;">Outstanding — ${esc(fmtDate(nyDay))}</h2>${table("Deposits not yet in", deposits, depTot)}${table("Balances due", balances, balTot)}</div>` });
+      await sb.from("client_followups").insert({ event_legacy_id: "REPORT", kind: "office_report", ref: nyDay.slice(0, 7), sent_to: brand.replyTo, ok: sent.ok, error: sent.ok ? null : sent.error });
     }
   }
   // The 1st of the month: the office sends singers' monthly payouts (owner 2026-11-09: "1st of the month, I send").
