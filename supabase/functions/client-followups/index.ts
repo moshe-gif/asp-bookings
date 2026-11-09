@@ -95,9 +95,12 @@ Deno.serve(async (req) => {
   const nameOf = (ref: string) => artistOf(ref)?.name;
   const singersOf = (e: Row) => [e.artist_id || e.app_doc?.artistId, ...(((e.app_doc || {}).additionalArtists || []).map((x: Row) => x?.artistId))].filter(Boolean).map(String);
   const singerNames = (e: Row) => singersOf(e).map((r) => nameOf(r)).filter(Boolean).join(" & ") || "your event";
-  const onceKinds = ["deposit_confirmed", "contract_sent", "balance_paid", "gig_reminder", "flight_reminder", "office_signed", "office_deposit", "office_balance", "gig_form", "gig_form_wa", "office_payouts"];
+  const onceKinds = ["deposit_confirmed", "contract_sent", "balance_paid", "gig_reminder", "flight_reminder", "office_signed", "office_deposit", "office_balance", "gig_form", "gig_form_wa", "office_payouts", "gig_form_nudge"];
   const { data: doneRows } = await sb.from("client_followups").select("event_legacy_id, kind, ref").in("kind", onceKinds).eq("ok", true).limit(20000);
   const done = new Set((doneRows || []).map((d: Row) => `${d.kind}|${d.event_legacy_id}|${d.ref || ""}`));
+  // When each gig's form was really sent (not the 'baseline' rows for gigs from before the form existed).
+  const { data: formRows } = await sb.from("client_followups").select("event_legacy_id, sent_at").eq("kind", "gig_form").neq("sent_to", "baseline").limit(5000);
+  const formSentAt = new Map((formRows || []).map((f: Row) => [f.event_legacy_id, Date.parse(f.sent_at)]));
   const results: Row[] = [];
   const once = async (kind: string, gig: string, ref: string, to: string, template: string, params: string[]) => {
     if (done.has(`${kind}|${gig}|${ref}`) || results.length >= MAX_SENDS_PER_RUN) return;
@@ -134,6 +137,22 @@ Deno.serve(async (req) => {
           if (wantEmail) { done.add(`gig_form|${e.legacy_id}|`); await sb.from("client_followups").insert({ event_legacy_id: e.legacy_id, kind: "gig_form", sent_to: out.email?.to || "no email", ok: out.email ? out.email.ok : true, error: out.email ? (out.email.ok ? null : out.email.error) : "no client email" }); }
           if (wantWa && !out.whatsapp?.held) { done.add(`gig_form_wa|${e.legacy_id}|`); await sb.from("client_followups").insert({ event_legacy_id: e.legacy_id, kind: "gig_form_wa", sent_to: out.whatsapp ? "whatsapp:" + waNumber(out.whatsapp.to) : "no phone", ok: out.whatsapp ? out.whatsapp.ok : true, error: out.whatsapp ? (out.whatsapp.ok ? null : out.whatsapp.error) : "no client phone" }); }
           results.push({ kind: "gig_form", gig: e.legacy_id, ok: !out.email || out.email.ok, email: out.email || null, whatsapp: out.whatsapp || null });
+        }
+      }
+      // Form not filled in: remind 4 weeks and 2 weeks before the gig (owner 2026-11-09), only after the form was
+      // really sent and at least 5 days ago. A late booking skips straight to the reminder that's due.
+      const daysOut = Math.round((Date.parse(e.date + "T12:00:00Z") - Date.parse(nyToday() + "T12:00:00Z")) / DAY);
+      const nudge = daysOut < 0 ? "" : daysOut <= 14 ? "14" : daysOut <= 28 ? "28" : "";
+      const sentAt = formSentAt.get(e.legacy_id);
+      if (nudge && ev.depositReceived && !ev.clientForm?.submittedAt && sentAt && now - sentAt >= 5 * DAY && !done.has(`gig_form_nudge|${e.legacy_id}|${nudge}`)
+          && results.length < MAX_SENDS_PER_RUN && formKindFor(ev, artistOf(String(e.artist_id || ev.artistId || ""))?.role)) {
+        done.add(`gig_form_nudge|${e.legacy_id}|${nudge}`);
+        if (dryRun) results.push({ kind: "gig_form_nudge", gig: e.legacy_id, dryRun: true, ok: true });
+        else {
+          const out = await sendGigForm(sb, { gig: e.legacy_id, ev, singers, when, email: true, whatsapp: true, reminder: true });
+          const ok = !out.email || out.email.ok;
+          await sb.from("client_followups").insert({ event_legacy_id: e.legacy_id, kind: "gig_form_nudge", ref: nudge, sent_to: out.email?.to || (out.whatsapp ? "whatsapp:" + waNumber(out.whatsapp.to) : "no contact"), ok, error: ok ? null : out.email?.error });
+          results.push({ kind: "gig_form_nudge", gig: e.legacy_id, ok });
         }
       }
       if (ev.balanceReceived) {

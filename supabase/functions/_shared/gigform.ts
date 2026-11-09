@@ -253,7 +253,7 @@ const escH = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": 
 // Send a gig's form link to the client: email and/or WhatsApp (one new link for both). The WhatsApp waits until
 // Meta approves its template (held: nothing minted, the caller tries again later). Test mode applies (mail.ts,
 // whatsapp.ts). Returns what happened per channel; the caller logs it.
-export async function sendGigForm(sb: Sb, o: { gig: string; ev: Doc; singers: string; when: string; email: boolean; whatsapp: boolean; by?: string | null }) {
+export async function sendGigForm(sb: Sb, o: { gig: string; ev: Doc; singers: string; when: string; email: boolean; whatsapp: boolean; by?: string | null; reminder?: boolean }) {
   const first = String(o.ev.clientName || "").trim().split(/\s+/)[0] || "there";
   const to = String(o.ev.clientEmail || "").trim();
   const waTo = waNumber(o.ev.clientPhone || "").length >= 10 ? String(o.ev.clientPhone) : "";
@@ -278,14 +278,17 @@ export async function sendGigForm(sb: Sb, o: { gig: string; ev: Doc; singers: st
     <div style="padding:20px 24px 16px;border-bottom:1px solid #E3E3E8;">${emailHeaderHtml(o.singers === "your event" ? "" : o.singers)}</div>
     <div style="padding:24px;font-size:14px;line-height:1.6;">
       <p style="margin:0 0 12px;">Hi ${escH(first)},</p>
-      <p style="margin:0 0 12px;">Thank you, your date is booked: <strong>${escH(o.singers)}</strong> on <strong>${escH(o.when)}</strong>.</p>
-      <p style="margin:0 0 12px;">To get everything ready, please fill in the event details: the times, your song choices and who to call on the day. Fill in what you know now; you can come back to the same link anytime to add or change things.</p>
+      ${o.reminder
+        ? `<p style="margin:0 0 12px;">Your event with <strong>${escH(o.singers)}</strong> on <strong>${escH(o.when)}</strong> is coming up, and we don't have the event details yet.</p>
+      <p style="margin:0 0 12px;">Please fill in the times, your song choices and who to call on the day, so everything is ready. Fill in what you know; you can come back to the same link to add or change things.</p>`
+        : `<p style="margin:0 0 12px;">Thank you, your date is booked: <strong>${escH(o.singers)}</strong> on <strong>${escH(o.when)}</strong>.</p>
+      <p style="margin:0 0 12px;">To get everything ready, please fill in the event details: the times, your song choices and who to call on the day. Fill in what you know now; you can come back to the same link anytime to add or change things.</p>`}
       <p style="margin:18px 0;"><a href="${escH(link.url)}" style="display:inline-block;background:#4C6FA5;color:#fff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:8px;">Fill in the details</a></p>
       <p style="margin:18px 0 0;">Thank you,<br/>ASP Management</p>
     </div>
     <div style="padding:12px 24px;border-top:1px solid #E3E3E8;font-size:11px;color:#6B6B72;">ASP Management &middot; office@aspmgmt.com</div>
   </div></body></html>`;
-    const sent = await sendRelayEmail(sb, { to, subject: viaAsp(o.singers === "your event" ? "" : o.singers, `Your event details, ${o.when}`), html, brand: "asp" });
+    const sent = await sendRelayEmail(sb, { to, subject: viaAsp(o.singers === "your event" ? "" : o.singers, `${o.reminder ? "Reminder: your event details" : "Your event details"}, ${o.when}`), html, brand: "asp" });
     out.email = { ok: sent.ok, error: sent.error, to };
   }
   if (wantWa) {

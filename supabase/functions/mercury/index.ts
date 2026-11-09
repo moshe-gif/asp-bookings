@@ -25,6 +25,8 @@ import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 import { artistShares, clientOwedCentsOf, depositCentsOf } from "../_shared/connect.ts";
 import { mercuryApi, mercuryCanMoveMoney, mercuryConfigured, mercuryError, mercurySandbox } from "../_shared/mercury.ts";
+import { sendRelayEmail } from "../_shared/mail.ts";
+import { emailHeaderHtml } from "../_shared/config.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -229,7 +231,58 @@ Deno.serve(async (req) => {
     }
     await sb.from("monthly_payouts").update({ status: "sent", sent_at: new Date().toISOString(), destination: dest.name,
       mercury_request_id: r.data?.requestId || r.data?.id || null }).eq("id", p.id);
+    if (p.kind === "share") { try { await sendStatement({ ...p, destination: dest.name }); } catch (err) { console.error("mercury statement", String(err)); } }
     return { ok: true, name: p.payee_name };
+  }
+
+  // The singer's statement, emailed once their monthly payout is sent (owner 2026-11-09: "Yes, email statement"):
+  // each payment in it -- the gig, deposit or balance, the day it came in, ASP's commission and what they get.
+  // On a gig with several singers ASP's commission on that payment is shared out in proportion to their shares.
+  // Best effort: the money has moved either way; a singer with no email on file gets none.
+  async function sendStatement(p: Any): Promise<void> {
+    const { data: prof } = await sb.from("app_records").select("app_doc").eq("collection", "payee_profiles").eq("legacy_id", p.payee_key).maybeSingle();
+    const artistRef = prof?.app_doc?.artistId;
+    if (!artistRef) return;
+    const { data: artist } = await sb.from("artists").select("name, email").or(`legacy_id.eq.${artistRef},id.eq.${artistRef}`).maybeSingle();
+    if (!artist?.email) return;
+    const { data: mine } = await sb.from("money_ledger_parts").select("ledger_id, cents, ledger:money_ledger!inner(event_legacy_id, kind, received_on)").eq("payout_id", p.id);
+    if (!mine?.length) return;
+    const ledgerIds = [...new Set(mine.map((m: Any) => m.ledger_id))];
+    const { data: all } = await sb.from("money_ledger_parts").select("ledger_id, kind, cents").in("ledger_id", ledgerIds);
+    const gigIds = [...new Set(mine.map((m: Any) => m.ledger.event_legacy_id))];
+    const { data: gigs } = await sb.from("events").select("legacy_id, date, app_doc").in("legacy_id", gigIds);
+    const gigOf = (id: string) => (gigs || []).find((g: Any) => g.legacy_id === id);
+    const e = (x: unknown) => String(x ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+    const day = (iso: string) => new Date(iso + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+    let totYou = 0, totComm = 0;
+    const rows = mine.sort((a: Any, b: Any) => String(a.ledger.received_on).localeCompare(String(b.ledger.received_on))).map((m: Any) => {
+      const parts = (all || []).filter((x: Any) => x.ledger_id === m.ledger_id);
+      const shares = parts.filter((x: Any) => x.kind === "share").reduce((t: number, x: Any) => t + Number(x.cents || 0), 0);
+      const comm = parts.filter((x: Any) => x.kind === "commission").reduce((t: number, x: Any) => t + Number(x.cents || 0), 0);
+      const myComm = shares > 0 ? Math.round(comm * Number(m.cents) / shares) : 0;
+      totYou += Number(m.cents); totComm += myComm;
+      const g = gigOf(m.ledger.event_legacy_id), doc = g?.app_doc || {};
+      const what = [doc.type, doc.clientName].filter(Boolean).join(" · ") || m.ledger.event_legacy_id;
+      const td = "padding:8px 6px;border-top:1px solid #E1E1E6;vertical-align:top;";
+      return `<tr><td style="${td}">${e(g?.date ? day(g.date) : "")}<br/><span style="color:#67676D;font-size:12px;">${e(what)}</span></td><td style="${td}">${m.ledger.kind === "deposit" ? "Deposit" : "Balance"}<br/><span style="color:#67676D;font-size:12px;">in ${e(day(m.ledger.received_on))}</span></td><td style="${td}text-align:right;">${usd(Number(m.cents) + myComm)}</td><td style="${td}text-align:right;color:#67676D;">${usd(myComm)}</td><td style="${td}text-align:right;font-weight:600;">${usd(Number(m.cents))}</td></tr>`;
+    }).join("");
+    const monthName = new Date(p.month + "-01T00:00:00Z").toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    const th = "padding:6px;text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#9A9AA1;";
+    const html = `<!doctype html><html><body style="margin:0;padding:24px;background:#F5F4EF;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17171A;">
+  <div style="max-width:640px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;">
+    <div style="padding:20px 24px 16px;border-bottom:1px solid #E3E3E8;">${emailHeaderHtml(artist.name)}</div>
+    <div style="padding:24px;font-size:14px;line-height:1.55;">
+      <p style="margin:0 0 6px;font-size:18px;font-weight:600;">Your ${e(monthName)} payout</p>
+      <p style="margin:0 0 16px;color:#67676D;">${usd(totYou)} was sent to your account (${e(p.destination || "your Mercury account")}). Here is what it covers.</p>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums;">
+        <tr><th style="${th}">Gig</th><th style="${th}">Payment</th><th style="${th}text-align:right;">Amount</th><th style="${th}text-align:right;">ASP commission</th><th style="${th}text-align:right;">You receive</th></tr>
+        ${rows}
+        <tr><td colspan="3" style="padding:10px 6px;border-top:2px solid #17171A;font-weight:700;">Total</td><td style="padding:10px 6px;border-top:2px solid #17171A;text-align:right;color:#67676D;">${usd(totComm)}</td><td style="padding:10px 6px;border-top:2px solid #17171A;text-align:right;font-weight:700;">${usd(totYou)}</td></tr>
+      </table>
+      <p style="margin:18px 0 0;color:#67676D;font-size:12.5px;">Payments are paid out the month after they come in, including deposits for gigs still ahead. Questions? Just reply to this email.</p>
+    </div>
+  </div></body></html>`;
+    await sendRelayEmail(sb, { to: artist.email, subject: `ASP payout statement — ${monthName}`, html, brand: "asp" });
   }
 
   // A gig is Paid Out once each singer has been sent, in payouts, at least their whole share of it
