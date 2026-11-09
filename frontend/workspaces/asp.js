@@ -9001,7 +9001,7 @@ function renderContractBuilderModal(){
           <h2 style="font-size:1.2rem;margin-bottom:4px;">${esc(contractTemplateLabel(c.template))}</h2>
           <span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span>
         </div>
-        <div style="display:flex;gap:6px;align-items:center;">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;min-width:0;">
           ${c.status!=='void' && c.status!=='signed'? `<button class="btn btn-sm btn-primary" data-action="review-and-send-contract" data-id="${c.id}" data-testid="review-and-send">${ICO.mail} Review &amp; send</button>` : ''}
           <button class="icon-btn" data-action="view-contract-builder-doc" title="Preview &amp; Print" aria-label="Preview &amp; Print">${ICO.leads}</button>
           <button class="icon-btn" data-action="delete-contract" title="Delete" aria-label="Delete">${ICO.trash}</button>
