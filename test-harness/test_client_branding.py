@@ -141,6 +141,33 @@ def test_home_shows_this_weeks_gigs_with_whats_missing(live_server, page):
     text = card.inner_text()
     assert "Missing Bits Client" in text and "Client form not filled in" in text and "No start time" in text
     assert "Ready Client" in text and "Ready" in text
+    # Owner 2026-11-10: "i need singers name first" -- the bold first line of each row is the singer.
+    assert card.locator('[data-testid="this-week-singer"]').first.inner_text().strip() == "Benny Friedman"
+
+
+def test_phone_tab_bar_slides(live_server, page):
+    # Owner 2026-11-10: "make the slider slidable like other apple apps": press, drag the bubble, let go.
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    nav = page.locator(".bottom-nav")
+    nav.wait_for(state="visible")
+    start = nav.locator('.bn-item[data-view="dashboard"]').bounding_box()
+    end = nav.locator('.bn-item[data-view="leads"]').bounding_box()
+    y = start["y"] + start["height"] / 2
+    page.mouse.move(start["x"] + start["width"] / 2, y)
+    page.mouse.down()
+    for i in range(1, 11):
+        page.mouse.move(start["x"] + start["width"] / 2 + (end["x"] - start["x"]) * i / 10, y)
+    assert "bn-dragging" in (nav.get_attribute("class") or ""), "the bar didn't start sliding"
+    slider_x = page.evaluate("document.querySelector('.bn-slider').getBoundingClientRect().left")
+    assert slider_x > start["x"] + 20, "the bubble didn't follow the finger"
+    page.mouse.up()
+    page.wait_for_function("() => S.view === 'leads'")
+    # a plain tap still works
+    page.wait_for_timeout(400)
+    nav.locator('.bn-item[data-view="calendar"]').click()
+    page.wait_for_function("() => S.view === 'calendar'")
 
 
 def test_riders_card_and_send_rider_on_the_gig(live_server, page):
@@ -222,3 +249,22 @@ def test_adding_a_lead_makes_the_contract_and_asks_send_contract(live_server, pa
     assert page.locator('.sheet [data-testid="send-contract"]').count() == 1
     assert page.locator('.sheet [data-action="create-contract"]').count() == 0
     assert not errors, f"console errors: {errors}"
+
+
+def test_new_lead_never_reuses_a_contracts_gig_id(live_server, page):
+    # Owner 2026-11-10 ("mistake, names dont match"): a deleted gig's contract kept pointing at EV-5243 and a new
+    # lead was handed that same id, so the old contract showed on it. New ids skip any id a contract points at.
+    import json
+    orphan = {"id": "CT-9901", "schemaVersion": 3, "leadId": "EV-9950", "template": "standard", "status": "signed",
+              "performerArtistId": "benny", "createdAt": "2026-11-06T16:08:35.193Z", "updatedAt": "2026-11-06T16:08:35.193Z",
+              "snapshot": {"clientName": "Old Deleted Gig", "eventDate": "2027-02-15"}, "fee": {"amount": 1000}, "versions": []}
+    seed_events(page, [fake_gig("EV-9949", "benny", "2099-01-01")])
+    page.goto(live_server)
+    page.evaluate("(c) => localStorage.setItem('asp_mock_contracts_v1', JSON.stringify([c]))", orphan)
+    page.reload()
+    login_as(page, "admin_bookings")
+    create_lead(page, "Fresh Lead Client", "2099-03-03", artist_id="baruch")
+    new_id = page.evaluate("() => S.events.find(e => e.clientName === 'Fresh Lead Client').id")
+    assert new_id != "EV-9950", "the new lead reused the id an old contract points at"
+    mine = page.evaluate("(id) => JSON.parse(localStorage.getItem('asp_mock_contracts_v1')).filter(c => c.leadId === id).map(c => c.performerArtistId)", new_id)
+    assert mine == ["baruch"], f"the new lead's contract is not Baruch's own: {mine}"

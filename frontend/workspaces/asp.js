@@ -3352,6 +3352,17 @@ document.addEventListener('gesturestart', e=>e.preventDefault(), { passive:false
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && S.artistPortal.on) loadArtistPortalData(); });
 S.events = loadEvents();
 EVID = S.events.reduce((max,e)=>{ const n=parseInt(String(e.id).split('-')[1],10); return isNaN(n)? max : Math.max(max,n+1); }, EVID);
+// A new gig's id is never one a contract or travel request still points at (owner 2026-11-10: a deleted test gig's
+// signed contract attached itself to a new lead that was given the freed id, EV-5243). Ids only go up.
+function newEventId(){
+  const num = id=>{ const n = parseInt(String(id||'').split('-')[1],10); return isNaN(n) ? 0 : n; };
+  let max = EVID;
+  for(const e of S.events) max = Math.max(max, num(e.id)+1);
+  for(const c of CONTRACTS) max = Math.max(max, num(c.leadId)+1);
+  for(const r of (typeof TRAVEL_REQUESTS!=='undefined' ? TRAVEL_REQUESTS : [])) max = Math.max(max, num(r.eventId)+1);
+  EVID = max + 1;
+  return 'EV-' + max;
+}
 
 /* ============ REAL AUTH (Supabase) ============ */
 // A session never touches the ARTISTS/ADMIN_USERS roster lists except to add exactly the one matching row for whoever just signed in, so the
@@ -4380,6 +4391,63 @@ function repositionNavSliders(){
     slider.style.transition = '';
   });
 }
+/* ---- Phone tab bar you can slide (owner 2026-11-10: "make the slider slidable like other apple apps") ----
+   Press the bar and the bubble lifts; slide and it follows your finger, the tab under it lights up; let go and
+   that tab opens. A plain tap still works as before. Listeners sit on document (the bar is redrawn often). */
+const bnDrag = { on:false, moved:false, startX:0, nav:null, slider:null, items:[], target:null, synthetic:false, swallowUntil:0 };
+function bnItemsOf(nav){ return [...nav.querySelectorAll('.bn-item')].filter(el=>el.offsetWidth>0); }
+function bnItemAt(x){ let best=null, bd=Infinity; for(const el of bnDrag.items){ const r=el.getBoundingClientRect(); const d = x<r.left ? r.left-x : x>r.right ? x-r.right : 0; if(d<bd){ bd=d; best=el; } } return best; }
+// The app can redraw the bar mid-slide (a status check finishing): carry on with the new one.
+function bnLive(){
+  if(bnDrag.nav && bnDrag.nav.isConnected) return true;
+  const nav = document.querySelector('.bottom-nav'), sl = nav && nav.querySelector('.bn-slider');
+  if(!nav || !sl) return false;
+  Object.assign(bnDrag, { nav, slider:sl, items:bnItemsOf(nav), target:null });
+  nav.classList.add('bn-pressed'); if(bnDrag.moved) nav.classList.add('bn-dragging');
+  return true;
+}
+function bnPlace(x){
+  if(!bnLive()) return;
+  const nav=bnDrag.nav, sl=bnDrag.slider;
+  const nr=nav.getBoundingClientRect(), it=bnItemAt(x); if(!it) return;
+  const w=it.offsetWidth, first=bnDrag.items[0], last=bnDrag.items[bnDrag.items.length-1];
+  const min=first.offsetLeft, max=last.offsetLeft+last.offsetWidth-w;
+  sl.style.width=w+'px'; sl.style.left=Math.max(min, Math.min(max, x-nr.left-w/2))+'px';
+  if(bnDrag.target!==it){ if(bnDrag.target) bnDrag.target.classList.remove('bn-hover'); it.classList.add('bn-hover'); bnDrag.target=it; }
+}
+function bnEnd(cancel, x){
+  if(!bnLive()) { bnDrag.on=false; return; }
+  if(bnDrag.moved && x!=null) bnPlace(x);
+  const nav=bnDrag.nav;
+  nav.classList.remove('bn-pressed','bn-dragging');
+  if(bnDrag.target) bnDrag.target.classList.remove('bn-hover');
+  const target=bnDrag.target, moved=bnDrag.moved;
+  const pending = bnDrag.pendingRender;
+  Object.assign(bnDrag, { on:false, moved:false, nav:null, slider:null, items:[], target:null, pendingRender:false });
+  if(!moved){ if(pending) render(); return; }   // a tap: the normal click opens the tab
+  bnDrag.swallowUntil = Date.now()+350;       // the browser's own click right after a slide must not open the start tab
+  if(cancel || !target || target.classList.contains('active')){ if(pending) render(); repositionNavSliders(); return; }
+  bnDrag.synthetic = true; try{ target.click(); } finally { bnDrag.synthetic = false; }
+  if(pending) render();
+}
+document.addEventListener('pointerdown', e=>{
+  const nav = e.target.closest && e.target.closest('.bottom-nav'); if(!nav || e.button>0) return;
+  const slider = nav.querySelector('.bn-slider'); if(!slider) return;
+  Object.assign(bnDrag, { on:true, moved:false, startX:e.clientX, since:Date.now(), nav, slider, items:bnItemsOf(nav), target:null, pendingRender:false });
+  nav.classList.add('bn-pressed');
+}, { passive:true });
+document.addEventListener('pointermove', e=>{
+  if(!bnDrag.on) return;
+  if(!bnDrag.moved && Math.abs(e.clientX-bnDrag.startX) < 8) return;
+  if(!bnDrag.moved){ bnDrag.moved=true; if(bnLive()) bnDrag.nav.classList.add('bn-dragging'); }
+  bnPlace(e.clientX);
+}, { passive:true });
+document.addEventListener('pointerup', e=>{ if(bnDrag.on) bnEnd(false, e.clientX); }, { passive:true });
+document.addEventListener('pointercancel', ()=>{ if(bnDrag.on) bnEnd(true); }, { passive:true });
+document.addEventListener('click', e=>{
+  if(bnDrag.synthetic || Date.now() > bnDrag.swallowUntil) return;
+  if(e.target.closest && e.target.closest('.bottom-nav')){ bnDrag.swallowUntil = 0; e.preventDefault(); e.stopPropagation(); }   // once
+}, true);
 /* ============ RENDER: SHELL ============ */
 // Search boxes that re-render on every keystroke need their cursor back after render -- but only
 // if they had it, or just appeared (a modal opened). Focusing them unconditionally on every render
@@ -4400,6 +4468,8 @@ const BODY_OVERLAY_FLAGS = ['showFlightForm','showTransportForm','showDressCodeF
   'showItinerary','showInvoiceDoc','showDocumentBuilder'];
 function render(){
   if(renderDepth){ renderQueued = true; return; }
+  // A finger is on the phone tab bar: hold the redraw until it lifts (bnEnd draws it), so the bubble isn't snapped back.
+  if(bnDrag.on && Date.now() - bnDrag.since < 4000){ bnDrag.pendingRender = true; return; }
   renderDepth++;
   try{ renderNow(); } finally { renderDepth--; }
   if(renderQueued){ renderQueued = false; render(); }
@@ -4624,7 +4694,7 @@ function portalNavItems(){ return crewUser() ? (isTravelCrew() ? TRAVEL_CREW_NAV
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.63'; // bump on every release so a phone can tell it has updated. v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.65'; // bump on every release so a phone can tell it has updated. v1.9.65: a new gig never reuses a deleted gig's id (an old contract attached itself); dropdowns styled like the fields; This week leads with the singer. v1.9.64: the phone tab bar slides (press, drag the bubble, let go to open). v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4664,7 +4734,7 @@ function renderBottomNav(isAdmin){
   // The owner's phone bar (2026-10-29: "on the phone i want it [WhatsApp] on the slider menu, remove another
   // one"): WhatsApp takes Projects' place for whoever has WhatsApp access; Projects stays in the ☰ menu.
   return `<div class="bottom-nav${crewUser()?' crew':''}${isAdmin && canUseWhatsApp()?' has-wa':''}">
-    ${items.map(([v,l,ic])=>`<a href="#" class="bn-item ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span><span>${l}</span></a>`).join('')}
+    ${items.map(([v,l,ic])=>`<a href="#" draggable="false" class="bn-item ${isNavActive(v)?'active':''}" data-action="nav" data-view="${v}"><span class="nav-icon-wrap">${ic}${navBadge(v)}</span><span>${l}</span></a>`).join('')}
   </div>`;
 }
 function renderMobileMenu(isAdmin){
@@ -5156,8 +5226,9 @@ function renderThisWeekCard(){
   ${gigs.length ? `<div class="card" data-testid="this-week" style="margin-bottom:20px;">${gigs.map(e=>{
     const a = artistById(e.artistId) || {}, missing = gigMissing(e);
     return `<div class="kv-row" data-action="open-event" data-id="${e.id}" style="cursor:pointer;padding:12px 16px;flex-direction:column;align-items:stretch;gap:8px;">
-      <div style="min-width:0;"><strong style="display:block;">${esc(fmtDateWeekday(e.date))} · ${esc(fmtTimeRange(e.time, e.endTime))}</strong>
-        <span style="font-size:12.5px;color:var(--ink-2);">${esc(a.name||'')} — ${esc([e.type, e.clientName, e.venue].filter(Boolean).join(' · '))}</span></div>
+      <div style="min-width:0;"><strong style="display:block;font-size:15px;" data-testid="this-week-singer">${esc([a.name, ...(e.additionalArtists||[]).map(x=>(artistById(x.artistId)||{}).name)].filter(Boolean).join(' & ') || 'Singer TBD')}</strong>
+        <span style="display:block;font-size:13px;color:var(--ink);margin-top:2px;">${esc(fmtDateWeekday(e.date))} · ${esc(fmtTimeRange(e.time, e.endTime))}</span>
+        <span style="font-size:12.5px;color:var(--ink-2);">${esc([e.type && e.type!=='Unknown' ? e.type : '', e.clientName, e.venue].filter(Boolean).join(' · '))}</span></div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-start;">${missing.length
         ? missing.map(m=>`<span class="pill pill-warn pill-wrap">${esc(m)}</span>`).join('')
         : `<span class="pill pill-good">Ready</span>`}</div>
@@ -7611,7 +7682,7 @@ function renderNewLeadModal(){
           ${f.pasteNotes? `<p style="font-size:11.5px;color:var(--ink-3);margin:6px 0 0;">Also in the message: ${esc(f.pasteNotes)}</p>` : ''}
         </div>` : ''}
         <div class="field"><label>Artist</label>
-          <select data-action="pick-artist" data-testid="lead-artist" style="max-width:100%;">
+          <select data-action="pick-artist" data-testid="lead-artist" required style="max-width:100%;">
             <option value="" ${!f.artistId?'selected':''} disabled>Pick the singer…</option>
             ${ARTISTS.map(a=>`<option value="${esc(a.id)}" ${f.artistId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
           </select>
@@ -10981,7 +11052,7 @@ function doAddProject(){
     if(!f.recordingDate){ toast('Pick a recording date.', 'system'); return; }
     const count = f.episodeCount || 2;
     const ev = {
-      id:'EV-'+(EVID++), artistId: artist.id, type:'Recording Day', unpaid:true,
+      id:newEventId(), artistId: artist.id, type:'Recording Day', unpaid:true,
       clientName:null, clientEmail:'', clientPhone:'',
       date: f.recordingDate, time:'10:00', endTime:null,
       venue:'', city:'', state:'',
@@ -11195,7 +11266,7 @@ function doSubmitLead(){
   const typeList = isInternal ? INTERNAL_EVENT_TYPES : EVENT_TYPES;
   const resolvedType = (f.type==='Other'? (f.customType||'').trim()||'Other' : f.type)||typeList[0];
   const ev = {
-    id:'EV-'+(EVID++), artistId:f.artistId, type: resolvedType,
+    id:newEventId(), artistId:f.artistId, type: resolvedType,
     unpaid: isInternal,
     clientName: isInternal? null : f.clientName,
     clientEmail: isInternal? '' : (f.clientEmail||''), clientPhone: isInternal? '' : (f.clientPhone||''),
@@ -11240,7 +11311,7 @@ function doSubmitBlockTime(){
   let hadConflict = false;
   dates.forEach(date=>{
     const ev = {
-      id:'EV-'+(EVID++), artistId:S.user, type:'Unavailable', unpaid:true,
+      id:newEventId(), artistId:S.user, type:'Unavailable', unpaid:true,
       clientName:null, clientEmail:'', clientPhone:'',
       date, time: allDay?'00:00':f.startTime, endTime: allDay?null:f.endTime,
       venue:'', city:'', state:'',
