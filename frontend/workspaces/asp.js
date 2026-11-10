@@ -2573,42 +2573,52 @@ function doDeleteTravelRequest(id){
 
 /* ============ PRICING ============ */
 const PRICING_LS_KEY = 'asp_mock_pricing_v1';
-function seedPricing(){
-  const p = {};
-  ARTISTS.forEach(a=>{
-    p[a.id] = {};
-    EVENT_TYPES.forEach((type,i)=>{
-      p[a.id][type] = { hourlyRate: 300 + a.slot*35 + i*15, includedHours: 2 };
-    });
-  });
-  return p;
-}
+// Price list (owner 2026-11-10): one flat fee per singer x event type, an out-of-town fee (+ travel), the hours it
+// covers and a note -- PRICING[artistId][type] = { fee, outOfTownFee, hours, note }, kept in the office's shared
+// settings (app_records 'pricing'), never in this public file. Older rows held hourlyRate x includedHours: mostly
+// placeholder numbers, and some flat fees typed as an hourly rate (so New Lead multiplied them) -- only `fee`
+// counts now, so a type with no fee leaves New Lead's price blank for the office to type.
 function loadPricing(){ try{ const raw = localStorage.getItem(PRICING_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
 function savePricing(){ const r = persist(PRICING_LS_KEY, PRICING, 'pricing'); if(SHARED) SHARED.settings.schedule(); return r; }
-let PRICING = loadPricing();
-if(!PRICING) PRICING = seedPricing();
-ARTISTS.forEach(a=>{ if(!PRICING[a.id]) PRICING[a.id] = {}; EVENT_TYPES.forEach((type,i)=>{ if(!PRICING[a.id][type]) PRICING[a.id][type] = { hourlyRate: 300 + a.slot*35 + i*15, includedHours: 2 }; }); });
-savePricing();
-function getPricing(artistId, type){ return (PRICING[artistId] && PRICING[artistId][type]) || { hourlyRate:0, includedHours:2 }; }
+let PRICING = loadPricing() || {};
+function getPricing(artistId, type){
+  const p = (PRICING[artistId] && PRICING[artistId][type]) || {};
+  return { fee:Number(p.fee)||0, outOfTownFee:Number(p.outOfTownFee)||0, hours:Number(p.hours)||0, note:String(p.note||'') };
+}
+// Out of town = the lead needs a flight (the office ticks it); then the out-of-town fee, when there is one.
+function leadStandardFee(f){ const p = getPricing(f.artistId, f.type); return f.flightNeeded && p.outOfTownFee ? p.outOfTownFee : p.fee; }
 function applyStandardPricing(){
   const f = S.newLeadForm;
-  if(!f.artistId || !f.type || f.type==='Other') return;
-  const p = getPricing(f.artistId, f.type);
-  if(p.hourlyRate) f.price = p.hourlyRate * p.includedHours;
+  if(!f.artistId || !f.type) return;
+  const fee = leadStandardFee(f);
+  // Only a price the list put there is replaced -- never one typed by hand.
+  if(f.price===undefined || f.price==='' || String(f.price)===String(f.priceAuto)){ f.price = fee || ''; f.priceAuto = fee || ''; }
   if(!f.endTimeManual) delete f.endTime; // re-derive from the new artist/type
 }
-// New Lead end time (owner 2026-10-13): start + the artist's included hours for that event type
-// (Pricing page; 2 hours when nothing is set), until someone types an end time. "Time TBD" leaves
-// both blank, and clearing the end time leaves only the end TBD.
+// Far-ahead dates (owner 2026-11-10: "for dates far ahead, such as after Pesach, pricing needs your confirmation first").
+const PRICE_CONFIRM_AFTER_DEFAULT = '2027-04-29';   // the day after Pesach 5787 ends
+function priceConfirmAfter(){ return ORG_SETTINGS.priceConfirmAfter || PRICE_CONFIRM_AFTER_DEFAULT; }
+function leadPriceHint(f){
+  if(!f.artistId || !f.type) return '';
+  const p = getPricing(f.artistId, f.type), bits = [];
+  if(p.fee) bits.push(`List: ${money(p.fee)}${p.hours ? ` · ${p.hours<1 ? Math.round(p.hours*60)+' min' : p.hours+' h'}` : ''}`);
+  if(p.outOfTownFee) bits.push(`Out of town ${money(p.outOfTownFee)} + travel`);
+  if(p.note) bits.push(esc(p.note));
+  const warn = f.date && f.date > priceConfirmAfter() ? `<div style="color:var(--warn-ink);font-weight:600;" data-testid="price-confirm">Date after ${esc(fmtDateShort(priceConfirmAfter()))}: confirm the price with Moshe first.</div>` : '';
+  return bits.length || warn ? `<div style="font-size:11.5px;color:var(--ink-3);margin-top:4px;line-height:1.45;" data-testid="price-hint">${bits.join(' · ')}${warn}</div>` : '';
+}
+// New Lead end time (owner 2026-10-13): start + the hours the price covers (Pricing page), else the occasion's
+// standard hours, else 2 -- until someone types an end time. "Time TBD" leaves both blank.
 const LEAD_DEFAULT_START = '19:00';
 function leadDefaultEndTime(f){
-  const hours = getPricing(f.artistId, f.type).includedHours || 2;
+  const hours = getPricing(f.artistId, f.type).hours || parseFloat(standardHoursFor(f.type)) || 2;
   return addMinutesToTime(f.time || LEAD_DEFAULT_START, Math.round(hours*60));
 }
 function leadEndTime(f){ return f.endTime!==undefined ? f.endTime : leadDefaultEndTime(f); }
 function setPricing(artistId, type, patch){
   PRICING[artistId] = PRICING[artistId] || {};
-  PRICING[artistId][type] = Object.assign({hourlyRate:0,includedHours:2}, PRICING[artistId][type], patch);
+  const { fee, outOfTownFee, hours, note } = Object.assign({}, PRICING[artistId][type], patch);
+  PRICING[artistId][type] = { fee:Number(fee)||0, outOfTownFee:Number(outOfTownFee)||0, hours:Number(hours)||0, note:String(note||'').slice(0,300) };
   savePricing();
 }
 const CHARGE_PRESETS = ['Travel','Flights','Hotel & Lodging','Sound & Production Rider','Musicians & Band','Other'];
@@ -4698,7 +4708,7 @@ function portalNavItems(){ return crewUser() ? (isTravelCrew() ? TRAVEL_CREW_NAV
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.69'; // bump on every release so a phone can tell it has updated. v1.9.69: Clients list (one client -> all their gigs, booked total, still owed; worked out from the gigs). v1.9.68: one singer profile page (contact, commission, Zelle/payee, rider, bio, photo; riders moved off Settings). v1.9.66: navigate buttons compact on a computer, big on a phone; a line mic icon instead of the photo. v1.9.65: a new gig never reuses a deleted gig's id (an old contract attached itself); dropdowns styled like the fields; This week leads with the singer. v1.9.64: the phone tab bar slides (press, drag the bubble, let go to open). v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.70'; // bump on every release so a phone can tell it has updated. v1.9.70: the price list -- a flat fee per singer x event type (+ out of town, hours, note); New Lead fills it (never over a typed price) and flags dates after Pesach. v1.9.69: Clients list (one client -> all their gigs, booked total, still owed; worked out from the gigs). v1.9.68: one singer profile page (contact, commission, Zelle/payee, rider, bio, photo; riders moved off Settings). v1.9.66: navigate buttons compact on a computer, big on a phone; a line mic icon instead of the photo. v1.9.65: a new gig never reuses a deleted gig's id (an old contract attached itself); dropdowns styled like the fields; This week leads with the singer. v1.9.64: the phone tab bar slides (press, drag the bubble, let go to open). v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -5597,7 +5607,7 @@ function renderArtistDetailPage(artistId){
     <div class="grid grid-2" style="margin-bottom:20px;">
       ${card('Contact', `${kv('Email', row ? row.email : a.email)}${kv('WhatsApp', row && row.whatsapp)}${kv('ASP commission', pct!=null && pct!=='' ? pct + '%' : '')}`,
         row ? `<button class="btn btn-sm" data-action="open-edit-real-user" data-kind="artist" data-id="${esc(row.id)}" data-testid="profile-edit">Edit</button>` : '')}
-      ${card('Payment &amp; contracts', pp ? `${kv('Contracts are with', pp.entityName)}${kv('Zelle', pp.zelle)}${kv('Checks payable to', pp.checkPayee)}${pp.defaultFee ? kv('Usual fee', money(pp.defaultFee)) : ''}`
+      ${card('Payment &amp; contracts', pp ? `${kv('Contracts are with', pp.entityName)}${kv('Zelle', pp.zelle)}${kv('Checks payable to', pp.checkPayee)}${getPricing(artistId,'Wedding').fee ? kv('Wedding fee (Pricing)', money(getPricing(artistId,'Wedding').fee)) : ''}`
           : `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No payee profile yet — contracts use ASP's.</p>`,
         pp ? `<button class="btn btn-sm" data-action="open-payee-profile-form" data-id="${esc(pp.id)}" data-testid="profile-payee">Edit</button>`
            : `<button class="btn btn-sm" data-action="add-payee-for-artist" data-id="${esc(artistId)}" data-testid="profile-payee">Add</button>`)}
@@ -6758,26 +6768,32 @@ function bindVideoLibrary(){
 function renderPricingPage(){
   const artistId = S.pricingArtist || ARTISTS[0].id;
   const artist = artistById(artistId);
+  const inp = (key, v, attrs)=>`<input ${attrs} value="${esc(v||'')}" data-pricing data-artist="${esc(artistId)}" data-type="${esc(TYPE)}" data-key="${key}" class="pricing-in"/>`;
+  let TYPE = '';
   return `
-  <p style="font-size:12.5px;color:var(--ink-3);margin:0 0 16px;max-width:640px;">Standard hourly rates by artist and event type — the reference bookkeeping quotes from before negotiating a final flat price. Overtime: each extra half hour costs a full hour at the gig's rate (the fee ÷ booked hours) — contracts fill it in automatically and it stays editable.</p>
+  <p style="font-size:12.5px;color:var(--ink-3);margin:0 0 16px;max-width:680px;">Each singer's usual fee by event type. New Lead fills it in (the out-of-town fee when "Flight needed" is ticked) and you can always change it on the lead. Overtime: each extra half hour costs the fee ÷ the hours.</p>
   ${renderArtistFilterRow(artistId, 'pricing-artist', {noAll:true})}
-  <div class="card table-cards">
+  <div class="card table-cards" data-testid="pricing-table">
     <table>
-      <thead><tr><th>Event Type</th><th>Hourly Rate</th><th>Included Hours</th><th>Overtime (per ½ hour)</th></tr></thead>
+      <thead><tr><th>Event type</th><th>Fee (local)</th><th>Out of town (+ travel)</th><th>Hours</th><th>Note</th><th>Overtime (per ½ hour)</th></tr></thead>
       <tbody>
-        ${EVENT_TYPES.map(type=>{
+        ${EVENT_TYPES.map(type=>{ TYPE = type;
           const p = getPricing(artistId, type);
-          return `<tr>
-            <td data-label="Event Type">${esc(type)}</td>
-            <td data-label="Hourly Rate"><span class="u-mono" style="margin-right:2px;">$</span><input type="number" min="0" step="25" value="${esc(p.hourlyRate)}" data-action="set-hourly-rate" data-artist="${artistId}" data-type="${esc(type)}" style="width:90px;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-family:var(--font-mono);"/></td>
-            <td data-label="Included Hours"><input type="number" min="0" step="0.5" value="${esc(p.includedHours)}" data-action="set-included-hours" data-artist="${artistId}" data-type="${esc(type)}" style="width:70px;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-family:var(--font-mono);"/></td>
-            <td data-label="Overtime" class="u-mono">${money(p.hourlyRate)}/½ hr</td>
+          return `<tr data-testid="pricing-row" data-type="${esc(type)}">
+            <td data-label="Event type">${esc(type)}</td>
+            <td data-label="Fee (local)">${inp('fee', p.fee||'', 'type="number" min="0" step="250" placeholder="—"')}</td>
+            <td data-label="Out of town">${inp('outOfTownFee', p.outOfTownFee||'', 'type="number" min="0" step="250" placeholder="—"')}</td>
+            <td data-label="Hours">${inp('hours', p.hours||'', `type="number" min="0" step="0.25" placeholder="${esc(String(parseFloat(standardHoursFor(type))||''))}" style="width:70px;"`)}</td>
+            <td data-label="Note">${inp('note', p.note, 'type="text" maxlength="300" placeholder="" style="width:100%;min-width:160px;"')}</td>
+            <td data-label="Overtime" class="u-mono">${p.fee && (p.hours || parseFloat(standardHoursFor(type))) ? money(Math.round(p.fee / (p.hours || parseFloat(standardHoursFor(type))))) : '—'}</td>
           </tr>`;
         }).join('')}
       </tbody>
     </table>
   </div>
-  <p style="font-size:11px;color:var(--ink-3);margin-top:10px;">Editing ${esc(artist.name)}'s rates — changes save automatically.</p>
+  <div class="field" style="max-width:360px;margin-top:14px;"><label>Prices need Moshe's OK for dates after</label>
+    <input type="date" data-price-confirm-after value="${esc(priceConfirmAfter())}"/></div>
+  <p style="font-size:11px;color:var(--ink-3);margin-top:10px;">Editing ${esc(artist.name)}'s prices — changes save automatically and every office login sees them.</p>
   `;
 }
 /* ---- Monthly payouts (0078; owner 2026-11-04: "i dont want each gig to have a payout, i want the payouts to
@@ -7829,7 +7845,7 @@ function renderNewLeadModal(){
           <div class="field"><label>State</label><input data-field="state" value="${esc(f.state||'')}" placeholder="NJ"/></div>
         </div>
         <div class="field-row">
-          ${!isInternal? `<div class="field"><label>Price</label><input type="number" data-field="price" value="${esc(f.price||'')}" placeholder="4500"/>
+          ${!isInternal? `<div class="field"><label>Price</label><input type="number" data-field="price" value="${esc(f.price||'')}" placeholder="4500"/>${leadPriceHint(f)}
             <button type="button" class="filter-chip ${f.mezumin?'sel':''}" style="margin-top:6px;align-self:flex-start;" data-action="toggle-lead-mezumin">Mezumin (cash)</button></div>` : ''}
           <div class="field" style="justify-content:flex-end;flex-direction:row;align-items:center;gap:8px;padding-top:18px;">
             <input type="checkbox" id="flightck" data-field="flightNeeded" ${f.flightNeeded?'checked':''} style="width:16px;height:16px;"/>
@@ -11699,6 +11715,7 @@ function bindGlobal(){
           [['address',v.address],['city',v.city],['state',v.state]].forEach(([k,val])=>{ target[k] = val; const inp = box.querySelector(`[data-field="${k}"]`); if(inp) inp.value = val; }); }
       }
       if(target===S.newLeadForm && key==='endTime') S.newLeadForm.endTimeManual = true;
+      if(target===S.newLeadForm && (key==='flightNeeded' || key==='date')){ applyStandardPricing(); renderPreservingFocus(); }
       if(target===S.newLeadForm && key==='time' && !S.newLeadForm.endTimeManual){
         const endEl = el.closest('[data-form]')?.querySelector('[data-field="endTime"]');
         if(endEl) endEl.value = leadDefaultEndTime(S.newLeadForm);
@@ -12290,11 +12307,11 @@ function bindGlobal(){
   document.querySelectorAll('[data-action="set-project-due"]').forEach(inp=>{
     inp.addEventListener('change', ()=>{ const p=getProject(inp.getAttribute('data-id')); p.dueDate = inp.value||null; saveProjects(); toast('Target date updated.', 'system'); });
   });
-  document.querySelectorAll('[data-action="set-hourly-rate"]').forEach(inp=>{
-    inp.addEventListener('change', ()=>{ setPricing(inp.getAttribute('data-artist'), inp.getAttribute('data-type'), {hourlyRate:Number(inp.value)||0}); toast('Rate updated.', 'system'); render(); });
+  document.querySelectorAll('[data-pricing]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{ const k = inp.dataset.key; setPricing(inp.dataset.artist, inp.dataset.type, { [k]: k==='note' ? inp.value.trim() : Number(inp.value)||0 }); toast('Price saved.', 'success'); render(); });
   });
-  document.querySelectorAll('[data-action="set-included-hours"]').forEach(inp=>{
-    inp.addEventListener('change', ()=>{ setPricing(inp.getAttribute('data-artist'), inp.getAttribute('data-type'), {includedHours:Number(inp.value)||0}); toast('Rate updated.', 'system'); render(); });
+  document.querySelectorAll('[data-price-confirm-after]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{ ORG_SETTINGS.priceConfirmAfter = inp.value || PRICE_CONFIRM_AFTER_DEFAULT; saveOrgSettings(); toast('Saved.', 'success'); render(); });
   });
   document.querySelectorAll('[data-action="upload-deposit-zelle-qr"]').forEach(inp=>{
     if(inp.tagName!=='INPUT') return;
