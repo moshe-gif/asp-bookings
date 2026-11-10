@@ -20,6 +20,8 @@ GIGS = [
 
 
 def test_singer_home_calendar_and_big_nav(live_server, page):
+    # Big on the phone (owner: "make the navigate buttons bigger"); compact on a computer ("now they are too big").
+    page.set_viewport_size({"width": 390, "height": 844})
     errors = collect_console_errors(page)
     seed_events(page, GIGS)
     page.goto(live_server)
@@ -27,11 +29,15 @@ def test_singer_home_calendar_and_big_nav(live_server, page):
     assert page.locator('[data-testid="cal-subscribe"]').is_visible(), "no calendar subscribe card on the singer home"
     nav = page.locator('[data-testid="nav-buttons"]').first
     assert nav.is_visible(), "no big navigate buttons for today's gig"
+    # the Today's gig card's icon is a small line icon, not a full-size photo
+    icon = page.locator('.card', has_text="Today's Gig").locator(".ico").first.bounding_box()
+    assert icon["height"] <= 24, f"Today's gig icon is huge: {icon}"
     for b in nav.locator("a").all():
         assert b.bounding_box()["height"] >= 48, "navigate button is not big"
 
-    goto_nav(page, "a_gigs", mobile=False)
-    page.locator('tr[data-action="open-event"][data-id="EV-9302"]').first.click()
+    page.evaluate("location.hash = '#/a_gigs'")
+    page.wait_for_function("() => S.view === 'a_gigs'")
+    page.locator('[data-action="open-event"][data-id="EV-9302"]').first.click()
     sheet = page.locator(".sheet").first
     sheet.wait_for(state="visible")
     text = sheet.inner_text()
@@ -60,3 +66,15 @@ def test_singer_message_choices(live_server, page):
     text = card.inner_text()
     assert "WHATSAPP" in text.upper() and "EMAIL" in text.upper(), text
     assert card.locator('[data-action="toggle-singer-notify"]').count() == 3
+
+
+def test_nav_buttons_compact_on_a_computer(live_server, page):
+    page.set_viewport_size({"width": 1280, "height": 900})
+    seed_events(page, GIGS)
+    page.goto(live_server)
+    login_as(page, "benny")
+    nav = page.locator('[data-testid="nav-buttons"]').first
+    nav.wait_for(state="visible")
+    for b in nav.locator("a").all():
+        box = b.bounding_box()
+        assert box["height"] <= 40 and box["width"] < 260, f"navigate button too big on a computer: {box}"
