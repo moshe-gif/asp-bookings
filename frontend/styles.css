@@ -792,3 +792,8 @@ th{ border-bottom:1px solid var(--ink); }
   .sheet-head .gig-head-name{ font-size:1.25rem !important; }
   .sheet-head{ align-items:center; }
 }
+/* Totals row under a money table (My Jobs). */
+tfoot .total-row td{ border-top:1px solid var(--ink); padding-top:12px; }
+/* Big Waze / Google Maps buttons for singers and crew (owner 2026-11-10). */
+.nav-buttons{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; margin-top:10px; }
+.nav-buttons .btn{ justify-content:center; min-height:52px; font-size:15px; text-decoration:none; }

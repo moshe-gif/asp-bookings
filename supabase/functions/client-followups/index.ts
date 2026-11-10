@@ -91,9 +91,11 @@ Deno.serve(async (req) => {
   if (body.only === "submit_templates") return json({ ok: true, templates: await createTemplates360() });
 
   // Who's who, and what was already sent once (kind|gig|ref).
-  const { data: artists } = await sb.from("artists").select("id, legacy_id, name, whatsapp, role, email");
+  const { data: artists } = await sb.from("artists").select("id, legacy_id, name, whatsapp, role, email, notify");
   const artistOf = (ref: string) => (artists || []).find((a: Row) => a.id === ref || a.legacy_id === ref);
   const nameOf = (ref: string) => artistOf(ref)?.name;
+  // A singer's own choices (0089, Settings in their app): missing = on.
+  const wants = (a: Row | undefined, k: string) => !!a && a.notify?.[k] !== false;
   const singersOf = (e: Row) => [e.artist_id || e.app_doc?.artistId, ...(((e.app_doc || {}).additionalArtists || []).map((x: Row) => x?.artistId))].filter(Boolean).map(String);
   const singerNames = (e: Row) => singersOf(e).map((r) => nameOf(r)).filter(Boolean).join(" & ") || "your event";
   const onceKinds = ["deposit_confirmed", "contract_sent", "balance_paid", "gig_reminder", "flight_reminder", "office_signed", "office_deposit", "office_balance", "gig_form", "gig_form_wa", "office_payouts", "gig_form_nudge", "gig_sheet", "thank_you", "singer_week", "office_unpaid", "cash_confirm", "cash_dayof", "office_report"];
@@ -196,8 +198,8 @@ Deno.serve(async (req) => {
     if (e.date === nyDay && !ev.unpaid) {
       for (const ref of singersOf(e)) {
         const a = artistOf(ref);
-        if (a && hasPhone(a.whatsapp)) await once("gig_reminder", e.legacy_id, String(a.id), a.whatsapp, "gig_reminder",
-          [firstName(a.name), title, `nyDay${fmtTime(ev.time) ? `, ${fmtTime(ev.time)}` : ""}`, place]);
+        if (a && hasPhone(a.whatsapp) && wants(a, "dayOfWhatsApp")) await once("gig_reminder", e.legacy_id, String(a.id), a.whatsapp, "gig_reminder",
+          [firstName(a.name), title, `Today${fmtTime(ev.time) ? `, ${fmtTime(ev.time)}` : ""}`, place]);
       }
     }
     const f = ev.flight || {};
@@ -205,7 +207,7 @@ Deno.serve(async (req) => {
     if (departDay === inThree && (f.flightNumber || f.airline)) {
       const a = artistOf(String(e.artist_id || ev.artistId || ""));
       const hm = String(f.depart).slice(11, 16);
-      if (a && hasPhone(a.whatsapp)) await once("flight_reminder", e.legacy_id, String(a.id), a.whatsapp, "flight_reminder",
+      if (a && hasPhone(a.whatsapp) && wants(a, "flightWhatsApp")) await once("flight_reminder", e.legacy_id, String(a.id), a.whatsapp, "flight_reminder",
         [firstName(a.name), [f.flightNumber, f.airline ? `(${f.airline})` : ""].filter(Boolean).join(" "), `${fmtDate(departDay)}${fmtTime(hm) ? `, ${fmtTime(hm)}` : ""}`,
          `the ${title} event${ev.city ? ` in ${ev.city}` : ""}`]);
     }
@@ -217,7 +219,7 @@ Deno.serve(async (req) => {
     for (const e of events || []) {
       const ev: Row = e.app_doc || {};
       if ((e.status !== "booked" && e.status !== "paid") || ev.unpaid || e.date <= nyDay || e.date > weekEnd) continue;
-      for (const ref of singersOf(e)) { const a = artistOf(ref); if (a?.email) byArtist.set(String(a.id), [...(byArtist.get(String(a.id)) || []), e]); }
+      for (const ref of singersOf(e)) { const a = artistOf(ref); if (a?.email && wants(a, "weeklyEmail")) byArtist.set(String(a.id), [...(byArtist.get(String(a.id)) || []), e]); }
     }
     for (const [artistId, gigs] of byArtist) {
       const a = artistOf(artistId)!, key = `singer_week|WEEK|${artistId}@${nyDay}`;

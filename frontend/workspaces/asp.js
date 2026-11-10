@@ -3537,7 +3537,7 @@ function resetAfterSignOut(){
   stopArtistPortal();
   closeAllOverlays();
   stopWhatsAppLive(); S.wa = null; S.waContact = null;
-  S.user = null; S.previewFrom = null; S.crew = null; S.crewRoster = null; S.gigCrew = null; S.lib = null; S.libUrls = null; S.libTab = null; S.libAt = null; S.libF = null; S.libQ = null; S.drive = null; S.realSession = null; S.realPasskeys = null; S.realRoster = null;
+  S.user = null; S.previewFrom = null; S.crew = null; S.crewRoster = null; S.gigCrew = null; S.lib = null; S.libUrls = null; S.libTab = null; S.libAt = null; S.libF = null; S.libQ = null; S.drive = null; S.realSession = null; S.singerNotify = undefined; S.realPasskeys = null; S.realRoster = null;
   S.realSignInNotFound = false; S.realSignInError = null; S.showRealSignIn = false;
   S.eventId = null; S.showNewLead = false; S.showMobileMenu = false;
   history.pushState(null, '', location.pathname + location.search);
@@ -4061,6 +4061,14 @@ function mapLinks(ev){
 function gmapsUrl(ev){ return mapLinks(ev).google; }
 function wazeUrl(ev){ return mapLinks(ev).waze; }
 // data-action="external-link" keeps a click on the link from also opening the row it sits in.
+// Two big tap targets for drivers: Waze and Google Maps, side by side, full width.
+function renderNavButtons(ev){
+  if(!hasLocation(ev)) return '';
+  const l = mapLinks(ev);
+  return `<div class="nav-buttons" data-testid="nav-buttons">
+    <a href="${esc(l.waze)}" target="_blank" rel="noopener" data-action="external-link" class="btn btn-primary">${ICO.pin} Waze</a>
+    <a href="${esc(l.google)}" target="_blank" rel="noopener" data-action="external-link" class="btn">${ICO.pin} Google Maps</a></div>`;
+}
 function renderMapLinks(ev){
   if(!hasLocation(ev)) return '';
   const l = mapLinks(ev);
@@ -4233,6 +4241,7 @@ function applyHashToState(){
   const [view, id] = hash.split('/');
   if(view==='artist_detail'){ S.view='artist_detail'; S.artistDetailId=id; }
   else if(view==='project_detail'){ S.view='project_detail'; S.projectId=id; }
+  else if(view==='event' && id){ S.eventId = decodeURIComponent(id); }   // calendar feed links (cal-feed)
   else { S.view = view; }
 }
 window.addEventListener('popstate', ()=>{
@@ -4601,7 +4610,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.61'; // bump on every release so a phone can tell it has updated. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.62'; // bump on every release so a phone can tell it has updated. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4724,6 +4733,42 @@ const THEME_OPTIONS = [
   ['light', 'Light', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>'],
   ['dark', 'Dark', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>'],
 ];
+/* ---- A singer's messages (0089): saved on the server, so the sends really follow them (owner 2026-11-10:
+   "we should add a whatsapp option"). Missing = on. ---- */
+const SINGER_NOTIFY = [
+  ['weeklyEmail',   'Your week ahead',  'Sunday: one email with the coming week\'s gigs and gig sheets', 'Email'],
+  ['dayOfWhatsApp', 'Day-of reminder',  'The morning of each gig, with a link to the gig sheet and directions', 'WhatsApp'],
+  ['flightWhatsApp','Flight reminder',  'Three days before a flight we booked for you', 'WhatsApp'],
+];
+function renderSingerNotifyCard(){
+  const prefs = S.singerNotify;
+  if(prefs===undefined && !S.previewFrom && supabaseClient && S.realSession){ S.singerNotify = null; loadSingerNotify(); }
+  const ro = !!S.previewFrom || !S.realSession;
+  return `<div class="card card-pad" style="margin-bottom:20px;" data-testid="singer-notify">
+    <h3 style="margin-bottom:8px;">Messages from ASP</h3>
+    ${SINGER_NOTIFY.map(([key,label,sub,channel])=>{ const on = !prefs || prefs[key]!==false;
+      return `<div class="settings-row"><div><h4>${label}</h4><p>${sub}</p></div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <span class="u-label" style="font-size:9px;">${channel}</span>
+          <label class="switch"><input type="checkbox" data-action="toggle-singer-notify" data-key="${key}" ${on?'checked':''} ${ro||prefs===null?'disabled':''}/><span class="switch-track"></span></label>
+        </div></div>`; }).join('')}
+    ${S.previewFrom ? `<p style="font-size:11.5px;color:var(--ink-3);margin:8px 0 0;">Preview — the singer changes these on their own phone.</p>` : ''}
+  </div>`;
+}
+async function loadSingerNotify(){
+  const { data, error } = await supabaseClient.rpc('my_notify');
+  S.singerNotify = error ? {} : (data || {});
+  render();
+}
+async function doToggleSingerNotify(key){
+  const cur = S.singerNotify || {};
+  const next = { [key]: cur[key]===false };
+  S.singerNotify = Object.assign({}, cur, next); render();
+  const { data, error } = await supabaseClient.rpc('set_my_notify', { p: next });
+  if(error){ S.singerNotify = cur; toast('Could not save that — try again.', 'system'); }
+  else { S.singerNotify = data || S.singerNotify; toast('Saved.', 'success'); }
+  render();
+}
 const NOTIFY_ITEMS = [
   ['newLeads', 'New leads', 'A new booking request comes in', 'ASP books a new gig for you'],
   ['balanceReminders', 'Balance reminders', "A client's remaining balance is coming due", "A client's remaining balance is coming due"],
@@ -4875,7 +4920,8 @@ function renderSettingsPage(){
   ${isAdmin ? renderOfficeAlertsCard() : ''}
 
 
-  ${crewUser() ? '' : `<div class="card card-pad" style="margin-bottom:20px;">
+  ${!isAdmin && !crewUser() ? renderSingerNotifyCard() : ''}
+  ${crewUser() || !isAdmin ? '' : `<div class="card card-pad" style="margin-bottom:20px;">
     <h3 style="margin-bottom:8px;">Notifications</h3>
     ${NOTIFY_ITEMS.filter(([,,,,artistOnly])=>!artistOnly||!isAdmin).map(([key,label,adminSub,artistSub])=>`
     <div class="settings-row">
@@ -5937,7 +5983,7 @@ function crewGigRow(ev, opts={}){
         </div>
       </div>
     </div>
-    ${opts.directions ? renderMapLinks(ev) : ''}
+    ${opts.directions ? renderNavButtons(ev) : ''}
     ${me && me.kind==='videographer' && ev.myStatus==='requested' ? `<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
       <button class="btn btn-sm btn-primary" data-action="crew-respond" data-id="${esc(ev.id)}" data-accept="1" ${S.crewBusy?'disabled':''}>${ICO.check} Confirm</button>
       <button class="btn btn-sm" data-action="crew-respond" data-id="${esc(ev.id)}" data-accept="0" ${S.crewBusy?'disabled':''}>Can't make it</button></div>` : ''}
@@ -5980,7 +6026,8 @@ function renderCrewGigSheet(ev){
           <div class="kv-row"><span style="color:var(--ink-2);">${ICO.clock} Date &amp; Time</span><strong class="u-mono" style="text-align:right;">${esc(d)}${ev.time && ev.time!=='00:00' ? ' · ' + esc(fmtTimeRange(ev.time, ev.endTime)) : ''}</strong></div>
           <div class="kv-row"><span style="color:var(--ink-2);">Event</span><strong style="text-align:right;">${esc(ev.type)}${ev.clientName ? `<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.clientName)}</span>` : ''}</strong></div>
           <div class="kv-row"><span style="color:var(--ink-2);">${ICO.pin} Venue</span><span style="text-align:right;"><strong>${ev.venue ? esc(ev.venue) : '<span style="color:var(--ink-3);font-weight:500;">TBD</span>'}${ev.address ? `<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.address)}</span>` : ''}${ev.city||ev.state ? `<br/><span style="font-weight:500;color:var(--ink-2);">${esc([ev.city, ev.state].filter(Boolean).join(', '))}</span>` : ''}</strong>
-            <span style="display:flex;justify-content:flex-end;">${renderMapLinks(ev)}</span></span></div>
+</span></div>
+          ${renderNavButtons(ev)}
           ${ev.dressCode ? `<div class="kv-row"><span style="color:var(--ink-2);">Dress Code</span><strong style="text-align:right;">${esc(ev.dressCode)}</strong></div>` : ''}
         </div>
         ${me.kind==='social' ? renderGigCrewCard(ev.id, ev.crew||[]) : ''}
@@ -7283,14 +7330,37 @@ function renderArtistDashboard(artistId){
     <div style="font-family:var(--font-display);font-size:1.15rem;font-weight:600;margin-bottom:4px;cursor:pointer;" data-action="open-event" data-id="${todayGig.id}">${esc(todayGig.type)}${todayGig.clientName?` — ${esc(todayGig.clientName)}`:''}</div>
     <div style="font-size:13px;color:var(--ink-2);margin-bottom:2px;">${fmtTimeRange(todayGig.time, todayGig.endTime)}</div>
     <div style="font-size:13px;color:${hasLocation(todayGig)?'var(--ink-2)':'var(--ink-3)'};margin-bottom:14px;">${hasLocation(todayGig)? esc(fullLocation(todayGig)) : 'Location TBD'}</div>
-    ${hasLocation(todayGig)? `<div style="display:flex;gap:8px;">
-      <a href="${esc(wazeUrl(todayGig))}" target="_blank" rel="noopener" data-action="external-link" class="btn btn-primary" style="flex:1;">${ICO.pin} Navigate (Waze)</a>
-      <a href="${esc(gmapsUrl(todayGig))}" target="_blank" rel="noopener" data-action="external-link" class="btn" style="flex:1;background:var(--surface);">${ICO.pin} Google Maps</a>
-    </div>` : ''}
+    ${renderNavButtons(todayGig)}
   </div>` : ''}
+  ${renderCalendarSubscribe(false)}
   ${renderArtistTravelCard(evs)}
   ${renderUpcomingGigsCard(evs, {days:7, showArtist:false})}
   `;
+}
+/* ---- The singer's own calendar feed (0088, cal-feed): subscribe once, every gig shows and updates by itself ---- */
+const CAL_SUB_KEY = 'aspCalSubscribed';
+function calSubscribed(){ try{ return localStorage.getItem(CAL_SUB_KEY)===String(S.user); }catch(e){ return false; } }
+function renderCalendarSubscribe(compact){
+  if(S.previewFrom) return '';   // the office previewing a singer: no feed links for someone else
+  if(calSubscribed()) return compact ? '' : `<p style="font-size:12px;color:var(--ink-3);margin:0 0 16px;" data-testid="cal-subscribed">${ICO.check} Your gigs are in your phone calendar and update by themselves. <a href="#" data-action="cal-subscribe" data-kind="reset" style="color:var(--ink-3);">New link</a></p>`;
+  return `<div class="card card-pad cal-sub" data-testid="cal-subscribe" style="margin-bottom:16px;">
+    <strong style="display:block;margin-bottom:4px;">${ICO.cal} Put your gigs in your calendar</strong>
+    <p style="font-size:12.5px;color:var(--ink-2);margin:0 0 10px;">Tap once — every gig you're booked on shows up and stays up to date by itself.</p>
+    <div class="nav-buttons">
+      <button class="btn btn-primary" data-action="cal-subscribe" data-kind="apple" ${S.calSubBusy?'disabled':''}>iPhone calendar</button>
+      <button class="btn" data-action="cal-subscribe" data-kind="google" ${S.calSubBusy?'disabled':''}>Google Calendar</button></div>
+  </div>`;
+}
+async function doCalendarSubscribe(kind){
+  if(S.calSubBusy) return;
+  S.calSubBusy = true; render();
+  try{
+    const res = await callEdgeFunction('cal-feed', { action: kind==='reset' ? 'reset' : 'link' });
+    if(!res || !res.ok){ toast((res && res.error) || 'Could not get your calendar link — try again.', 'system'); return; }
+    if(kind==='reset'){ try{ localStorage.removeItem(CAL_SUB_KEY); }catch(e){} toast('New calendar link made — the old one stopped working. Subscribe again below.', 'success'); return; }
+    try{ localStorage.setItem(CAL_SUB_KEY, String(S.user)); }catch(e){}
+    if(kind==='google') window.open(res.google, '_blank'); else location.href = res.webcal;
+  } finally { S.calSubBusy = false; render(); }
 }
 // "Your Travel" (owner 2026-10-15: "a box that will have a itinerary on the artist end ... they can just
 // click on their itinerary and see all of their information"): every upcoming gig with travel booked.
@@ -7360,7 +7430,12 @@ function renderArtistFinancials(artistId){
         <td data-label="ASP Fee" class="u-mono">${m.pct!=null ? `${esc(fmtPct(m.pct))} · ` : ''}${money(m.cut)}</td>
         <td data-label="You Receive" class="u-mono">${money(m.net)}</td>`}
         <td data-label="Status"><span class="pill ${st.cls}">${esc(st.label)}</span></td></tr>`; }).join('')}
-    </tbody></table></div>` : `<div class="card empty">No booked gigs yet.</div>`}
+    </tbody>${(()=>{ const known = jobs.map(artistMoney).filter(m=>!m.pending); if(!known.length) return '';
+      const sum = k=>known.reduce((t,m)=>t+(Number(m[k])||0),0);
+      return `<tfoot><tr class="total-row" data-testid="jobs-total"><td data-label="Total"><strong>Total</strong>${known.length<jobs.length?` <span style="font-weight:500;color:var(--ink-3);font-size:11.5px;">(${jobs.length-known.length} being confirmed)</span>`:''}</td><td></td>
+        <td data-label="Gig Amount" class="u-mono"><strong>${money(sum('gross'))}</strong></td>
+        <td data-label="ASP Fee" class="u-mono"><strong>${money(sum('cut'))}</strong></td>
+        <td data-label="You Receive" class="u-mono"><strong>${money(sum('net'))}</strong></td><td></td></tr></tfoot>`; })()}</table></div>` : `<div class="card empty">No booked gigs yet.</div>`}
   `;
 }
 function renderArtistGigTable(events){
@@ -7752,12 +7827,13 @@ function renderEventSheet(ev){
             <span style="color:var(--ink-2);">${ICO.pin} Venue</span>
             <span style="text-align:right;">
               <strong>${ev.venue? esc(ev.venue) : `<span style="color:var(--ink-3);font-weight:500;">TBD</span>`}${!isAdmin && ev.address?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.address)}</span>`:''}${(ev.city||ev.state)?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.city)}${ev.city&&ev.state?', ':''}${esc(ev.state)}</span>`:''}</strong>
-              ${!isAdmin ? `<span style="display:flex;justify-content:flex-end;">${renderMapLinks(ev)}</span>` : hasLocation(ev)? `<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px;">
+              ${!isAdmin ? '' : hasLocation(ev)? `<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px;">
                 <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="font-size:11px;font-weight:700;color:var(--accent);text-decoration:none;">Maps</a>
                 <a href="${wazeUrl(ev)}" target="_blank" rel="noopener" style="font-size:11px;font-weight:700;color:var(--accent);text-decoration:none;">Waze</a>
               </div>`:''}
             </span>
           </div>
+          ${!isAdmin ? renderNavButtons(ev) : ''}
           <div class="kv-row" style="align-items:center;">
             <span style="color:var(--ink-2);">Dress Code</span>
             <span style="display:flex;align-items:center;gap:6px;">
@@ -7789,13 +7865,7 @@ function renderEventSheet(ev){
         </div>` : ''}
         ${isAdmin && !ev.unpaid && ['contract_sent','booked','paid'].includes(ev.status) ? renderGigCrewCard(ev.id, (S.gigCrew||{})[ev.id] || []) : ''}
         ${renderPrepAndGigInfoCard(ev, isAdmin)}
-        ${!isAdmin ? `<div>
-            <div style="display:flex;gap:8px;">
-              <button class="btn btn-primary btn-block" data-action="gcal" data-id="${ev.id}">${ICO.cal} Add to Google Calendar</button>
-              <button class="btn btn-block" data-action="ics" data-id="${ev.id}">Download .ics</button>
-            </div>
-            <p style="font-size:11px;color:var(--ink-3);text-align:center;margin:8px 0 0;">Once ASP is online, gigs will sync to your Google Calendar automatically — no clicking needed. Add your Google account to the Apple Calendar app on iPhone and it'll show up there too.</p>
-          </div>`:''}
+        ${!isAdmin && !crewUser() ? renderCalendarSubscribe(true) : ''}
 
         ${isAdmin ? renderAdminActions(ev) : ''}
 
@@ -11816,6 +11886,8 @@ function bindGlobal(){
       case 'toggle-artist-paidout': doToggleArtistPaidOut(id); break;
       case 'gcal': window.open(gcalUrl(getEvent(id)), '_blank'); break;
       case 'ics': downloadIcs(getEvent(id)); break;
+      case 'toggle-singer-notify': doToggleSingerNotify(t.getAttribute('data-key')); break;
+      case 'cal-subscribe': e.preventDefault(); doCalendarSubscribe(t.getAttribute('data-kind')); break;
       case 'dismiss-intl': {
         const result = updateEvent(id, { intlOpportunityDismissed:true });
         toast(result.ok ? 'Dismissed.' : (result.error==='conflict' ? 'This gig changed elsewhere since you loaded it — reload before dismissing.' : 'Could not save.'), result.ok?'system':'system');
