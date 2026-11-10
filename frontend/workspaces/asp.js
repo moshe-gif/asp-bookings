@@ -8,6 +8,7 @@
 
 /* ============ ICONS (tiny inline svg) ============ */
 const ICO = {
+  client:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="11" r="2.5"/><path d="M5.5 17c.6-1.8 2-2.8 3.5-2.8s2.9 1 3.5 2.8"/><path d="M15 10h3M15 14h3"/></svg>',
   pencil:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
   dash:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
   cal:'<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
@@ -4252,6 +4253,7 @@ function pathForState(){
   let seg = S.view;
   if(S.view==='artist_detail' && S.artistDetailId) seg += '/'+S.artistDetailId;
   if(S.view==='project_detail' && S.projectId) seg += '/'+S.projectId;
+  if(S.view==='client_detail' && S.clientKey) seg += '/'+encodeURIComponent(S.clientKey);
   return '#/'+seg;
 }
 function syncURL(){
@@ -4264,6 +4266,7 @@ function applyHashToState(){
   const [view, id] = hash.split('/');
   if(view==='artist_detail'){ S.view='artist_detail'; S.artistDetailId=id; }
   else if(view==='project_detail'){ S.view='project_detail'; S.projectId=id; }
+  else if(view==='client_detail'){ S.view='client_detail'; S.clientKey=decodeURIComponent(id||''); }
   else if(view==='event' && id){ S.eventId = decodeURIComponent(id); }   // calendar feed links (cal-feed)
   else { S.view = view; }
 }
@@ -4642,7 +4645,7 @@ function renderUserChip(){
 
 const MGMT_NAV_ITEMS = [
   ['dashboard','Dashboard',ICO.dash], ['calendar','Calendar',ICO.cal], ['leads','Leads',ICO.leads],
-  ['artists','Artists',ICO.artists], ['travel','Travel',ICO.suitcase], ['projects','Projects',ICO.kanban], ['pricing','Pricing',ICO.tag], ['financials','Financials',ICO.money],
+  ['artists','Artists',ICO.artists], ['clients','Clients',ICO.client], ['travel','Travel',ICO.suitcase], ['projects','Projects',ICO.kanban], ['pricing','Pricing',ICO.tag], ['financials','Financials',ICO.money],
   ['contracts','Contracts',ICO.leads],
   ['messages','Inbox',ICO.sms],
   ['videos','Media',ICO.film],
@@ -4695,12 +4698,12 @@ function portalNavItems(){ return crewUser() ? (isTravelCrew() ? TRAVEL_CREW_NAV
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.68'; // bump on every release so a phone can tell it has updated. v1.9.68: one singer profile page (contact, commission, Zelle/payee, rider, bio, photo; riders moved off Settings). v1.9.66: navigate buttons compact on a computer, big on a phone; a line mic icon instead of the photo. v1.9.65: a new gig never reuses a deleted gig's id (an old contract attached itself); dropdowns styled like the fields; This week leads with the singer. v1.9.64: the phone tab bar slides (press, drag the bubble, let go to open). v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.69'; // bump on every release so a phone can tell it has updated. v1.9.69: Clients list (one client -> all their gigs, booked total, still owed; worked out from the gigs). v1.9.68: one singer profile page (contact, commission, Zelle/payee, rider, bio, photo; riders moved off Settings). v1.9.66: navigate buttons compact on a computer, big on a phone; a line mic icon instead of the photo. v1.9.65: a new gig never reuses a deleted gig's id (an old contract attached itself); dropdowns styled like the fields; This week leads with the singer. v1.9.64: the phone tab bar slides (press, drag the bubble, let go to open). v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
 }
-function isNavActive(v){ return S.view===v || (v==='artists' && S.view==='artist_detail') || ((v==='projects'||v==='a_projects') && S.view==='project_detail'); }
+function isNavActive(v){ return S.view===v || (v==='artists' && S.view==='artist_detail') || (v==='clients' && S.view==='client_detail') || ((v==='projects'||v==='a_projects') && S.view==='project_detail'); }
 
 function renderRail(){
   return `<div class="rail">
@@ -4776,6 +4779,8 @@ const VIEWS = {
   needs_review:     { who:'admin',  title:'Needs Review',               render:()=>renderNeedsReviewPage() },
   artists:          { who:'admin',  title:'Artists',                    render:()=>renderArtistsPage() },
   artist_detail:    { who:'admin',  title:()=>artistById(S.artistDetailId)?.name || '', render:()=>renderArtistDetailPage(S.artistDetailId) },
+  clients:          { who:'admin',  title:'Clients',                    render:()=>renderClientsPage() },
+  client_detail:    { who:'admin',  title:()=>(clientByKey(S.clientKey)||{}).name || 'Client', render:()=>renderClientDetailPage(S.clientKey) },
   financials:       { who:'admin',  title:'Financials',                 render:()=>renderFinancialsPage() },
   outside_bookings: { who:'admin',  title:'Other Bookings',             render:()=>renderOutsideBookingsPage() },
   documents:        { who:'admin',  title:'Documents',                  render:()=>renderDocumentsPage() },
@@ -5604,6 +5609,82 @@ function renderArtistDetailPage(artistId){
     <div class="section-head"><h2>Upcoming (${upcoming.length})</h2></div>
     ${renderEventTable(upcoming, {})}
   `;
+}
+
+/* ============ CLIENTS (owner 2026-11-09: "a Clients list (one client -> many gigs)") ============
+   Worked out from the gigs, never stored: the gig stays the one place a client's name / email / phone live
+   (SSOT), so fixing a gig fixes the list. Gigs belong to the same client when they share an email, a phone
+   number (last 10 digits), or the exact same full name. A client's key is their newest email, else phone,
+   else name -- and is found again by any of those, so the link survives a new gig. */
+function clientIds(ev){
+  const email = String(ev.clientEmail||'').trim().toLowerCase();
+  const ph = String(ev.clientPhone||'').replace(/\D/g,'').slice(-10);
+  const name = String(ev.clientName||'').trim().toLowerCase().replace(/\s+/g,' ');
+  return [ /@/.test(email) && !/@aspmgmt\.com$/.test(email) ? 'e:'+email : '', ph.length>=7 ? 'p:'+ph : '', name.includes(' ') ? 'n:'+name : (name && !email && ph.length<7 ? 'n:'+name : '') ].filter(Boolean);
+}
+function buildClients(){
+  const evs = S.events.filter(e=>String(e.clientName||'').trim() || String(e.clientEmail||'').trim());
+  const parent = evs.map((_, i)=>i), find = i=>{ while(parent[i]!==i){ parent[i]=parent[parent[i]]; i=parent[i]; } return i; };
+  const firstWith = {};
+  evs.forEach((e, i)=>clientIds(e).forEach(k=>{ if(firstWith[k]===undefined) firstWith[k]=i; else parent[find(i)] = find(firstWith[k]); }));
+  const groups = {};
+  evs.forEach((e, i)=>{ (groups[find(i)] = groups[find(i)] || []).push(e); });
+  return Object.values(groups).map(gigs=>{
+    gigs.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+    const pick = f=>(gigs.find(g=>String(g[f]||'').trim())||{})[f] || '';
+    const ids = [...new Set(gigs.flatMap(clientIds))];
+    const email = pick('clientEmail').trim().toLowerCase(), ph = pick('clientPhone').replace(/\D/g,'').slice(-10);
+    const key = email ? 'e:'+email : ph.length>=7 ? 'p:'+ph : ids[0] || 'g:'+gigs[0].id;
+    const today = todayISO(), confirmed = gigs.filter(isConfirmed);
+    const next = gigs.filter(g=>g.date>=today && (isConfirmed(g) || isOpenLead(g))).sort((a,b)=>a.date.localeCompare(b.date))[0] || null;
+    const owed = confirmed.filter(g=>!g.balanceReceived).reduce((t,g)=>t + Math.max(0, g.depositReceived ? clientBalanceDue(g) : clientTotal(g)), 0);
+    return { key, ids, name: pick('clientName').trim() || pick('clientEmail'), email: pick('clientEmail').trim(), phone: pick('clientPhone').trim(),
+      gigs, booked: confirmed.length, total: confirmed.reduce((t,g)=>t + clientTotal(g), 0), owed, next, last: gigs[0] };
+  });
+}
+function clientByKey(key){ return key ? buildClients().find(c=>c.key===key || c.ids.includes(key)) || null : null; }
+function renderClientsPage(){
+  const q = String(S.clientSearch||'').trim().toLowerCase();
+  let list = buildClients();
+  if(q) list = list.filter(c=>[c.name, c.email, c.phone, ...c.gigs.map(g=>g.venue)].some(x=>String(x||'').toLowerCase().includes(q)));
+  list.sort((a,b)=>String((b.next||b.last).date).localeCompare(String((a.next||a.last).date)));
+  const nextLine = c=>c.next ? `Next: ${fmtDateShort(c.next.date)}${c.next.venue?` · ${esc(c.next.venue)}`:''}` : `Last: ${fmtDateShort(c.last.date)}`;
+  return `<div class="section-head"><h2>Clients (${list.length})</h2></div>
+    <input type="search" data-client-search data-focus-key="client-search" value="${esc(S.clientSearch||'')}" placeholder="Name, email, phone or hall" autocomplete="off" class="client-search"/>
+    ${list.length ? `<div class="card table-cards" data-testid="clients-list"><table>
+      <thead><tr><th>Client</th><th>Contact</th><th>Gigs</th><th>Next / last</th><th>Booked total</th><th>Still owed</th></tr></thead>
+      <tbody>${list.map(c=>`<tr class="row-link" data-action="open-client" data-id="${esc(c.key)}" data-testid="client-row">
+        <td data-label="Client"><strong>${esc(c.name)}</strong></td>
+        <td data-label="Contact" style="overflow-wrap:anywhere;">${esc(c.email || c.phone || '—')}</td>
+        <td data-label="Gigs">${c.gigs.length}${c.booked!==c.gigs.length ? ` <span style="color:var(--ink-3);">(${c.booked} booked)</span>` : ''}</td>
+        <td data-label="Next / last">${nextLine(c)}</td>
+        <td data-label="Booked total" class="u-mono">${c.total ? money(c.total) : '—'}</td>
+        <td data-label="Still owed" class="u-mono">${c.owed>0.5 ? `<span style="color:var(--warn-ink);font-weight:600;">${money(c.owed)}</span>` : '—'}</td>
+      </tr>`).join('')}</tbody></table></div>` : `<div class="card empty">${q ? 'No client matches that.' : 'No clients yet.'}</div>`}`;
+}
+function renderClientDetailPage(key){
+  const c = clientByKey(key);
+  if(!c) return `<div class="card card-pad">That client isn't on any gig any more. <button class="btn btn-sm" data-action="nav" data-view="clients">All clients</button></div>`;
+  const kv = (k, v)=>`<div class="kv-row"><span style="color:var(--ink-2);">${k}</span><strong style="text-align:right;overflow-wrap:anywhere;">${v}</strong></div>`;
+  const tel = c.phone.replace(/[^\d+]/g,'');
+  const today = todayISO();
+  const upcoming = c.gigs.filter(g=>g.date>=today).sort((a,b)=>a.date.localeCompare(b.date)), past = c.gigs.filter(g=>g.date<today);
+  return `<div data-testid="client-detail">
+    <div class="profile-head"><span class="avatar profile-pic" data-slot="1">${esc(String(c.name||'?').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase())}</span>
+      <div class="profile-id"><h2 class="profile-name">${esc(c.name)}</h2><span class="u-label">${c.gigs.length} gig${c.gigs.length===1?'':'s'} · ${c.booked} booked</span></div></div>
+    <div class="grid grid-2" style="margin-bottom:20px;">
+      <div class="card card-pad"><div class="u-label" style="margin-bottom:8px;">Contact</div>
+        ${kv('Email', c.email ? `<a href="mailto:${esc(c.email)}" style="color:var(--accent-ink);">${esc(c.email)}</a>` : '—')}
+        ${kv('Phone', c.phone ? `<a href="tel:${esc(tel)}" style="color:var(--accent-ink);">${esc(c.phone)}</a>` : '—')}
+        <p style="font-size:11.5px;color:var(--ink-3);margin:8px 0 0;">From their gigs — change it on a gig and it changes here.</p></div>
+      <div class="card card-pad"><div class="u-label" style="margin-bottom:8px;">Money</div>
+        ${kv('Booked total', c.total ? money(c.total) : '—')}
+        ${kv('Still owed', c.owed>0.5 ? money(c.owed) : 'Nothing')}</div>
+    </div>
+    <div class="section-head"><h2>Upcoming (${upcoming.length})</h2></div>
+    ${renderEventTable(upcoming, {showArtist:true})}
+    ${past.length ? `<div class="section-head" style="margin-top:18px;"><h2>Past (${past.length})</h2></div>${renderEventTable(past, {showArtist:true})}` : ''}
+  </div>`;
 }
 
 /* ============ FINANCIALS ============ */
@@ -11650,6 +11731,7 @@ function bindGlobal(){
   // preview as Artists -> Preview their app, from the top bar.
   document.querySelectorAll('[data-view-as]').forEach(el=>el.addEventListener('change', ()=>startArtistPreview(el.value)));
   document.querySelectorAll('[data-cq]').forEach(el=>el.addEventListener('input', ()=>{ if(S.contractQuestions) S.contractQuestions[el.dataset.cq] = el.value; }));
+  document.querySelectorAll('[data-client-search]').forEach(el=>el.addEventListener('input', ()=>{ S.clientSearch = el.value; renderPreservingFocus(); }));
   document.querySelectorAll('[data-home-search]').forEach(el=>el.addEventListener('input', ()=>{ S.homeSearch = el.value; renderPreservingFocus(); }));
   document.querySelectorAll('[data-profile-photo]').forEach(inp=>inp.addEventListener('change', ()=>{ const f = inp.files && inp.files[0]; inp.value = ''; if(f) libSingerPhoto(inp.dataset.profilePhoto, f); }));
   document.querySelectorAll('[data-rider-upload]').forEach(inp=>inp.addEventListener('change', ()=>{ const f = inp.files && inp.files[0]; inp.value = ''; if(f) uploadRider(inp.dataset.riderUpload, f); }));
@@ -11766,6 +11848,7 @@ function bindGlobal(){
       case 'dayoverlay-close': if(e.target===t){ S.dayListDate=null; render(); } break;
       case 'open-event-from-day': S.dayListDate = null; openEvent(id); break;
       case 'open-artist': navigate('artist_detail', {artistDetailId:id}); break;
+      case 'open-client': navigate('client_detail', {clientKey:id}); break;
       case 'open-new-lead': closeAllOverlays(); S.newLeadForm={date:'',time:'19:00'}; S.showNewLead=true; render(); break;
       case 'quick-add-event': closeAllOverlays(); S.newLeadForm={date:t.getAttribute('data-date'),time:'19:00'}; S.showNewLead=true; render(); break;
       case 'open-block-time': closeAllOverlays(); S.blockTimeForm={}; S.showBlockTime=true; render(); break;

@@ -838,3 +838,5 @@ select option{ color:var(--ink); }
   .profile-id{ flex:1 1 0; } .profile-actions{ flex-basis:100%; } .profile-actions .btn{ flex:1 1 0; justify-content:center; } }
 .grid-2{ grid-template-columns:repeat(2,minmax(0,1fr)); }
 @media (max-width:760px){ .grid-2{ grid-template-columns:minmax(0,1fr); } }
+/* Clients list (v1.9.69) */
+.client-search{ width:100%; box-sizing:border-box; padding:11px 14px; font-size:15px; border:1px solid var(--border-strong); border-radius:var(--r-sm); background:var(--surface); color:var(--ink); margin-bottom:14px; }
