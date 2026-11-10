@@ -13,7 +13,8 @@ def test_band_fields_hidden_until_wedding_selected(live_server, page):
 
     page.locator('[data-action="open-new-lead"]').click()
     band_input = page.locator('input[data-field="band"]')
-    assert not band_input.is_visible(), "band field visible before Wedding is explicitly selected"
+    # New Lead starts as a Wedding (v1.9.71, the event type is typed), so the band fields show from the start.
+    assert band_input.is_visible(), "band field hidden on a new lead that starts as a Wedding"
 
     page.locator('[data-testid="lead-type"]').fill("Bar Mitzvah")
     assert not band_input.is_visible(), "band field visible for a non-Wedding event type"
@@ -68,7 +69,7 @@ def test_band_fields_editable_and_hidden_for_other_types(live_server, page):
     page.locator('[data-action="open-edit-event"]').click()
     assert not page.locator('input[data-field="band"]').is_visible(), "band field visible in Edit Details before switching to Wedding"
 
-    page.locator('.edit-event-type-select').select_option("Wedding")
+    page.locator('[data-form="editevent"] input[data-field="type"]').fill("Wedding")
     assert page.locator('input[data-field="band"]').is_visible(), "band field did not appear in Edit Details after switching type to Wedding"
     page.locator('input[data-field="band"]').fill("Kol Simcha Orchestra")
     page.locator('input[data-field="bandSize"]').fill("1")
