@@ -28,6 +28,8 @@ ROLE_EMAILS = {
     # Crew (migration 0069): only exist as crew while test_crew.py runs (it adds and removes the rows).
     "crew_social": "test-social@aspmgmt.com",
     "crew_videographer": "test-videographer@aspmgmt.com",
+    # Travel crew (0090, test_travel_crew.py adds and removes its row).
+    "crew_travel": "test-travel@aspmgmt.com",
 }
 
 

@@ -66,6 +66,9 @@ here is applied **by hand in the dashboard**, so this file is the record of what
 | 0084_singer_gig_sheet_and_more | Applied 2026-11-09 — client_followups kinds `gig_sheet` (singers, 7 days before), `thank_you` (client, day after), `travel_request` (Rivky, out-of-town gig booked). |
 | 0085_riders | Applied 2026-11-09 — public-read `riders` storage bucket (PDF, 15 MB, admin write) for each singer's rider; Send rider on a gig emails the link. |
 | 0087_singer_week_cash_report | Applied 2026-11-09 — client_followups kinds `singer_week` (Sunday email), `office_unpaid` (3 days before), `cash_confirm` / `cash_dayof`, `office_report` (outstanding on the 1st). |
+| 0088_calendar_feeds | Applied 2026-11-10 — `calendar_feeds` (one private token per singer; service-role only) for the `cal-feed` subscribe-once calendar. |
+| 0089_singer_notify_prefs | Applied 2026-11-10 — `artists.notify` + `my_notify()` / `set_my_notify()`: the singer's Email / WhatsApp choices, followed by client-followups. |
+| 0090_travel_login_and_delete_rights | Applied 2026-11-10 — crew kind `travel` (gigs + travel columns via `crew_gig_view`, requests via `crew_travel_view`, no library, no money); `can_delete_gigs()`: only admin_coo / admin_ceo delete events. |
 
 ## Edge Functions (`functions/`)
 Deploy: `supabase/deploy-function.sh <name>` (or `all`). Every function imports the shared modules in

@@ -3262,7 +3262,7 @@ async function loadArtistPortalData(){
   if(!S.artistPortal.on || S.artistPortal.loading) return;
   S.artistPortal.loading = true;
   const user = S.user;
-  const before = JSON.stringify([S.events, S.crewRoster, S.artistPortal.error, !!S.artistPortal.loadedAt]);
+  const before = JSON.stringify([S.events, S.crewRoster, S.crewTravel, S.artistPortal.error, !!S.artistPortal.loadedAt]);
   try{
     if(crewUser()){
       const [g, c] = await Promise.all([
@@ -3270,7 +3270,14 @@ async function loadArtistPortalData(){
         supabaseClient.from('crew_directory').select('id, name, initials, kind, active').eq('active', true).order('name'), // 0070: no emails / phones
       ]);
       if(g.error || c.error) throw new Error((g.error || c.error).message);
+      let tr = null;
+      if(isTravelCrew()){
+        const t = await supabaseClient.from('crew_travel_view').select('*');
+        if(t.error) throw new Error(t.error.message);
+        tr = t.data || [];
+      }
       if(!S.artistPortal.on || S.user!==user) return;
+      S.crewTravel = tr;
       S.events = (g.data||[]).map(crewPortalEvent);
       S.crewRoster = c.data || [];
       S.artistPortal.error = null; S.artistPortal.loadedAt = Date.now();
@@ -3291,7 +3298,7 @@ async function loadArtistPortalData(){
   }finally{
     S.artistPortal.loading = false;
     // A refresh that found nothing new draws nothing (a redraw on every return to the app read as flashing).
-    if(S.artistPortal.on && JSON.stringify([S.events, S.crewRoster, S.artistPortal.error, !!S.artistPortal.loadedAt])!==before) render();
+    if(S.artistPortal.on && JSON.stringify([S.events, S.crewRoster, S.crewTravel, S.artistPortal.error, !!S.artistPortal.loadedAt])!==before) render();
   }
 }
 // One view row pair -> the event shape the existing renderers use. No finance row = "being confirmed".
@@ -3333,6 +3340,10 @@ function crewPortalEvent(g){
     clientName: g.client_name || '', venue: g.venue || '', address: g.address || '', city: g.city || '', state: g.state || '', mapQuery: g.map_query || '',
     dressCode: g.dress_code || '', band: g.band || null, gigInfoSheet: g.gig_sheet || null,
     crew: Array.isArray(g.crew) ? g.crew : [], myStatus: g.my_status || null, charges: [], log: [],
+    // travel crew only (0090; null for everyone else)
+    flightNeeded: !!g.flight_needed, flightBooked: !!(g.flight_booked && g.flight), flight: g.flight || null,
+    groundTransportNeeded: !!g.ground_transport_needed, groundTransportBooked: !!(g.ground_transport_booked && g.ground_transport), groundTransport: g.ground_transport || null,
+    travel: g.travel || null,
   };
 }
 window.addEventListener('focus', ()=>{ if(S.artistPortal.on) loadArtistPortalData(); });
@@ -3537,7 +3548,7 @@ function resetAfterSignOut(){
   stopArtistPortal();
   closeAllOverlays();
   stopWhatsAppLive(); S.wa = null; S.waContact = null;
-  S.user = null; S.previewFrom = null; S.crew = null; S.crewRoster = null; S.gigCrew = null; S.lib = null; S.libUrls = null; S.libTab = null; S.libAt = null; S.libF = null; S.libQ = null; S.drive = null; S.realSession = null; S.singerNotify = undefined; S.realPasskeys = null; S.realRoster = null;
+  S.user = null; S.previewFrom = null; S.crew = null; S.crewRoster = null; S.gigCrew = null; S.crewTravel = null; S.lib = null; S.libUrls = null; S.libTab = null; S.libAt = null; S.libF = null; S.libQ = null; S.drive = null; S.realSession = null; S.singerNotify = undefined; S.realPasskeys = null; S.realRoster = null;
   S.realSignInNotFound = false; S.realSignInError = null; S.showRealSignIn = false;
   S.eventId = null; S.showNewLead = false; S.showMobileMenu = false;
   history.pushState(null, '', location.pathname + location.search);
@@ -4605,12 +4616,15 @@ function navBadge(v){
   return n>0 ? `<span class="nav-badge">${n>9?'9+':n}</span>` : '';
 }
 const CREW_NAV_ITEMS = [['c_home','Today',ICO.dash], ['c_calendar','Calendar',ICO.cal], ['videos','Media',ICO.film]];
+// Travel crew (0090, Rivky: "travel + gig info only"): the gigs, the calendar and the travel requests. No media, no money.
+const TRAVEL_CREW_NAV_ITEMS = [['c_home','Today',ICO.dash], ['c_calendar','Calendar',ICO.cal], ['c_travel','Travel',ICO.suitcase]];
+const isTravelCrew = ()=>{ const c = crewUser(); return !!c && c.kind==='travel'; };
 // The non-office menu: crew or artist.
-function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS; }
+function portalNavItems(){ return crewUser() ? (isTravelCrew() ? TRAVEL_CREW_NAV_ITEMS : CREW_NAV_ITEMS) : ARTIST_NAV_ITEMS; }
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.62'; // bump on every release so a phone can tell it has updated. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.63'; // bump on every release so a phone can tell it has updated. v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4711,6 +4725,7 @@ const VIEWS = {
   a_travel:         { who:'artist', title:'Travel',                     render:()=>renderTravelPage(eventsFor(S.user), {singleArtist:true}) },
   a_projects:       { who:'artist', title:'My Projects',                render:()=>renderArtistProjects(S.user) },
   c_home:           { who:'crew',   title:'Today',                      render:()=>renderCrewHome() },
+  c_travel:         { who:'crew',   title:'Travel',                     render:()=>renderCrewTravelPage() },
   c_calendar:       { who:'crew',   title:'Calendar',                   render:()=>renderCalendarPage(S.events, crewUser() && crewUser().kind==='social' ? {showFilter:true} : {noLegend:true}) },
 };
 function homeViewFor(isAdmin){ return crewUser() ? 'c_home' : isAdmin ? 'dashboard' : 'a_dashboard'; }
@@ -5689,7 +5704,7 @@ async function libSignPaths(paths){
 }
 // Who may open the library (0069): admins given library access (the owner, Ilan), and crew. Managing
 // it (upload, tag, singers): the same admins and social crew. The database enforces both.
-function canSeeLibrary(){ return !!crewUser() || !!(adminById(S.user) && adminById(S.user).libraryAccess); }
+function canSeeLibrary(){ return (!!crewUser() && !isTravelCrew()) || !!(adminById(S.user) && adminById(S.user).libraryAccess); }
 function canManageLibrary(){ const c = crewUser(); return c ? c.kind==='social' : !!(adminById(S.user) && adminById(S.user).libraryAccess); }
 const LIB_PHOTO_TYPES = { jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp' };
 const libIsPhoto = v => /^image\//.test((v && v.mime) || '');
@@ -5979,6 +5994,7 @@ function crewGigRow(ev, opts={}){
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
           ${ev.crewStatus==='pending' ? `<span class="pill pill-neutral">Pending contract</span>` : ''}
           ${me && me.kind==='videographer' && ev.myStatus ? `<span class="pill ${(CREW_STATUS[ev.myStatus]||[])[1]||''}">${esc(ev.myStatus==='requested' ? 'Waiting for your answer' : (CREW_STATUS[ev.myStatus]||[ev.myStatus])[0])}</span>` : ''}
+          ${me && me.kind==='travel' ? travelPills(ev) : ''}
           ${me && me.kind==='social' ? (confirmed.length ? `<span class="pill pill-good">${ICO.check} ${esc(confirmed.map(c=>c.name.split(/\s+/)[0]).join(', '))} filming</span>` : (ev.crew||[]).some(c=>c.status==='requested') ? `<span class="pill pill-warn">Videographer asked</span>` : `<span class="pill pill-neutral">No videographer</span>`) : ''}
         </div>
       </div>
@@ -5988,6 +6004,52 @@ function crewGigRow(ev, opts={}){
       <button class="btn btn-sm btn-primary" data-action="crew-respond" data-id="${esc(ev.id)}" data-accept="1" ${S.crewBusy?'disabled':''}>${ICO.check} Confirm</button>
       <button class="btn btn-sm" data-action="crew-respond" data-id="${esc(ev.id)}" data-accept="0" ${S.crewBusy?'disabled':''}>Can't make it</button></div>` : ''}
   </div>`;
+}
+function travelPills(ev){
+  const p = [];
+  if(ev.flightNeeded) p.push(ev.flightBooked ? `<span class="pill pill-good">${ICO.plane} Flight booked</span>` : `<span class="pill pill-warn">${ICO.plane} Flight needed</span>`);
+  if(ev.groundTransportNeeded) p.push(ev.groundTransportBooked ? `<span class="pill pill-good">${ICO.car} Driver booked</span>` : `<span class="pill pill-warn">${ICO.car} Driver needed</span>`);
+  return p.join('');
+}
+// What the travel crew see on a gig: what is needed, what is booked, the itinerary, and the requests sent.
+function renderCrewTravelBlocks(ev){
+  const need = (what, ico)=>`<div class="card card-pad" style="border-color:var(--warn);background:var(--warn-wash);"><div style="display:flex;align-items:center;gap:8px;color:var(--warn-ink);font-weight:700;font-size:13px;">${ico} ${what} — not booked yet</div></div>`;
+  const reqs = (S.crewTravel||[]).filter(r=>r.event_id===ev.id);
+  return `${ev.flightNeeded && !ev.flightBooked ? need('Flight needed', ICO.plane) : renderFlightBlock(ev, false)}
+    ${ev.groundTransportNeeded && !ev.groundTransportBooked ? need('Driver needed', ICO.car) : renderGroundTransportBlock(ev, false)}
+    ${hasItinerary(ev) ? `<button class="btn" style="justify-content:flex-start;" data-action="view-itinerary" data-id="${esc(ev.id)}">${ICO.suitcase} View Itinerary</button>` : ''}
+    ${reqs.map(renderCrewTravelRequest).join('')}`;
+}
+const TRAVEL_REQ_PILL = { draft:['Not sent yet','pill-neutral'], sent:['Sent to you','pill-warn'], awaiting_reply:['Waiting on you','pill-warn'], answered:['Answered','pill-accent'], completed:['Done','pill-good'] };
+function renderCrewTravelRequest(r){
+  const d = r.details || {};
+  const [label, cls] = TRAVEL_REQ_PILL[r.status] || [r.status||'', 'pill-neutral'];
+  const where = [d.venue, d.city, d.state].map(x=>String(x||'').trim()).filter(Boolean).join(', ');
+  const row = (k, v)=> v ? `<div class="kv-row"><span style="color:var(--ink-2);">${k}</span><strong style="text-align:right;">${esc(v)}</strong></div>` : '';
+  return `<div class="card card-pad" data-testid="crew-travel-request" ${r.event_id ? `data-action="open-event" data-id="${esc(r.event_id)}" style="cursor:pointer;"` : ''}>
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:6px;"><strong>${esc(d.passengers || 'Travel request')}</strong><span class="pill ${cls}">${esc(label)}</span></div>
+    ${row('Event', [d.eventDate ? fmtDate(d.eventDate) : '', d.eventTime ? fmtTimeRange(d.eventTime) : ''].filter(Boolean).join(' · '))}
+    ${row('Where', where)}
+    ${row('From', d.origin)}${row('Arrive by', d.arriveBy)}${row('Leave after', d.departAfter)}
+    ${row('Flights', d.flightQty ? `${d.flightQty} · ${d.flightClass || ''}` : '')}
+    ${row('Hotel', d.hotelNeeded ? (d.hotelPrefs || 'Yes') : '')}
+    ${row('Driver', d.groundTransportNeeded ? (d.groundTransportNotes || 'Yes') : '')}
+    ${row('Notes', d.notes)}
+  </div>`;
+}
+function renderCrewTravelPage(){
+  const p = S.artistPortal;
+  if(!p.loadedAt) return `<div class="card card-pad" style="font-size:13px;color:var(--ink-2);">${p.error ? 'Could not load: ' + esc(p.error) : 'Loading…'}</div>`;
+  const today = todayISO();
+  const list = (S.crewTravel||[]).slice().sort((a,b)=>String((a.details||{}).eventDate||'').localeCompare(String((b.details||{}).eventDate||'')));
+  const open = list.filter(r=>!['completed'].includes(r.status) && String((r.details||{}).eventDate||'9') >= today);
+  const done = list.filter(r=>!open.includes(r)).reverse().slice(0, 30);
+  const sec = (t, html, n, empty)=>`<div class="section-head" style="margin-top:18px;"><h2>${t}</h2></div>${n ? `<div style="display:flex;flex-direction:column;gap:10px;">${html}</div>` : `<div class="card card-pad" style="font-size:13px;color:var(--ink-3);">${empty}</div>`}`;
+  const needing = S.events.filter(e=>e.date>=today && ((e.flightNeeded && !e.flightBooked) || (e.groundTransportNeeded && !e.groundTransportBooked)))
+    .sort((a,b)=>a.date.localeCompare(b.date));
+  return `${sec('Still to book', needing.map(e=>crewGigRow(e)).join(''), needing.length, 'Nothing waiting to be booked.')}
+    ${sec('Travel requests', open.map(renderCrewTravelRequest).join(''), open.length, 'No open travel requests.')}
+    ${done.length ? sec('Done', done.map(renderCrewTravelRequest).join(''), done.length, '') : ''}`;
 }
 function renderCrewHome(){
   const me = crewUser(); if(!me) return '';
@@ -6031,6 +6093,7 @@ function renderCrewGigSheet(ev){
           ${ev.dressCode ? `<div class="kv-row"><span style="color:var(--ink-2);">Dress Code</span><strong style="text-align:right;">${esc(ev.dressCode)}</strong></div>` : ''}
         </div>
         ${me.kind==='social' ? renderGigCrewCard(ev.id, ev.crew||[]) : ''}
+        ${me.kind==='travel' ? renderCrewTravelBlocks(ev) : ''}
         ${renderPrepAndGigInfoCard(ev, false)}
       </div>
     </div>
@@ -7806,7 +7869,7 @@ function renderEventSheet(ev){
           <button class="icon-btn" data-action="toggle-event-menu" aria-label="Toggle event menu">${ICO.kebab}</button>
           ${S.showEventMenu? `<div class="kebab-dropdown">
             <button class="kebab-item" data-action="share-event" data-id="${ev.id}">${ICO.share} Share</button>
-            ${isAdmin? `<button class="kebab-item danger" data-action="delete-event" data-id="${ev.id}">${ICO.trash} Delete ${ev.unpaid?'Internal Day':ev.status==='lead'?'Lead':'Gig'}</button>` : ''}
+            ${canDeleteGigs()? `<button class="kebab-item danger" data-action="delete-event" data-id="${ev.id}">${ICO.trash} Delete ${ev.unpaid?'Internal Day':ev.status==='lead'?'Lead':'Gig'}</button>` : ''}
           </div>`:''}
           <button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button>
         </div>
@@ -10862,8 +10925,11 @@ function doCopyDailyDigest(){
     toast('Clipboard not supported in this browser.', 'system');
   }
 }
+// Deleting a gig: the owner and Ilan only (owner 2026-11-09; the server enforces it too -- 0090 can_delete_gigs()).
+function canDeleteGigs(){ return isAdminUser(S.user) && ['admin_coo','admin_ceo'].includes(adminRoleOf(S.user)); }
 function doDeleteEvent(id){
   if(artistReadOnly()) return;
+  if(!canDeleteGigs()){ toast('Only Moshe or Ilan can delete a gig.', 'system'); return; }
   const ev = getEvent(id);
   const what = ev.unpaid ? `this ${ev.type} for ${artistById(ev.artistId).name}` : `this ${ev.status==='lead'?'lead':'gig'} for ${ev.clientName} (${artistById(ev.artistId).name})`;
   if(!confirm(`Delete ${what}? This can't be undone.`)) return;
