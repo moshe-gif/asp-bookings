@@ -29,6 +29,8 @@ def test_singer_home_calendar_and_big_nav(live_server, page):
     assert page.locator('[data-testid="cal-subscribe"]').is_visible(), "no calendar subscribe card on the singer home"
     nav = page.locator('[data-testid="nav-buttons"]').first
     assert nav.is_visible(), "no big navigate buttons for today's gig"
+    # today's gig shows once: in the Today's gig card, not again under Upcoming (owner 2026-11-10)
+    assert page.locator('[data-action="open-event"][data-id="EV-9301"]').count() == 1, "today's gig shows twice"
     # the Today's gig card's icon is a small line icon, not a full-size photo
     icon = page.locator('.card', has_text="Today's Gig").locator(".ico").first.bounding_box()
     assert icon["height"] <= 24, f"Today's gig icon is huge: {icon}"
