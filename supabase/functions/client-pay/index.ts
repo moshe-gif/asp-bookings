@@ -126,8 +126,8 @@ async function viewOf(sb: any, r: Row, tokenHash: string) {
   const zelle = r.kind === "event_balance" ? (isTest(r) ? null : await balanceZelle(sb, r.event_legacy_id)) : await depositZelle(sb);
   const phone = await officePhone(sb, brand.key);
   const block = await blocker(sb, r, tokenHash);
-  let zelleSentAt: string | null = null;
-  if (r.event_legacy_id) {
+  let zelleSentAt: string | null = r.zelle_reported_at || null;
+  if (!zelleSentAt && r.event_legacy_id) {
     const { data: ev } = await sb.from("events").select("app_doc").eq("legacy_id", r.event_legacy_id).maybeSingle();
     zelleSentAt = ev?.app_doc?.zelleReported?.[r.kind]?.at || null;
   }
@@ -233,6 +233,11 @@ Deno.serve(async (req) => {
     const zl = r.kind === "event_balance" ? await balanceZelle(sb, r.event_legacy_id) : await depositZelle(sb);
     if (!zl) return json({ ok: false, error: "unavailable" });
     const at = new Date().toISOString();
+    // One notice per link per 10 minutes (a double tap, or someone replaying the link), claimed atomically.
+    const { data: claimed, error: claimErr } = await sb.from("payment_requests").update({ zelle_reported_at: at }).eq("id", r.id)
+      .or(`zelle_reported_at.is.null,zelle_reported_at.lt.${new Date(Date.now() - 10 * 60 * 1000).toISOString()}`).select("id");
+    if (claimErr) { console.error("client-pay zelle_sent claim", claimErr.message); return json({ ok: false, error: "server" }, 500); }
+    if (!claimed || !claimed.length) return json({ ok: true, at: r.zelle_reported_at || at });
     const amount = `$${(r.amount_cents / 100).toLocaleString("en-US", { minimumFractionDigits: r.amount_cents % 100 ? 2 : 0 })}`;
     const what = r.kind === "contract_deposit" ? "deposit" : r.kind === "event_balance" ? "balance" : "invoice";
     const who = r.client_name || "The client";
@@ -241,9 +246,6 @@ Deno.serve(async (req) => {
       const { data: ev } = await sb.from("events").select("app_doc").eq("legacy_id", r.event_legacy_id).maybeSingle();
       const doc = ev?.app_doc;
       if (doc) {
-        const prev = doc.zelleReported?.[r.kind]?.at;
-        // One notice per 10 minutes, so a double tap doesn't send two alerts.
-        if (prev && Date.now() - new Date(prev).getTime() < 10 * 60 * 1000) return json({ ok: true, at: prev });
         when = doc.date ? ` (${doc.date})` : "";
         const next = { ...doc, zelleReported: { ...(doc.zelleReported || {}), [r.kind]: { at, amountCents: r.amount_cents } },
           log: [...(Array.isArray(doc.log) ? doc.log : []), { ts: at, type: "system", text: `${who} says they sent the ${what} (${amount}) by Zelle. Check it arrived, then record it.` }] };
