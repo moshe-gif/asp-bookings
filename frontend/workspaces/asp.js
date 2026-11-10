@@ -3677,7 +3677,7 @@ function doEditRealUser(){
   if(f.kind!=='admin' && (f.commissionPct==='' || Number.isNaN(pct) || pct<0 || pct>100)){ toast('Enter a commission between 0 and 100%.', 'system'); return; }
   const patch = f.kind==='admin'
     ? { name, email, initials, role: f.adminRole }
-    : { name, email, initials, role: f.artistRole, commission_pct: pct, whatsapp: String(f.whatsapp||'').trim() || null };
+    : { name, email, initials, role: f.artistRole, commission_pct: pct, whatsapp: String(f.whatsapp||'').trim() || null, bio: String(f.bio||'').trim().slice(0,4000) || null };
   supabaseClient.from(table).update(patch).eq('id', f.id).then(({error})=>{
     if(error){ toast('Could not save that account: ' + error.message, 'system'); return; }
     toast(`${name} updated.`, 'success');
@@ -4695,7 +4695,7 @@ function portalNavItems(){ return crewUser() ? (isTravelCrew() ? TRAVEL_CREW_NAV
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.67'; // bump on every release so a phone can tell it has updated. v1.9.66: navigate buttons compact on a computer, big on a phone; a line mic icon instead of the photo. v1.9.65: a new gig never reuses a deleted gig's id (an old contract attached itself); dropdowns styled like the fields; This week leads with the singer. v1.9.64: the phone tab bar slides (press, drag the bubble, let go to open). v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.68'; // bump on every release so a phone can tell it has updated. v1.9.68: one singer profile page (contact, commission, Zelle/payee, rider, bio, photo; riders moved off Settings). v1.9.66: navigate buttons compact on a computer, big on a phone; a line mic icon instead of the photo. v1.9.65: a new gig never reuses a deleted gig's id (an old contract attached itself); dropdowns styled like the fields; This week leads with the singer. v1.9.64: the phone tab bar slides (press, drag the bubble, let go to open). v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4951,7 +4951,8 @@ function renderEditRealUserModal(){
         <div class="field"><label>ASP Commission (%)</label><input type="number" min="0" max="100" step="0.5" data-field="commissionPct" value="${esc(String(f.commissionPct ?? ''))}"/>
           <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Prefills the commission on this artist's new gigs. Existing gigs keep theirs.</p></div>
         <div class="field"><label>WhatsApp number</label><input type="tel" data-field="whatsapp" value="${esc(f.whatsapp||'')}" placeholder="+1 718 555 0123"/>
-          <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Gets a gig reminder 3 days before each gig and "prepare for your flight" 3 days before a flight.</p></div>` : `<div class="field"><label>Desk</label>
+          <p style="font-size:11px;color:var(--ink-3);margin:4px 0 0;">Gets the day-of WhatsApp with a link to the gig, and "prepare for your flight" before a flight.</p></div>
+        <div class="field"><label>Bio</label><textarea data-field="bio" rows="5" maxlength="4000" placeholder="A few lines about them, for the website">${esc(f.bio||'')}</textarea></div>` : `<div class="field"><label>Desk</label>
           <div class="chip-row">${Object.entries(ADMIN_ROLE_LABELS).map(([k,l])=>`<button class="filter-chip ${adminRole===k?'sel':''}" data-action="pick-edit-admin-role" data-role="${k}">${l}</button>`).join('')}</div>
         </div>`}
         ${f.email!==f.originalEmail? `<p style="font-size:11px;color:var(--ink-3);margin:0;">Changing the email does not move their existing sign-in -- they'll still sign in with the old address until this one is updated to match a real account.</p>` : ''}
@@ -4988,7 +4989,6 @@ function renderSettingsPage(){
 
   ${isAdmin && QBO_CLIENT_ID ? renderQuickBooksCard() : ''}
   ${isAdmin ? renderOnlinePaymentsCard() : ''}
-  ${isAdmin ? renderRidersCard() : ''}
   ${isAdmin ? renderMercuryCard() : ''}
 
   ${isAdmin ? renderGoogleCalendarSyncCard() : ''}
@@ -5554,15 +5554,51 @@ function renderArtistsPage(){
     }).join('')}
   </div>`;
 }
+/* ---- One singer profile (owner 2026-11-09: "ONE singer profile (contact, Zelle, commission, rider, bio, photo) used
+   by app, contracts and website") ----
+   Nothing new is stored here: the page shows each piece where it already lives and edits it there --
+   contact / commission / WhatsApp / bio = the artists row (Edit opens the account form), Zelle + entity = the
+   singer's payee profile, rider = office settings, photo = the Media Library card picture. */
+function artistDbRow(artistId){
+  const a = artistById(artistId), rows = (S.realRoster && S.realRoster.artists) || [];
+  return rows.find(r=>r.legacy_id===artistId || r.id===artistId || (a && a.dbId && r.id===a.dbId)) || null;
+}
+function artistLibSinger(artistId){
+  const a = artistById(artistId); if(!a || !S.lib) return null;
+  const nm = String(a.name||'').trim().toLowerCase();
+  return S.lib.singers.find(x=>a.dbId && x.artist_id===a.dbId) || S.lib.singers.find(x=>String(x.name||'').trim().toLowerCase()===nm) || null;
+}
 function renderArtistDetailPage(artistId){
   const a = artistById(artistId);
-  const evs = eventsFor(artistId).sort((a,b)=>a.date.localeCompare(b.date));
+  if(!a) return `<div class="card card-pad">That singer isn't on the roster.</div>`;
+  if(S.realSession && S.realRoster===null && !S.realRosterBusy) loadRealRoster();
+  if(S.realSession && canSeeLibrary() && !S.lib && !S.libBusy) loadLibrary();
+  const evs = eventsFor(artistId).sort((x,y)=>x.date.localeCompare(y.date));
   const upcoming = evs.filter(e=>!isPast(e.date));
+  const row = artistDbRow(artistId);
+  const pp = PAYEE_PROFILES.find(p=>p.artistId===artistId);
+  const ls = artistLibSinger(artistId), pic = ls ? libSingerPic(ls) : '';
+  const first = esc(String(a.name||'').split(/\s+/)[0]);
+  const kv = (k, v, empty='—')=>`<div class="kv-row"><span style="color:var(--ink-2);">${k}</span><strong style="text-align:right;overflow-wrap:anywhere;">${v ? esc(v) : `<span style="color:var(--ink-3);font-weight:400;">${empty}</span>`}</strong></div>`;
+  const pct = row && row.commission_pct!=null ? row.commission_pct : a.commissionPct;
+  const card = (title, body, btn='')=>`<div class="card card-pad"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;"><div class="u-label">${title}</div>${btn}</div>${body}</div>`;
+  const photoUp = ls && canManageLibrary() ? `<label class="btn btn-sm" style="cursor:pointer;">${pic?'Change photo':'Add photo'}<input type="file" accept="image/jpeg,image/png,image/webp" data-profile-photo="${esc(ls.id)}" style="display:none;"/></label>` : '';
   return `
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
-      <span class="avatar" data-slot="${a.slot}" style="width:52px;height:52px;font-size:17px;">${esc(a.initials)}</span>
-      <div style="flex:1;min-width:0;"><h2 style="font-size:1.5rem;">${esc(a.name)}</h2><span class="u-label">${esc(a.role||'Artist')} · Viewing as Management</span></div>
-      <button class="btn btn-sm" data-action="preview-as-artist" data-id="${esc(artistId)}" title="See the app the way ${esc(a.name.split(' ')[0])} sees it (read-only)">Preview their app</button>
+    <div class="profile-head" data-testid="singer-profile">
+      ${pic ? `<img class="profile-pic" src="${esc(pic)}" alt=""/>` : `<span class="avatar profile-pic" data-slot="${a.slot}">${esc(a.initials)}</span>`}
+      <div class="profile-id"><h2 class="profile-name">${esc(a.name)}</h2><span class="u-label">${esc(a.role||'Artist')} · ${upcoming.length} upcoming · ${esc(money(ytdPayoutOf(evs)))} paid out this year</span></div>
+      <span class="profile-actions">${photoUp}<button class="btn btn-sm" data-action="preview-as-artist" data-id="${esc(artistId)}" title="See the app the way ${first} sees it (read-only)">Preview their app</button></span>
+    </div>
+    <div class="grid grid-2" style="margin-bottom:20px;">
+      ${card('Contact', `${kv('Email', row ? row.email : a.email)}${kv('WhatsApp', row && row.whatsapp)}${kv('ASP commission', pct!=null && pct!=='' ? pct + '%' : '')}`,
+        row ? `<button class="btn btn-sm" data-action="open-edit-real-user" data-kind="artist" data-id="${esc(row.id)}" data-testid="profile-edit">Edit</button>` : '')}
+      ${card('Payment &amp; contracts', pp ? `${kv('Contracts are with', pp.entityName)}${kv('Zelle', pp.zelle)}${kv('Checks payable to', pp.checkPayee)}${pp.defaultFee ? kv('Usual fee', money(pp.defaultFee)) : ''}`
+          : `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No payee profile yet — contracts use ASP's.</p>`,
+        pp ? `<button class="btn btn-sm" data-action="open-payee-profile-form" data-id="${esc(pp.id)}" data-testid="profile-payee">Edit</button>`
+           : `<button class="btn btn-sm" data-action="add-payee-for-artist" data-id="${esc(artistId)}" data-testid="profile-payee">Add</button>`)}
+      ${card('Rider', renderRiderRow(a))}
+      ${card('Bio', row && row.bio ? `<p style="font-size:13px;line-height:1.55;margin:0;white-space:pre-wrap;" data-testid="profile-bio">${esc(row.bio)}</p>` : `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No bio yet${row ? ' — tap Edit to add one (it goes on the website).' : '.'}</p>`,
+        row ? `<button class="btn btn-sm" data-action="open-edit-real-user" data-kind="artist" data-id="${esc(row.id)}">Edit</button>` : '')}
     </div>
     <div class="card card-pad" style="margin-bottom:20px;">${renderCalendarPage(evs, {noLegend:true, singleArtist:true, miniEmbed:true})}</div>
     <div class="section-head"><h2>Upcoming (${upcoming.length})</h2></div>
@@ -8331,19 +8367,15 @@ function renderClientFormBlock(ev, isAdmin){
 // One PDF per singer in the public "riders" store (0085); which file is whose lives in office settings
 // (ORG_SETTINGS.riders[artistId] = { url, name, uploadedAt }), shared like the rest of Settings.
 function riderFor(artistId){ const r = (ORG_SETTINGS.riders||{})[artistId]; return r && /^https:\/\//.test(r.url||'') ? r : null; }
-function renderRidersCard(){
-  const list = ARTISTS.filter(a=>a && a.id);
-  return `<div class="card card-pad" style="margin-bottom:20px;" data-testid="riders-card">
-    <div class="u-label" style="margin-bottom:4px;">Riders</div>
-    <p style="font-size:12.5px;color:var(--ink-2);margin:0 0 10px;">Each singer's rider (PDF). "Send rider" on a gig emails it to the client.</p>
-    ${list.map(a=>{ const rd = riderFor(a.id), busy = S.riderBusy===a.id;
-      return `<div class="kv-row" style="gap:8px;flex-wrap:wrap;">
-        <span><strong>${esc(a.name)}</strong>${rd? ` <a href="${esc(rd.url)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--accent-ink);">${esc(rd.name||'Rider.pdf')}</a>` : ` <span style="font-size:12px;color:var(--ink-3);">No rider yet</span>`}</span>
-        <span style="display:flex;gap:6px;">
-          <label class="btn btn-sm" style="cursor:pointer;">${busy? 'Uploading…' : rd? 'Replace' : 'Upload PDF'}<input type="file" accept="application/pdf" data-rider-upload="${esc(a.id)}" style="display:none;" ${busy?'disabled':''}/></label>
-          ${rd? `<button class="btn btn-sm btn-ghost" data-action="remove-rider" data-id="${esc(a.id)}">Remove</button>` : ''}
-        </span></div>`; }).join('')}
-  </div>`;
+// One singer's rider row (lives on the singer's profile page since 2026-11-10).
+function renderRiderRow(a){
+  const rd = riderFor(a.id), busy = S.riderBusy===a.id;
+  return `<div class="kv-row" style="gap:8px;flex-wrap:wrap;" data-testid="profile-rider">
+    <span>${rd? `<a href="${esc(rd.url)}" target="_blank" rel="noopener" style="color:var(--accent-ink);">${esc(rd.name||'Rider.pdf')}</a>` : `<span style="color:var(--ink-3);">No rider yet</span>`}</span>
+    <span style="display:flex;gap:6px;">
+      <label class="btn btn-sm" style="cursor:pointer;">${busy? 'Uploading…' : rd? 'Replace' : 'Upload PDF'}<input type="file" accept="application/pdf" data-rider-upload="${esc(a.id)}" style="display:none;" ${busy?'disabled':''}/></label>
+      ${rd? `<button class="btn btn-sm btn-ghost" data-action="remove-rider" data-id="${esc(a.id)}">Remove</button>` : ''}
+    </span></div>`;
 }
 async function uploadRider(artistId, file){
   if(!supabaseClient || !S.realSession){ toast('Sign in with your ASP account to upload.', 'system'); return; }
@@ -11619,6 +11651,7 @@ function bindGlobal(){
   document.querySelectorAll('[data-view-as]').forEach(el=>el.addEventListener('change', ()=>startArtistPreview(el.value)));
   document.querySelectorAll('[data-cq]').forEach(el=>el.addEventListener('input', ()=>{ if(S.contractQuestions) S.contractQuestions[el.dataset.cq] = el.value; }));
   document.querySelectorAll('[data-home-search]').forEach(el=>el.addEventListener('input', ()=>{ S.homeSearch = el.value; renderPreservingFocus(); }));
+  document.querySelectorAll('[data-profile-photo]').forEach(inp=>inp.addEventListener('change', ()=>{ const f = inp.files && inp.files[0]; inp.value = ''; if(f) libSingerPhoto(inp.dataset.profilePhoto, f); }));
   document.querySelectorAll('[data-rider-upload]').forEach(inp=>inp.addEventListener('change', ()=>{ const f = inp.files && inp.files[0]; inp.value = ''; if(f) uploadRider(inp.dataset.riderUpload, f); }));
   document.querySelectorAll('[data-event-status]').forEach(el=>el.addEventListener('change', ()=>doSetEventStatus(el.dataset.id, el.value)));
   document.querySelectorAll('[data-outside-field]').forEach(el=>{
@@ -11882,6 +11915,8 @@ function bindGlobal(){
       case 'contractbuilderdoc-overlay-close': if(e.target===t){ S.showContractBuilderDoc=false; render(); } break;
       case 'print-contract-builder': window.print(); break;
       case 'filter-contracts-status': S.contractsStatusFilter = t.getAttribute('data-status'); render(); break;
+      case 'add-payee-for-artist': { closeAllOverlays(); const ar = artistById(id); S.showPayeeProfileForm=true; S.editingPayeeProfileId=null; S.payeeStripeEmail=null; S.payeeStripeLink=null;
+        S.payeeProfileForm = { artistId:id, entityName: ar ? ar.name : '', defaultOvertimeInterval:'half_hour', zelleActive:true }; render(); break; }
       case 'open-payee-profile-form': S.showPayeeProfileForm=true; S.editingPayeeProfileId=id||null; S.payeeStripeEmail=null; S.payeeStripeLink=null; if(id && stripeReady()) refreshStripePayees(); S.payeeProfileForm = id? (()=>{ const p=getPayeeProfile(id); return p? {entityName:p.entityName, artistId:p.artistId, zelle:p.zelle, checkPayee:p.checkPayee, checkAddress:p.checkAddress, wireBankName:p.wireBankName, wireAccountName:p.wireAccountName, wireAccountNumber:p.wireAccountNumber, wireRoutingNumber:p.wireRoutingNumber, wireSwift:p.wireSwift, notes:p.notes, defaultOvertimeInterval:p.defaultOvertimeInterval, zelleRecipientLabel:p.zelleRecipientLabel, zelleInstructions:p.zelleInstructions, zelleActive:p.zelleActive, zelleQrDataUrl:p.zelleQrDataUrl, zelleQrUrl:p.zelleQrUrl||null} : {}; })() : {defaultOvertimeInterval:'half_hour', zelleActive:true};
       render(); break;
       case 'close-payee-profile-form': S.showPayeeProfileForm=false; S.payeeProfileForm={}; S.editingPayeeProfileId=null; render(); break;
@@ -12086,7 +12121,7 @@ function bindGlobal(){
         const row = (kind==='admin'? S.realRoster.admins : S.realRoster.artists).find(r=>r.id===id);
         if(!row) break;
         S.editRealUserForm = { kind, id: row.id, name: row.name, email: row.email, originalEmail: row.email, adminRole: row.role, artistRole: row.role,
-          commissionPct: row.commission_pct ?? Math.round(COMMISSION_RATE*100), whatsapp: row.whatsapp || '' };
+          commissionPct: row.commission_pct ?? Math.round(COMMISSION_RATE*100), whatsapp: row.whatsapp || '', bio: row.bio || '' };
         S.showEditRealUser = true; render(); break;
       }
       case 'close-edit-real-user': S.showEditRealUser=false; render(); break;

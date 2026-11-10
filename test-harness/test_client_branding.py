@@ -181,11 +181,26 @@ def test_riders_card_and_send_rider_on_the_gig(live_server, page):
                                  f"if (!o.riders) {{ o.riders = {json.dumps(riders)}; localStorage.setItem(k, JSON.stringify(o)); }} }})()")
     page.goto(live_server)
     login_as(page, "admin_bookings")
+    # Riders live on each singer's profile page (v1.9.68), no longer in Settings.
     goto_nav(page, "settings")
-    card = page.locator('[data-testid="riders-card"]')
-    card.wait_for(state='visible', timeout=15000)
-    assert card.locator('input[data-rider-upload="eli"]').count() == 1
-    assert "Benny rider.pdf" in card.inner_text()
+    assert page.locator('[data-testid="riders-card"]').count() == 0
+    goto_nav(page, "artists")
+    page.locator('[data-action="open-artist"][data-id="benny"]').first.click()
+    prof = page.locator('[data-testid="singer-profile"]')
+    prof.wait_for(state='visible', timeout=15000)
+    rider = page.locator('[data-testid="profile-rider"]')
+    assert "Benny rider.pdf" in rider.inner_text()
+    assert rider.locator('input[data-rider-upload="benny"]').count() == 1
+    assert page.locator('[data-testid="profile-payee"]').count() == 1
+    edit = page.locator('[data-testid="profile-edit"]')
+    edit.wait_for(state='visible', timeout=15000)   # the real roster row (contact, commission, bio)
+    edit.click()
+    assert page.locator('[data-form="edituser"] textarea[data-field="bio"]').count() == 1
+    page.locator('[data-action="close-edit-real-user"]').click()
+    goto_nav(page, "artists")
+    page.locator('[data-action="open-artist"][data-id="eli"]').first.click()
+    page.locator('[data-testid="singer-profile"]').wait_for(state='visible')
+    assert "No rider yet" in page.locator('[data-testid="profile-rider"]').inner_text()
     goto_nav(page, "leads")
     page.locator('[data-action="open-event"][data-id="EV-9821"]').first.click()
     block = page.locator('.sheet [data-testid="rider-block"]')

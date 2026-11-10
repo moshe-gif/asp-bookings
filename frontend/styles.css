@@ -827,3 +827,14 @@ select{ -webkit-appearance:none; appearance:none; font:inherit; color:var(--ink)
 select option{ color:var(--ink); }
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) select{ background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%238C96A3' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m1 1.5 5 5 5-5'/%3E%3C/svg%3E"); } }
 .status-select{ padding-right:22px !important; background-position:right 8px center; background-size:10px 7px; }
+
+/* One singer profile page (v1.9.68) */
+.profile-head{ display:flex; align-items:center; gap:14px; margin-bottom:18px; flex-wrap:wrap; }
+.profile-pic{ width:64px; height:64px; border-radius:50%; object-fit:cover; flex:0 0 auto; font-size:20px; border:1px solid var(--border); }
+.profile-name{ font-size:1.5rem; margin:0; }
+.profile-id{ flex:1 1 220px; min-width:0; }
+.profile-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+@media (max-width:640px){ .profile-pic{ width:52px; height:52px; font-size:17px; } .profile-name{ font-size:1.25rem; }
+  .profile-id{ flex:1 1 0; } .profile-actions{ flex-basis:100%; } .profile-actions .btn{ flex:1 1 0; justify-content:center; } }
+.grid-2{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+@media (max-width:760px){ .grid-2{ grid-template-columns:minmax(0,1fr); } }
