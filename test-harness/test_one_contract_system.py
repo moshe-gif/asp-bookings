@@ -25,7 +25,7 @@ def test_contracts_page_lists_real_contracts_and_uncontracted_bookings(live_serv
     page.evaluate("window.dispatchEvent(new PopStateEvent('popstate'))")
 
     goto_nav(page, "contracts")
-    row = page.locator('tr[data-action="open-contract-doc"]', has_text="One System Client")
+    row = page.locator('tr[data-action="open-contract-builder"]', has_text="One System Client")
     assert row.count() == 1, "the new contract isn't listed on the Contracts page"
     assert "Draft" in row.inner_text()
     missing = page.locator('tr', has_text="Imported Booking Client")
@@ -33,8 +33,9 @@ def test_contracts_page_lists_real_contracts_and_uncontracted_bookings(live_serv
         "a booked gig without a contract record isn't listed with Create Contract"
     assert page.locator('[data-action="open-contract-from-list"]').count() == 0
 
+    # A draft opens in the builder, to finish and send (one Contracts page, 2026-11-10).
     row.click()
-    doc = page.locator("#contractBuilderPrintHost .doc")
-    doc.wait_for(state="visible")
-    assert "One System Client" in doc.inner_text(), "row didn't open that contract's document"
+    builder = page.locator("#contractBuilderOverlayHost .sheet")
+    builder.wait_for(state="visible")
+    assert builder.locator('input[data-contract-field="snapshot.clientName"]').input_value() == "One System Client"
     assert not errors, f"console errors: {errors}"

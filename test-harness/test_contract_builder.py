@@ -354,7 +354,7 @@ def test_v2_contract_migrates_split_boilerplate_without_data_loss(live_server, p
     page.reload()
     login_as(page, "admin_bookings")
 
-    goto_nav(page, "contract_builder")
+    goto_nav(page, "contracts")
     page.locator("tr", has_text="Legacy Client").click()
     builder = page.locator('#contractBuilderOverlayHost .sheet')
     builder.wait_for(state='visible')
@@ -472,9 +472,9 @@ def test_sent_contract_keeps_the_payee_it_was_sent_with(live_server, page):
     page.evaluate("""(id) => { const k='asp_mock_payee_profiles_v1'; const l=JSON.parse(localStorage.getItem(k)); l.find(p=>p.id===id).entityName='CHANGED AFTER SENDING LLC'; localStorage.setItem(k, JSON.stringify(l)); }""", c["payeeProfileId"])
     page.reload()
     login_as(page, "admin_bookings")
-    goto_nav(page, "contract_builder")
-    page.locator('[data-action="open-contract-builder"]', has_text="Frozen Payee Client").first.click()
-    page.locator('#contractBuilderOverlayHost [data-action="view-contract-builder-doc"]').click()
+    goto_nav(page, "contracts")
+    # A sent contract opens straight to its document from the one Contracts page.
+    page.locator('[data-action="open-contract-doc"]', has_text="Frozen Payee Client").first.click()
     doc = page.locator('#contractBuilderPrintHost .doc')
     doc.wait_for(state='visible')
     text = doc.inner_text()

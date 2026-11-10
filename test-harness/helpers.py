@@ -45,10 +45,10 @@ MOBILE_WHATSAPP_NAV = ["dashboard", "calendar", "leads", "whatsapp", "financials
 WHATSAPP_ACCESS_IDS = {"admin_bookings"}
 MOBILE_ARTIST_NAV = ["a_calendar", "a_gigs", "a_dashboard", "a_travel", "a_financials"]
 
-MGMT_NAV_ITEMS = ["dashboard", "calendar", "leads", "artists", "travel", "projects", "pricing", "financials", "contracts", "contract_builder", "messages"]
+MGMT_NAV_ITEMS = ["dashboard", "calendar", "leads", "artists", "travel", "projects", "pricing", "financials", "contracts", "messages"]
 ARTIST_NAV_ITEMS = ["a_dashboard", "a_calendar", "a_gigs", "a_travel", "a_financials", "a_projects"]
 
-CEO_HIDDEN_NAV_VIEWS = ("contract_builder",)
+CEO_HIDDEN_NAV_VIEWS = ()   # Contract Builder folded into Contracts (2026-11-10)
 
 # Pages that still exist but were removed from the menu (2026-10-09) -- reachable only by URL.
 URL_ONLY_VIEWS = ("outside_bookings", "documents")

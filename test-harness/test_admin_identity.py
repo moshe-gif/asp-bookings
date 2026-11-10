@@ -21,6 +21,6 @@ def test_ceo_role_still_gets_ceo_view(live_server, page):
     page.goto(live_server)
     login_as(page, "admin_ceo")
     assert UUID.match(page.evaluate("window.S.user"))
-    # Role-based rule still applies: the CEO's menu hides Contract Builder.
+    # Contract Builder is folded into Contracts (2026-11-10): no separate menu item for anyone.
     assert page.locator('.rail-link[data-view="contract_builder"]').count() == 0
     assert page.locator('.rail-link[data-view="dashboard"]').count() == 1

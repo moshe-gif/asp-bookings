@@ -4553,7 +4553,6 @@ const MGMT_NAV_ITEMS = [
   ['dashboard','Dashboard',ICO.dash], ['calendar','Calendar',ICO.cal], ['leads','Leads',ICO.leads],
   ['artists','Artists',ICO.artists], ['travel','Travel',ICO.suitcase], ['projects','Projects',ICO.kanban], ['pricing','Pricing',ICO.tag], ['financials','Financials',ICO.money],
   ['contracts','Contracts',ICO.leads],
-  ['contract_builder','Contract Builder',ICO.edit],
   ['messages','Inbox',ICO.sms],
   ['videos','Media',ICO.film],
   ['whatsapp','WhatsApp',ICO.wa],
@@ -4562,7 +4561,7 @@ const MGMT_NAV_ITEMS = [
 // (2026-10-09, Moshe's call) -- their pages still exist and open by URL (#/outside_bookings,
 // #/documents). Contract Builder is office/bookkeeping work Ilan (CEO) doesn't need on his
 // simplified view — hidden for that login only.
-const CEO_HIDDEN_NAV_VIEWS = ['contract_builder'];
+const CEO_HIDDEN_NAV_VIEWS = [];   // Contract Builder folded into Contracts (2026-11-10)
 function mgmtNavItemsFor(userId){
   return MGMT_NAV_ITEMS.filter(([v])=> !(CEO_HIDDEN_NAV_VIEWS.includes(v) && adminRoleOf(userId)==='admin_ceo') && (v!=='videos' || canSeeLibrary()) && (v!=='whatsapp' || canUseWhatsApp()));
 }
@@ -4602,7 +4601,7 @@ function portalNavItems(){ return crewUser() ? CREW_NAV_ITEMS : ARTIST_NAV_ITEMS
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.60'; // bump on every release so a phone can tell it has updated. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.61'; // bump on every release so a phone can tell it has updated. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4687,7 +4686,7 @@ const VIEWS = {
   outside_bookings: { who:'admin',  title:'Other Bookings',             render:()=>renderOutsideBookingsPage() },
   documents:        { who:'admin',  title:'Documents',                  render:()=>renderDocumentsPage() },
   contracts:        { who:'admin',  title:'Contracts',                  render:()=>renderContractsPage() },
-  contract_builder: { who:'admin',  title:'Contract Builder',           render:()=>renderContractsBuilderListPage() },
+  contract_builder: { who:'admin',  title:'Contracts',                  render:()=>renderContractsPage() },   // old link; one Contracts page now
   messages:         { who:'admin',  title:'Inbox',                      render:()=>renderMessagesPage() },
   videos:           { who:'library', title:'Media Library',             render:()=>renderVideoLibraryPage() },
   whatsapp:         { who:'whatsapp', title:'WhatsApp',                 render:()=>renderWhatsAppPage() },
@@ -5095,10 +5094,10 @@ function renderThisWeekCard(){
   return `<div class="section-head"><h2>This week</h2><button class="btn btn-sm btn-ghost" data-action="nav" data-view="calendar">Calendar ${ICO.chev('r')}</button></div>
   ${gigs.length ? `<div class="card" data-testid="this-week" style="margin-bottom:20px;">${gigs.map(e=>{
     const a = artistById(e.artistId) || {}, missing = gigMissing(e);
-    return `<div class="kv-row" data-action="open-event" data-id="${e.id}" style="cursor:pointer;padding:12px 16px;align-items:flex-start;gap:12px;">
+    return `<div class="kv-row" data-action="open-event" data-id="${e.id}" style="cursor:pointer;padding:12px 16px;flex-direction:column;align-items:stretch;gap:8px;">
       <div style="min-width:0;"><strong style="display:block;">${esc(fmtDateWeekday(e.date))} · ${esc(fmtTimeRange(e.time, e.endTime))}</strong>
         <span style="font-size:12.5px;color:var(--ink-2);">${esc(a.name||'')} — ${esc([e.type, e.clientName, e.venue].filter(Boolean).join(' · '))}</span></div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;">${missing.length
+      <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-start;">${missing.length
         ? missing.map(m=>`<span class="pill pill-warn pill-wrap">${esc(m)}</span>`).join('')
         : `<span class="pill pill-good">Ready</span>`}</div>
     </div>`; }).join('')}</div>`
@@ -6869,10 +6868,13 @@ function contractedEvents(){
   return S.events.filter(e=>!e.unpaid && ['contract_sent','booked','paid'].includes(e.status));
 }
 function renderContractsPage(){
+  // One Contracts page (owner 2026-11-10: "why do we still have contracts and contract builder").
+  // A draft opens in the builder to finish and send; a sent / signed / void one opens its document.
   const q = (S.contractSearchQuery||'').trim().toLowerCase();
   const matches = (...texts)=>!q || texts.some(t=>String(t||'').toLowerCase().includes(q));
-  const live = CONTRACTS.filter(c=>c.status!=='void')
-    .filter(c=>matches(c.snapshot.clientName, contractPerformerName(c)))
+  const statusFilter = S.contractsStatusFilter||'all';
+  const live = CONTRACTS.filter(c=> statusFilter==='all' ? c.status!=='void' : c.status===statusFilter)
+    .filter(c=>matches(c.snapshot.clientName, contractPerformerName(c), contractTemplateLabel(c.template)))
     .sort((a,b)=>String(b.snapshot.eventDate||'').localeCompare(String(a.snapshot.eventDate||'')));
   const withContract = new Set(CONTRACTS.map(c=>c.leadId));
   const missing = contractedEvents().filter(e=>!withContract.has(e.id))
@@ -6880,20 +6882,23 @@ function renderContractsPage(){
     .sort((a,b)=>b.date.localeCompare(a.date));
   return `
   <div class="section-head"><h2>Contracts (${live.length})</h2></div>
-  <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Every contract, searchable by client or artist. Open one to see the exact document; edit it from the gig or the Contract Builder.</p>
-  <div class="field" style="max-width:340px;margin-bottom:14px;">
+  <div class="field" style="max-width:340px;margin-bottom:10px;">
     <input id="contractSearchInput" value="${esc(S.contractSearchQuery||'')}" placeholder="Search client or artist..."/>
+  </div>
+  <div class="chip-row" style="margin-bottom:14px;">
+    <button class="filter-chip ${statusFilter==='all'?'sel':''}" data-action="filter-contracts-status" data-status="all">All</button>
+    ${CONTRACT_STATUSES.map(([st])=>`<button class="filter-chip ${statusFilter===st?'sel':''}" data-action="filter-contracts-status" data-status="${st}">${esc(contractStatusLabel(st))}</button>`).join('')}
   </div>
   ${live.length? `<div class="card table-cards"><table>
     <thead><tr><th>Client</th><th>Artist</th><th>Template</th><th>Event Date</th><th>Status</th></tr></thead>
-    <tbody>${live.map(c=>`<tr class="row-link" data-action="open-contract-doc" data-id="${esc(c.id)}">
+    <tbody>${live.map(c=>`<tr class="row-link" data-action="${c.status==='draft'?'open-contract-builder':'open-contract-doc'}" data-id="${esc(c.id)}">
         <td data-label="Client">${esc(c.snapshot.clientName)||'—'}</td>
         <td data-label="Artist">${esc(contractPerformerName(c))}</td>
         <td data-label="Template">${esc(contractTemplateLabel(c.template))}</td>
         <td data-label="Event Date" class="u-mono">${c.snapshot.eventDate? fmtDateShort(c.snapshot.eventDate) : '—'}</td>
         <td data-label="Status"><span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span></td>
       </tr>`).join('')}
-    </tbody></table></div>` : `<div class="card empty">${q? 'No contracts match that search.' : 'No contracts yet — create one from a gig.'}</div>`}
+    </tbody></table></div>` : `<div class="card empty">${q||statusFilter!=='all'? 'No contracts match.' : 'No contracts yet — they are made when you add a lead.'}</div>`}
   ${missing.length? `
   <div class="section-head" style="margin-top:26px;"><h2>Booked Without a Contract (${missing.length})</h2></div>
   <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Contracted or booked gigs with no contract record in the app (e.g. imported, or signed outside it).</p>
@@ -7713,13 +7718,13 @@ function renderEventSheet(ev){
     <div class="sheet sheet-window" data-stop>
       ${S.showEventMenu? `<div class="kebab-scrim"></div>`:''}
       <div class="sheet-head">
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span class="avatar" data-slot="${a.slot}" style="width:38px;height:38px;">${esc(a.initials)}</span>
-          <div><strong style="font-family:var(--font-display);font-size:1.2rem;display:block;">${esc(a.name)}</strong>
-          <span class="pill ${sm.cls}">${esc(sm.label)}</span>
-          ${isAdmin && !ev.unpaid ? `<select class="status-select" data-event-status data-id="${ev.id}" data-testid="gig-status-select" aria-label="Change status" title="Change status" style="margin-left:6px;font-size:12px;padding:2px 6px;border-radius:999px;border:1px solid var(--border-strong);background:var(--surface);color:var(--ink);max-width:150px;">
+        <div class="gig-head" style="display:flex;align-items:center;gap:12px;min-width:0;">
+          <span class="avatar" data-slot="${a.slot}" style="width:40px;height:40px;flex:0 0 auto;">${esc(a.initials)}</span>
+          <div style="min-width:0;"><strong class="gig-head-name" style="font-family:var(--font-display);font-size:1.2rem;display:block;">${esc(a.name)}</strong>
+          <div class="gig-head-status"><span class="pill ${sm.cls}">${esc(sm.label)}</span>
+          ${isAdmin && !ev.unpaid ? `<select class="status-select" data-event-status data-id="${ev.id}" data-testid="gig-status-select" aria-label="Change status" title="Change status">
             ${EVENT_PIPELINE.map(p=>`<option value="${p.key}" ${p.key===ev.status?'selected':''}>${esc(p.step)}</option>`).join('')}${EVENT_PIPELINE.some(p=>p.key===ev.status)?'':`<option value="${esc(ev.status)}" selected>${esc(sm.label)}</option>`}
-          </select>` : ''}</div>
+          </select>` : ''}</div></div>
         </div>
         <div class="kebab-menu-wrap" style="display:flex;gap:4px;align-items:center;position:relative;">
           ${isAdmin? `<button class="icon-btn" data-action="open-edit-event" title="Edit details" aria-label="Edit details">${ICO.edit}</button>`:''}
@@ -9705,33 +9710,6 @@ function contractEmailHtml(c){
     .doc-signature{ display:inline-block; font-family:"Snell Roundhand","Segoe Script","Brush Script MT",cursive; font-size:1.7rem; color:#17171A; }
     .doc-foot{ margin-top:26px; padding-top:14px; border-top:1px solid #E1E1E6; font-size:10.5px; color:#9A9AA1; text-align:center; }
   </style></head><body><div class="doc">${contractDocContent(c)}</div></body></html>`;
-}
-
-/* ---- Global "Contract Builder" list page (browse every contract across every lead) ---- */
-function renderContractsBuilderListPage(){
-  const q = (S.contractsSearchQuery||'').trim().toLowerCase();
-  const statusFilter = S.contractsStatusFilter||'all';
-  let list = CONTRACTS.slice().sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
-  if(statusFilter!=='all') list = list.filter(c=>c.status===statusFilter);
-  if(q) list = list.filter(c=>(c.snapshot.clientName||'').toLowerCase().includes(q) || contractPerformerName(c).toLowerCase().includes(q) || contractTemplateLabel(c.template).toLowerCase().includes(q));
-  return `<div class="section-head"><h2>Contract Builder (${CONTRACTS.length})</h2></div>
-    <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Every contract across every lead, to edit, approve and send. The <a href="#" data-action="nav" data-view="contracts" style="color:var(--accent);">Contracts</a> page lists the same contracts read-first.</p>
-    <input id="contractsSearchInput" value="${esc(S.contractsSearchQuery||'')}" placeholder="Search client, performer, or template..." style="width:100%;max-width:360px;padding:9px 12px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:14px;margin-bottom:10px;"/>
-    <div class="chip-row" style="margin-bottom:14px;">
-      <button class="filter-chip ${statusFilter==='all'?'sel':''}" data-action="filter-contracts-status" data-status="all">All</button>
-      ${CONTRACT_STATUSES.map(([s])=>`<button class="filter-chip ${statusFilter===s?'sel':''}" data-action="filter-contracts-status" data-status="${s}">${esc(contractStatusLabel(s))}</button>`).join('')}
-    </div>
-    ${list.length? `<div class="card table-cards"><table>
-      <thead><tr><th>Client</th><th>Performer</th><th>Template</th><th>Event Date</th><th>Status</th></tr></thead>
-      <tbody>${list.map(c=>`<tr class="row-link" data-action="open-contract-builder" data-id="${c.id}">
-        <td data-label="Client">${esc(c.snapshot.clientName)||'—'}</td>
-        <td data-label="Performer">${esc(contractPerformerName(c))}</td>
-        <td data-label="Template">${esc(contractTemplateLabel(c.template))}</td>
-        <td data-label="Event Date">${c.snapshot.eventDate? fmtDateShort(c.snapshot.eventDate) : '—'}</td>
-        <td data-label="Status"><span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span></td>
-      </tr>`).join('')}</tbody>
-    </table></div>` : `<div class="empty">No contracts yet — create one from a lead's detail view.</div>`}
-    `;
 }
 
 /* ---- Payee profile management (Settings) ---- */

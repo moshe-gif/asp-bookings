@@ -777,3 +777,18 @@ th{ border-bottom:1px solid var(--ink); }
 .sheet-head strong[style*="font-display"]{ font-weight:400 !important; font-stretch:112%; font-size:1.45rem !important; letter-spacing:-.02em; }
 /* "View as singer" lives in the top bar on a computer; on a phone the bar has no room (Artists -> Preview their app). */
 @media (max-width:900px){ .viewas{ display:none !important; } }
+/* Phones: keep the page title small enough to read whole (the look layer above sets a big desktop size). */
+@media (max-width: 860px){
+  .topbar h1{ font-size:1.15rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  .askai-btn .btn-label{ display:none; }
+  .askai-btn{ padding:9px 11px; }
+}
+/* Gig page header: name on one line, then the status pill and a small status picker side by side. */
+.gig-head-name{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.15; }
+.gig-head-status{ display:flex; align-items:center; gap:6px; margin-top:6px; flex-wrap:nowrap; }
+.status-select{ -webkit-appearance:none; appearance:none; font:inherit; font-size:12px !important; font-weight:600; line-height:1; height:24px; padding:0 22px 0 10px !important; border-radius:999px; border:1px solid var(--border-strong); color:var(--ink-2);
+  background:var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236B7480' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center; max-width:140px; width:auto; min-width:0; }
+@media (max-width: 860px){
+  .sheet-head .gig-head-name{ font-size:1.25rem !important; }
+  .sheet-head{ align-items:center; }
+}
