@@ -9,6 +9,9 @@
 //   POST { action: "pay",    token, confirmationTokenId, totalCents }  -> charges it (totalCents must be
 //                                                                         the total the client was shown)
 //   POST { action: "refresh", token }                                  -> re-reads the charge after 3-D Secure
+//   POST { action: "zelle_sent", token }                               -> the client says they sent it by Zelle:
+//                                                                         noted on the gig + email/WhatsApp to the office
+//                                                                         (the office still confirms it arrived)
 //
 // The browser never sends an amount Stripe charges: the server decides it from the row (amount and
 // card fee frozen when the link was made) and the card's funding type, which Stripe reports from the
@@ -24,8 +27,11 @@ import { serviceClient } from "../_shared/auth.ts";
 import { brandFor, gigArtistNames } from "../_shared/config.ts";
 import { cardFeeCents, recordPaymentIntent, stripeApi, stripeConfigured, stripeMode } from "../_shared/stripe.ts";
 import { balanceZelle, depositZelle, officePhone } from "../_shared/payblock.ts";
+import { sendRelayEmail } from "../_shared/mail.ts";
+import { sendTemplate, waNumber } from "../_shared/whatsapp.ts";
 import { balancePayeeProfile, balanceSplit, gigCardFeeBps, payoutViaMercury, splitAccounts } from "../_shared/connect.ts";
 
+const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 const CT_RE = /^ctoken_[A-Za-z0-9]{8,}$/;
 
@@ -120,7 +126,13 @@ async function viewOf(sb: any, r: Row, tokenHash: string) {
   const zelle = r.kind === "event_balance" ? (isTest(r) ? null : await balanceZelle(sb, r.event_legacy_id)) : await depositZelle(sb);
   const phone = await officePhone(sb, brand.key);
   const block = await blocker(sb, r, tokenHash);
+  let zelleSentAt: string | null = null;
+  if (r.event_legacy_id) {
+    const { data: ev } = await sb.from("events").select("app_doc").eq("legacy_id", r.event_legacy_id).maybeSingle();
+    zelleSentAt = ev?.app_doc?.zelleReported?.[r.kind]?.at || null;
+  }
   return {
+    zelleSentAt,
     kind: r.kind,
     status: r.pay_status,
     blocked: block,
@@ -211,6 +223,45 @@ Deno.serve(async (req) => {
     }
     const { data: fresh } = await sb.from("payment_requests").select("*").eq("id", r.id).single();
     return json({ ok: true, payment: await viewOf(sb, fresh, tokenHash) });
+  }
+
+  if (body.action === "zelle_sent") {
+    // Owner 2026-11-10: make Zelle easy. The client taps "I've sent it with Zelle"; the office is told
+    // right away and the gig shows it. Nothing is marked paid -- the office confirms it in the bank.
+    const block = await blocker(sb, r, tokenHash);
+    if (block && block !== "processing") return json({ ok: false, error: block });
+    const zl = r.kind === "event_balance" ? await balanceZelle(sb, r.event_legacy_id) : await depositZelle(sb);
+    if (!zl) return json({ ok: false, error: "unavailable" });
+    const at = new Date().toISOString();
+    const amount = `$${(r.amount_cents / 100).toLocaleString("en-US", { minimumFractionDigits: r.amount_cents % 100 ? 2 : 0 })}`;
+    const what = r.kind === "contract_deposit" ? "deposit" : r.kind === "event_balance" ? "balance" : "invoice";
+    const who = r.client_name || "The client";
+    let when = "";
+    if (r.event_legacy_id) {
+      const { data: ev } = await sb.from("events").select("app_doc").eq("legacy_id", r.event_legacy_id).maybeSingle();
+      const doc = ev?.app_doc;
+      if (doc) {
+        const prev = doc.zelleReported?.[r.kind]?.at;
+        // One notice per 10 minutes, so a double tap doesn't send two alerts.
+        if (prev && Date.now() - new Date(prev).getTime() < 10 * 60 * 1000) return json({ ok: true, at: prev });
+        when = doc.date ? ` (${doc.date})` : "";
+        const next = { ...doc, zelleReported: { ...(doc.zelleReported || {}), [r.kind]: { at, amountCents: r.amount_cents } },
+          log: [...(Array.isArray(doc.log) ? doc.log : []), { ts: at, type: "system", text: `${who} says they sent the ${what} (${amount}) by Zelle. Check it arrived, then record it.` }] };
+        const { error: upErr } = await sb.from("events").update({ app_doc: next }).eq("legacy_id", r.event_legacy_id);
+        if (upErr) { console.error("client-pay zelle_sent", upErr.message); return json({ ok: false, error: "server" }, 500); }
+      }
+    }
+    try {
+      const brand = await brandFor(sb, "asp");
+      const artist = await gigArtistNames(sb, r.event_legacy_id);
+      if (brand.replyTo && !isTest(r)) await sendRelayEmail(sb, { to: brand.replyTo, brand: "asp",
+        subject: `Zelle sent: ${who} — ${what} ${amount}`,
+        html: `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px;line-height:1.5;color:#17171A;max-width:600px;"><p><strong>${esc(who)}</strong> says they sent the <strong>${what} of ${amount}</strong>${artist ? ` for ${esc(artist)}` : ""}${esc(when)} by Zelle (memo “${esc(referenceOf(r) || "")}”).</p><p>Check it arrived in the bank, then record it in the app. Nothing has been marked paid yet.</p></div>` });
+      const { data: orgRow } = await sb.from("app_records").select("app_doc").eq("collection", "settings").eq("legacy_id", "org").maybeSingle();
+      const officeTo = String(orgRow?.app_doc?.value?.alertsWhatsApp || "");
+      if (!isTest(r) && waNumber(officeTo).length >= 10) await sendTemplate(officeTo, "office_alert", [`${who} says they sent the ${what} (${amount})${artist ? ` for ${artist}` : ""} by Zelle. Check the bank and record it.`]);
+    } catch (err) { console.error("client-pay zelle notice", String(err)); }
+    return json({ ok: true, at });
   }
 
   if (body.action !== "quote" && body.action !== "pay") return json({ ok: false, error: "unknown action" }, 400);

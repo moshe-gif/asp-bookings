@@ -35,7 +35,16 @@
     .pay-zelle img{ width:104px; height:104px; border-radius:6px; background:#fff; flex:none; }
     .pay-zelle strong{ display:block; color:var(--ink); font-size:14px; margin-bottom:2px; }
     .pay-foot{ font-size:11.5px; color:var(--ink-3); margin:10px 0 0; }
-    @media (max-width:420px){ .pay-zelle{ flex-direction:column; align-items:flex-start; } }`;
+    .pay-zelle{ flex-direction:column; align-items:stretch; gap:10px; }
+    .pay-zelle-top{ display:flex; gap:14px; align-items:center; }
+    .z-rows{ display:grid; gap:6px; }
+    .z-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--surface-2,#F6F7F9); border-radius:8px; padding:8px 10px; }
+    .z-row span{ font-size:12px; color:var(--ink-2); display:block; }
+    .z-row b{ font-size:14px; color:var(--ink); word-break:break-all; }
+    .z-copy{ font:inherit; font-size:12px; font-weight:600; border:1px solid var(--border); background:#fff; color:var(--ink); border-radius:999px; padding:6px 12px; cursor:pointer; flex:none; }
+    .z-sent{ font:inherit; font-size:14px; font-weight:600; border:1px solid var(--ink); background:#fff; color:var(--ink); border-radius:999px; padding:11px 16px; cursor:pointer; width:100%; }
+    .z-done{ font-size:13px; color:#1E6B43; background:#E8F3EC; border-radius:8px; padding:10px 12px; }
+    @media (max-width:420px){ .pay-zelle-top{ flex-direction:column; align-items:flex-start; } }`;
   function addStyle(){ if(document.getElementById('pay-css')) return; const s = document.createElement('style'); s.id = 'pay-css'; s.textContent = css; document.head.appendChild(s); }
 
   let stripeLoad = null;
@@ -73,12 +82,37 @@
     const title = p.kind==='invoice' ? 'Pay this invoice' : p.kind==='event_balance' ? 'Pay the balance' : 'Pay your deposit';
     const contact = p.replyTo ? ` Questions? Email <a href="mailto:${esc(p.replyTo)}">${esc(p.replyTo)}</a>.` : '';
     const card = inner => { el.innerHTML = `<div class="card pay-card" data-testid="pay-panel">${inner}</div>`; };
-    // Zelle under the card form: "Or scan here to pay the deposit" (the same box as in the email).
+    // Zelle under the card form (owner 2026-11-10: "what if someone wants to zelle, make that easy"):
+    // who to send to, how much and the memo, each with a Copy button; then "I've sent it with Zelle",
+    // which tells the office right away (the office still checks it arrived before marking it paid).
     const zelleBox = ()=>{
       const z = p.zelle; if(!z) return '';
       const qr = z.qrUrl && /^https:\/\//.test(z.qrUrl) ? z.qrUrl : '';
-      const memo = p.memo ? ` Put “${esc(p.memo)}” in the memo so we can match your payment.` : '';
-      return `<div class="pay-zelle" data-testid="pay-zelle">${qr?`<img src="${esc(qr)}" alt="Zelle QR code"/>`:''}<div><strong>${qr?'Or scan here to pay':'Or pay'} ${p.kind==='invoice'?'this invoice':'the '+what} with Zelle</strong>${qr?'Open your bank app, choose Zelle, and scan.':`Send it with Zelle to <strong style="display:inline;">${esc(z.handle)}</strong>.`}${memo}</div></div>`;
+      const thing = p.kind==='invoice' ? 'this invoice' : 'the '+what;
+      const row = (label, value, key)=> value ? `<div class="z-row"><div><span>${label}</span><b>${esc(value)}</b></div><button type="button" class="z-copy" data-zcopy="${key}">Copy</button></div>` : '';
+      const done = p.zelleSentAt
+        ? `<div class="z-done" data-testid="zelle-sent-done">Thanks — you told us you sent it on ${esc(day(p.zelleSentAt))}. We’ll email you once it arrives.</div>`
+        : `<button type="button" class="z-sent" data-testid="zelle-sent">I’ve sent it with Zelle</button>`;
+      return `<div class="pay-zelle" data-testid="pay-zelle">
+        <div class="pay-zelle-top">${qr?`<img src="${esc(qr)}" alt="Zelle QR code"/>`:''}<div><strong>Or pay ${thing} with Zelle — no fee</strong>${qr?'Open your bank app, choose Zelle, and scan — or send it to the address below.':'Open your bank app, choose Zelle, and send it to:'}</div></div>
+        <div class="z-rows">${row('Send to', z.handle, 'handle')}${row('Amount', money(p.amountCents), 'amount')}${row('Memo', p.memo||'', 'memo')}</div>
+        ${done}<p class="err" id="zelle-err" role="alert"></p></div>`;
+    };
+    const wireZelle = ()=>{
+      const z = p.zelle; if(!z) return;
+      const vals = { handle: z.handle||'', amount: (p.amountCents/100).toFixed(2), memo: p.memo||'' };
+      el.querySelectorAll('[data-zcopy]').forEach(b=>b.addEventListener('click', async ()=>{
+        const v = vals[b.dataset.zcopy];
+        try{ await navigator.clipboard.writeText(v); }catch(e){ const t=document.createElement('textarea'); t.value=v; document.body.appendChild(t); t.select(); try{document.execCommand('copy');}catch(_){} t.remove(); }
+        b.textContent = 'Copied'; setTimeout(()=>{ b.textContent='Copy'; }, 1600);
+      }));
+      const sent = el.querySelector('[data-testid="zelle-sent"]');
+      if(sent) sent.addEventListener('click', async ()=>{
+        sent.disabled = true; sent.textContent = 'Letting the office know…';
+        const r = await call(token, { action:'zelle_sent' });
+        if(r && r.ok){ p.zelleSentAt = r.at || new Date().toISOString(); sent.outerHTML = `<div class="z-done" data-testid="zelle-sent-done">Thank you — the office has been told. We’ll email you once it arrives.</div>`; }
+        else { sent.disabled = false; sent.textContent = 'I’ve sent it with Zelle'; const e = el.querySelector('#zelle-err'); if(e) e.textContent = ERR[r&&r.error] || 'Something went wrong — please try again, or call our office.'; }
+      });
     };
 
     if(p.paid){
@@ -93,7 +127,7 @@
     if(p.blocked==='unsigned'){ card(`<h2>${title}</h2><div class="pay-amount">${money(p.amountCents)}</div><p class="pay-note" style="margin:0;">Sign the contract above first; then you can pay the deposit here.</p>`); return; }
     if(p.blocked==='paid_elsewhere' || p.blocked==='paid'){ card(`<h2>Already paid</h2><p class="pay-note" style="margin:0;">Our records show this ${what} is paid. Thank you!${contact}</p>`); return; }
     if(p.blocked){ card(`<h2>Online payment closed</h2><p class="pay-note" style="margin:0;">This payment link is no longer active.${contact || ' Please contact us.'}</p>`); return; }
-    if(!p.available || !p.publishableKey){ card(`<h2>${title}</h2><div class="pay-amount">${money(p.amountCents)}</div>${zelleBox()}<p class="pay-foot">* To pay by check or cash, please call our office${p.officePhone?` at ${esc(p.officePhone)}`:''}.</p>`); return; }
+    if(!p.available || !p.publishableKey){ card(`<h2>${title}</h2><div class="pay-amount">${money(p.amountCents)}</div>${zelleBox()}<p class="pay-foot">* To pay by check or cash, please call our office${p.officePhone?` at ${esc(p.officePhone)}`:''}.</p>`); wireZelle(); return; }
 
     const feeNote = p.cardFeeBps>0
       ? `No fee for bank transfer or debit cards. Credit cards have a ${pct(p.cardFeeBps)} card fee — you’ll see the total before you pay.`
@@ -106,6 +140,7 @@
       <div id="pay-step"></div>
       ${zelleBox()}
       <p class="pay-foot">* To pay by check or cash, please call our office${p.officePhone?` at ${esc(p.officePhone)}`:''}.</p>`);
+    wireZelle();
     const step = el.querySelector('#pay-step');
     let stripe = null, elements = null;
 
