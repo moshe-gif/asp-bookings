@@ -18,7 +18,7 @@ LIST = {"moshe": {"Wedding": {"fee": 1100, "outOfTownFee": 2200, "hours": 5, "no
 def _open_lead(page, artist, type_="Wedding"):
     page.locator('[data-action="open-new-lead"]').click()
     page.locator('select[data-action="pick-artist"]').select_option(artist)
-    page.locator('select[data-action="pick-event-type"]').select_option(type_)
+    page.locator('[data-testid="lead-type"]').fill(type_)
 
 
 def _price(page):
@@ -49,6 +49,13 @@ def test_price_list_fills_new_lead(live_server, page):
     page.locator('input[data-field="date"]').fill("2027-01-10")
     assert page.locator('[data-testid="price-confirm"]').count() == 0
     page.keyboard.press("Escape")
+
+    # A typed variant finds its price ("Wedding" inside it); an unpriced type leaves the price blank.
+    page.goto(live_server)
+    _open_lead(page, "moshe", "wedding - outdoor")
+    assert _price(page) == "1100"
+    page.locator('[data-testid="lead-type"]').fill("Sheva Brachos")
+    assert _price(page) == "", "an unpriced type kept the wedding price"
 
     # Shmili's third dance: 45 minutes from the 7pm default start.
     page.goto(live_server)

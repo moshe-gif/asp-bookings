@@ -179,11 +179,13 @@ export const GIG_FORMS: Record<string, FormDef> = { wedding: WEDDING, bar_mitzva
 
 // Which form a gig gets (null = none: concerts). artistRole: the main artist's role ('Comedian' for Dovie).
 export function formKindFor(ev: Doc, artistRole?: string | null): string | null {
-  if (ev.type === "Concert") return null;
+  // The event type is typed freely in the app (2026-11-10), so match by word: "Wedding – third dance" is a wedding.
+  const t = String(ev.type || "");
+  if (/concert/i.test(t)) return null;
   if (/comedian/i.test(String(artistRole || ""))) return "comedian";
-  if (ev.type === "Wedding") return "wedding";
-  if (ev.type === "Bar Mitzvah") return "bar_mitzvah";
-  if (ev.type === "Sheva Brachos") return "sheva_brachos";
+  if (/wedding/i.test(t)) return "wedding";
+  if (/ba[rt][\s-]*mitzva/i.test(t)) return "bar_mitzvah";
+  if (/sheva/i.test(t)) return "sheva_brachos";
   return "event";
 }
 

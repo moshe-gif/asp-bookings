@@ -12,6 +12,7 @@
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 import { gmailToken } from "../_shared/mail.ts";
+import { sendTemplate, waNumber } from "../_shared/whatsapp.ts";
 import { clientOwedCentsOf, depositCentsOf } from "../_shared/connect.ts";
 // Pinned here, not in _shared/deps.ts, so only the functions that call Claude load the SDK.
 import Anthropic from "npm:@anthropic-ai/sdk@0.130.0";
@@ -135,8 +136,19 @@ Deno.serve(async (req) => {
     const r = await scanMailbox(box, gmail.token);
     runs.push({ mailbox: box.email, ...r });
   }
-  // The old single-mailbox state row is kept current for the app's "last checked" line.
-  await sb.from("inbox_scan_state").update({ last_run_at: new Date().toISOString(), last_error: runs.map((r) => r.error ? `${r.mailbox}: ${r.error}` : "").filter(Boolean).join("; ") || null }).eq("id", 1);
+  // The state row feeds the Inbox's warning banner. When reading first breaks, the office gets one WhatsApp
+  // (owner 2026-11-09: failures -> WhatsApp alert right away); not again every 10 minutes while it stays broken.
+  const lastError = runs.map((r) => r.error ? `${r.mailbox}: ${r.error}` : "").filter(Boolean).join("; ").slice(0, 1000) || null;
+  const { data: prevState } = await sb.from("inbox_scan_state").select("last_error").eq("id", 1).maybeSingle();
+  await sb.from("inbox_scan_state").update({ last_run_at: new Date().toISOString(), last_error: lastError }).eq("id", 1);
+  if (lastError && !prevState?.last_error) {
+    try {
+      const { data: orgRow } = await sb.from("app_records").select("app_doc").eq("collection", "settings").eq("legacy_id", "org").maybeSingle();
+      const officeTo = String(orgRow?.app_doc?.value?.alertsWhatsApp || "");
+      const why = /credit balance/i.test(lastError) ? "the AI account is out of credit (console.anthropic.com -> Plans & Billing)" : lastError.slice(0, 200);
+      if (waNumber(officeTo).length >= 10) await sendTemplate(officeTo, "office_alert", [`Email reading has stopped: ${why}. Emails are kept and read once it's fixed.`]);
+    } catch (err) { console.error("inbox-scan alert", String(err)); }
+  }
   return json({ ok: true, scanned: runs.reduce((n, r) => n + (r.scanned || 0), 0), mailboxes: runs });
 
   async function scanMailbox(box: Any, token: string): Promise<Any> {
@@ -224,8 +236,12 @@ Deno.serve(async (req) => {
     }
     // Never move the read position past an email that failed: the next run tries it again.
     if (failedAt < Infinity) newest = Math.max(since, Math.min(newest, failedAt - 1000));
-    await sb.from("gmail_mailboxes").update({ last_internal_date: newest, last_scan_at: new Date().toISOString(), last_scan_error: null }).eq("id", box.id);
-    return { scanned: todo.length, results };
+    // Emails that couldn't be read are an error the office must see (2026-11-10: the AI account ran out of credit
+    // and every email failed for two days while this said "no error"). They are retried next run.
+    const failed = results.filter((x) => x.error);
+    const readError = failed.length ? `${failed.length} of ${todo.length} email${todo.length === 1 ? "" : "s"} couldn't be read: ${failed[0].error}` : null;
+    await sb.from("gmail_mailboxes").update({ last_internal_date: newest, last_scan_at: new Date().toISOString(), last_scan_error: readError }).eq("id", box.id);
+    return { scanned: todo.length, results, ...(readError ? { error: readError } : {}) };
   }
 
   // What a payment email pays and whether the amount is exactly what's due. Claude proposes; this checks.

@@ -542,9 +542,9 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
 }
 
 /* ============ OPENER ============ */
-#opener{ position:fixed; inset:0; z-index:200; background:#12151C; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; transition:transform .85s cubic-bezier(.76,0,.24,1), opacity .5s ease .3s; cursor:pointer; }
+#opener{ position:fixed; inset:0; z-index:200; background:#0F2D52; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; transition:transform .85s cubic-bezier(.76,0,.24,1), opacity .5s ease .3s; cursor:pointer; }
 #opener.leaving{ transform:translateY(-100%); }
-/* The opener is the logo (version 1, white and blue on dark): the traced "A" whose bars rise into
+/* The opener is the logo on the app's navy (2026-11-10, the "Private Bank" look; was white and blue on near-black): the traced "A" whose bars rise into
    place one by one and keep moving, then the rest of the logo fades in beside it. */
 .opener-mark{ display:flex; align-items:center; justify-content:center; }
 /* Only the A, centered (owner 2026-10-14). */
@@ -553,7 +553,7 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
 .opener-mark.activate{ animation:openerDip .4s ease; }
 .opener-mark.activate .opener-a{ animation:openerGlow 1.4s ease; }
 @keyframes openerDip{ 0%{transform:scale(1);} 40%{transform:scale(.93);} 100%{transform:scale(1);} }
-@keyframes openerGlow{ 0%{filter:drop-shadow(0 0 0 transparent);} 20%{filter:drop-shadow(0 0 18px #7FA0D1);} 55%{filter:drop-shadow(0 0 16px #7FA0D1);} 100%{filter:drop-shadow(0 0 0 transparent);} }
+@keyframes openerGlow{ 0%{filter:drop-shadow(0 0 0 transparent);} 20%{filter:drop-shadow(0 0 18px #9DB8E0);} 55%{filter:drop-shadow(0 0 16px #9DB8E0);} 100%{filter:drop-shadow(0 0 0 transparent);} }
 /* The logo's A (aspIconSvg in asp.js): its eight bars move like an equalizer while something loads. */
 .asp-a{ display:inline-block; vertical-align:middle; }
 .asp-a .asp-bars rect{ transform-box:fill-box; transform-origin:center; }
@@ -578,9 +578,9 @@ body:has(.bottom-nav) .install-banner{ bottom:80px; }
 @keyframes aspEq{ 0%,100%{ transform:scaleY(1); } 50%{ transform:scaleY(.45); } }
 @media (prefers-reduced-motion: reduce){ .asp-a .asp-bars rect{ animation:none !important; transform:none !important; } }
 .opener-word{ font-family:var(--font-display); font-weight:600; font-size:2.5rem; letter-spacing:-.01em; color:#F1F3F7; opacity:0; transform:translateY(10px); animation:openerFadeUp .6s ease forwards; animation-delay:.85s; }
-.opener-tag{ font-family:-apple-system,sans-serif; font-size:11px; letter-spacing:.28em; text-transform:uppercase; color:#7C8698; opacity:0; animation:openerFadeUp .6s ease forwards; animation-delay:1.05s; }
+.opener-tag{ font-family:-apple-system,sans-serif; font-size:11px; letter-spacing:.28em; text-transform:uppercase; color:#9DB8E0; opacity:0; animation:openerFadeUp .6s ease forwards; animation-delay:1.05s; }
 @keyframes openerFadeUp{ to{opacity:1; transform:translateY(0);} }
-.opener-skip{ position:absolute; bottom:28px; font-family:-apple-system,sans-serif; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:#5C6270; opacity:0; animation:openerFadeUp .5s ease forwards; animation-delay:1.6s; }
+.opener-skip{ position:absolute; bottom:28px; font-family:-apple-system,sans-serif; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:#8FA6C6; opacity:0; animation:openerFadeUp .5s ease forwards; animation-delay:1.6s; }
 @media (prefers-reduced-motion: reduce){ #opener{ display:none; } }
 
 /* Video Library (Videos tab) */
@@ -844,3 +844,10 @@ select option{ color:var(--ink); }
 .pricing-in{ width:110px; padding:6px 8px; border-radius:6px; border:1px solid var(--border-strong); background:var(--surface); color:var(--ink); font:inherit; font-size:13px; }
 .pricing-in[type="number"]{ font-family:var(--font-mono); }
 @media (max-width:760px){ .pricing-in{ width:100%; } }
+
+/* Calendar swipe (v1.9.71): the new day / week / month slides in from the side it came from. */
+.content.cal-in-next > :not(.cal-head):not(.section-head){ animation:calInNext .24s ease-out; }
+.content.cal-in-prev > :not(.cal-head):not(.section-head){ animation:calInPrev .24s ease-out; }
+@keyframes calInNext{ from{ transform:translateX(36px); opacity:.2; } to{ transform:none; opacity:1; } }
+@keyframes calInPrev{ from{ transform:translateX(-36px); opacity:.2; } to{ transform:none; opacity:1; } }
+@media (prefers-reduced-motion: reduce){ .content.cal-in-next > *, .content.cal-in-prev > *{ animation:none !important; } }

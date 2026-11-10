@@ -65,7 +65,7 @@ Deno.serve(async (req) => {
       output_config: { effort: "low", format: { type: "json_schema", schema } },
       system: "You extract booking-lead details for ASP Management, a Jewish music artist agency, from a pasted " +
         "message (often a forwarded WhatsApp chat). Only use what the message says; leave a field empty rather than guess. " +
-        `Today is ${today}. Allowed event types: ${eventTypes.join(", ") || "Wedding, Bar Mitzvah, Other"}. ` +
+        `Today is ${today}. Event type: a short label in the office's words, e.g. ${eventTypes.join(", ") || "Wedding, Bar Mitzvah, Concert"}, Sheva Brachos, Dinner. ` +
         `Roster artists: ${artistNames.join(", ") || "(none)"}. A bare number like 4500 next to the booking is the price.`,
       messages: [{ role: "user", content: `<message>\n${text}\n</message>` }],
     });
@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
   // Keep only known keys and allowed values.
   const out: Record<string, string> = {};
   for (const k of Object.keys(FIELDS)) out[k] = typeof fields[k] === "string" ? fields[k].trim().slice(0, 300) : "";
-  if (out.type && eventTypes.length && !eventTypes.includes(out.type)) out.type = "";
+  out.type = out.type.slice(0, 60);   // typed freely since 2026-11-10; the list above is only examples
   if (out.artistName && !artistNames.includes(out.artistName)) out.artistName = "";
   if (out.date && !/^\d{4}-\d{2}-\d{2}$/.test(out.date)) out.date = "";
   for (const k of ["time", "endTime"]) if (out[k] && !/^\d{2}:\d{2}$/.test(out[k])) out[k] = "";

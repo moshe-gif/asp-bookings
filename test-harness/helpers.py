@@ -47,13 +47,13 @@ MOBILE_WHATSAPP_NAV = ["dashboard", "calendar", "leads", "whatsapp", "financials
 WHATSAPP_ACCESS_IDS = {"admin_bookings"}
 MOBILE_ARTIST_NAV = ["a_calendar", "a_gigs", "a_dashboard", "a_travel", "a_financials"]
 
-MGMT_NAV_ITEMS = ["dashboard", "calendar", "leads", "artists", "clients", "travel", "projects", "pricing", "financials", "contracts", "messages"]
+MGMT_NAV_ITEMS = ["dashboard", "calendar", "leads", "artists", "travel", "projects", "pricing", "financials", "contracts", "messages"]
 ARTIST_NAV_ITEMS = ["a_dashboard", "a_calendar", "a_gigs", "a_travel", "a_financials", "a_projects"]
 
 CEO_HIDDEN_NAV_VIEWS = ()   # Contract Builder folded into Contracts (2026-11-10)
 
 # Pages that still exist but were removed from the menu (2026-10-09) -- reachable only by URL.
-URL_ONLY_VIEWS = ("outside_bookings", "documents")
+URL_ONLY_VIEWS = ("outside_bookings", "documents", "clients")   # Clients: a button on Leads, not in the menu (owner 2026-11-10)
 
 
 def mgmt_nav_items_for(user_id):
@@ -267,7 +267,7 @@ def create_lead(page, client_name, date, artist_id="benny", event_type=None):
     page.locator('[data-action="open-new-lead"]').click()
     page.locator('select[data-action="pick-artist"]').select_option(f"{artist_id}")
     if event_type:
-        page.locator('select[data-action="pick-event-type"]').select_option(event_type)
+        page.locator('[data-testid="lead-type"]').fill(event_type)   # typed since v1.9.71 (suggestions only)
     page.locator('input[data-field="clientName"]').fill(client_name)
     page.locator('input[data-field="date"]').fill(date)
     submit_lead(page)

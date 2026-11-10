@@ -174,7 +174,7 @@ def _wedding_lead_variant(page, problems, width):
     modal = page.locator('[data-form="lead"]')
     modal.locator('select[data-action="pick-artist"]').select_option(index=1)
     modal.locator('input[data-field="clientName"]').fill(LONG_NAME)
-    page.locator('[data-form="lead"] select[data-action="pick-event-type"]').select_option("Wedding")
+    page.locator('[data-form="lead"] [data-testid="lead-type"]').fill("Wedding")
     page.wait_for_timeout(200)
     page.locator('[data-form="lead"] input[data-field="clientEmail"]').fill(LONG_EMAIL)
     page.locator('[data-form="lead"] input[data-field="venue"]').fill(LONG_VENUE)

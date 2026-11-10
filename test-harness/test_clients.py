@@ -50,3 +50,20 @@ def test_clients_list_groups_gigs_by_client(live_server, page):
     page.reload()
     page.locator('[data-testid="client-detail"]').wait_for(state="visible", timeout=20000)
     assert not errors, f"console errors: {errors}"
+
+
+def test_calendar_month_with_a_no_time_gig_still_shows(live_server, page):
+    # Owner 2026-11-10: "there's no january in the app" -- two gigs on one day, one with no time yet, crashed the
+    # time sort and the whole month never drew (the arrow stayed on December).
+    from helpers import seed_events, fake_gig
+    errors = collect_console_errors(page)
+    seed_events(page, [fake_gig("EV-9611", "benny", "2099-01-05", clientName="Timed Client"),
+                       fake_gig("EV-9612", "eli", "2099-01-05", clientName="No Time Client", time=None)])
+    page.goto(live_server)
+    login_as(page, "admin_bookings")
+    goto_nav(page, "calendar")
+    page.evaluate("() => { S.calViewMode = 'month'; S.calMonth = new Date(2098, 11, 1); }")
+    page.locator('[data-action="cal-next"]').first.click()
+    page.get_by_text("January 2099").first.wait_for(state="visible", timeout=5000)
+    assert page.locator('[data-action="open-event"][data-id="EV-9612"], [data-id="EV-9612"]').count() >= 1
+    assert not errors, f"console errors: {errors}"

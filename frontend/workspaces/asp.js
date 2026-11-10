@@ -413,30 +413,26 @@ function getDocument(id){ return DOCUMENTS.find(d=>d.id===id); }
 // Moved up from just after ADMIN_USERS (its original spot) so the Contract Builder block below
 // -- which seeds its clause library from EVENT_TYPES at load time -- can reference it without a
 // temporal-dead-zone error. Still declared once, still used everywhere else exactly as before.
-// Standard hours of engagement per occasion (owner 2026-11-09: "look at all the contracts and create standard times
-// for diff types of events, so when i click wedding on the contract, it fills in amount of time"). From the office's
-// contracts: weddings 5 hours (30 of 31), concerts a 2.5-hour show + rehearsal, holiday programs up to 2 hours a show,
-// comedy 45 min - 1 hour; bar mitzvahs 4 hours (owner); sheva brachos / dinners had none, so 2 hours.
+// Standard hours of engagement (owner 2026-11-10 price list, "use only this info"): weddings are 5 hours on site.
+// Anything else (bar mitzvahs, dinners, concerts, Dovi's sets) is agreed per event, so it starts blank -- or
+// takes the hours on the singer's price for that type (Shmili's third dance: 45 minutes).
 const STANDARD_HOURS = [
   ['Wedding', '5 hours'],
-  ['Bar Mitzvah', '4 hours'],
-  ['Sheva Brachos', '2 hours'],
-  ['Concert', '2.5 hour show duration, plus rehearsal on the day of show'],
-  ['Holiday program', 'Each show up to 2 hours'],
-  ['Comedy show', '45 minutes – 1 hour'],
-  ['Melave Malka', '2 hours'],
-  ['Chinese Auction', '2 hours'],
-  ['Dinner', '2 hours'],
 ];
 function standardHoursFor(occasion){
   const o = String(occasion||'').trim().toLowerCase();
   if(!o) return '';
-  const hit = STANDARD_HOURS.find(([k])=>o.includes(k.toLowerCase())) || (/\bbat mitzvah\b/.test(o) ? STANDARD_HOURS[1] : null) || (/comed/.test(o) ? STANDARD_HOURS[5] : null);
+  const hit = STANDARD_HOURS.find(([k])=>o.includes(k.toLowerCase()));
   return hit ? hit[1] : '';
 }
-// Hours still at a standard (or blank / the old 5-hour default) were never typed by hand, so picking an occasion may replace them.
+// Hours still at a standard (or blank) were never typed by hand, so picking an occasion may replace them.
 function hoursAreStandard(h){ const v = String(h||'').trim(); return !v || STANDARD_HOURS.some(([,x])=>x===v); }
-const EVENT_TYPES = ['Wedding','Bar Mitzvah','Sheva Brachos','Concert','Melave Malka','Chinese Auction','Private Simcha','Other'];
+// A price's hours as contract text: 0.75 -> "45 minutes", 5 -> "5 hours".
+function hoursText(n){ n = Number(n)||0; if(!n) return ''; return n < 1 ? `${Math.round(n*60)} minutes` : `${n} hour${n===1?'':'s'}`; }
+// Event type is typed freely (owner 2026-11-10: "take away so many event types and make that a fillable field");
+// these are only the suggestions under the box.
+const EVENT_TYPES = ['Wedding','Bar Mitzvah','Concert'];
+const isWeddingType = t=>/wedding/i.test(String(t||''));
 const DRESS_CODES = ['Black tie','Formal — dark suit','Business casual','All black','Uniform provided by venue'];
 const INTERNAL_EVENT_TYPES = ['Recording Day','Filming Day','Rehearsal','Studio Session','Unavailable','Other'];
 
@@ -583,41 +579,8 @@ function migratePayeeProfiles(){
       defaultTravelClause: { flightsCount:1, flightsClass:'business', hotelRooms:1, hotelNights:1, hotelTier:'standard', food:false, shabbos:false, groundTransport:false } });
     migrated = true;
   }
-  // Standard pricing (PR 19, 2026-10-06) -- real 2026-27 contract/calendar fee data he supplied,
-  // per artist. Each is the single clearest "standard" anchor figure from his notes (usually the
-  // wedding rate -- Baruch and Dovie's primary booking type is "events," not weddings, so those
-  // use their standard-event figure instead); the fuller range/context he gave goes in notes so
-  // the office sees it's an approximation, not a quote. Never overwrites a defaultFee someone's
-  // already set (0/undefined only) -- same "only touch the still-blank seed default" rule as the
-  // rest of this migration.
-  const STANDARD_PRICING = {
-    benny:  { fee:12000, note:'Standard pricing (2026-10-06): wedding $12,000 (range $10-13k, $15k+ with extras). Bar mitzvah $12,000. Events/concerts vary widely ($12k dinner up to $25-40k big shows), no standard.' },
-    moshe:  { fee:7500,  note:'Standard pricing (2026-10-06): wedding $7,500 (very consistent; $7k for repeat/mezumen clients). Events vary, no standard.' },
-    eli:    { fee:6000,  note:'Standard pricing (2026-10-06): wedding $6,000 ($5.5k mezumen, $6.5k common upper end). Out-of-town wedding $8,000 + travel. Events $10-18k, no standard.' },
-    yaakov: { fee:4500,  note:'Standard pricing (2026-10-06): wedding $4,500 ($4k for mezumen or with Manavich/Kunstler). Bar mitzvah $4,000. Out-of-town ~$6,000 + flights/hotel.' },
-    shmili: { fee:6000,  note:'Standard pricing (2026-10-06): full wedding $6,000. Third dance/short set $3,500. Bar mitzvah/events $3,500-5,000. Out-of-town/camps $4-6k + travel.' },
-    dovie:  { fee:6000,  note:'Standard pricing (2026-10-06): standard event $6,000 (recent bookings trending $6,500-8,000). Schools/camps/corporate $5-10k. Big shows $12k+, no standard.' },
-    baruch: { fee:10000, note:'Standard pricing (2026-10-06): standard dinner/event $8,000-10,000 ($10k most common). Smaller events $4,000-7,700. Wedding/chuppah $4,500-5,500. Big weekends $11-26k, no standard.' },
-  };
-  PAYEE_PROFILES.forEach(p=>{
-    const row = p.artistId && STANDARD_PRICING[p.artistId];
-    if(!row) return;
-    if(!p.defaultFee){ p.defaultFee = row.fee; migrated = true; }
-    if(!p.notes || !p.notes.includes('Standard pricing (2026-10-06)')){
-      p.notes = p.notes ? `${p.notes}\n\n${row.note}` : row.note;
-      migrated = true;
-    }
-  });
-  // Deposit: he gave one office-wide figure ($2,000 flat, not a per-artist percent), so it lives
-  // on the house profile once -- doCreateContractFromLead() falls back to it for any artist that
-  // doesn't have its own deposit default set.
-  const house = PAYEE_PROFILES.find(p=>!p.artistId);
-  if(house && !house.defaultDepositAmount){
-    house.defaultDepositAmount = 2000;
-    const depositNote = 'Standard pricing (2026-10-06): deposit typically $2,000 flat (mezumen-type weddings run roughly $500 lower on the total fee).';
-    if(!house.notes || !house.notes.includes(depositNote)) house.notes = house.notes ? `${house.notes}\n\n${depositNote}` : depositNote;
-    migrated = true;
-  }
+  // The October 2026 fee estimates and the $2,000 house deposit that used to be seeded here are gone (owner
+  // 2026-11-10: "use only this info"): fees come from the Pricing page, deposits are 15% (Dovie 10%).
   if(migrated) savePayeeProfiles();
 }
 migratePayeeProfiles();
@@ -640,7 +603,7 @@ const CONTRACT_TEMPLATES = [
 // A wedding with one artist is always the Standard Artist Agreement (owner 2026-10-13), so creating
 // its contract skips the template picker. Anything else (other types, extra performers) still asks.
 function obviousTemplateFor(ev){
-  return ev && ev.type==='Wedding' && ev.artistId && !(ev.additionalArtists||[]).length ? 'standard' : null;
+  return ev && isWeddingType(ev.type) && ev.artistId && !(ev.additionalArtists||[]).length ? 'standard' : null;
 }
 // The one entry point for "make a contract for this gig": straight to the builder when the
 // template is obvious, otherwise the picker.
@@ -865,7 +828,12 @@ function overtimeIntervalLabel(interval){ return OVERTIME_INTERVAL_LABELS[interv
 // (15 min = half that, an hour = double). Filled in automatically and kept in step with the fee,
 // hours and interval until someone types a rate (c.overtime.manual); clearing it goes back to auto.
 const OVERTIME_HALF_HOURS_PER_INTERVAL = { half_hour:1, '15_min':0.5, hour:2 };
-function hoursFromText(text){ const m = String(text||'').match(/\d+(\.\d+)?/); return m ? Number(m[0]) : 0; }
+function hoursFromText(text){
+  const t = String(text||'').toLowerCase();
+  const h = t.match(/(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours)\b/), m = t.match(/(\d+)\s*(?:m|min|mins|minute|minutes)\b/);
+  if(h || m) return (h ? Number(h[1]) : 0) + (m ? Number(m[1])/60 : 0);
+  const n = t.match(/\d+(\.\d+)?/); return n ? Number(n[0]) : 0;
+}
 function suggestedOvertimeRate(fee, hoursText, interval){
   const hours = hoursFromText(hoursText), factor = OVERTIME_HALF_HOURS_PER_INTERVAL[interval||'half_hour'];
   return hours && factor ? Math.round((Number(fee)||0) / hours * factor) : 0;
@@ -1013,7 +981,7 @@ function doCreateContractFromLead(eventId, template, opts={}){
   // number -- $2,000 -- not a per-artist percent), so percent only wins when someone's actually
   // set one for that artist; otherwise fall back to the artist's own flat amount, then the house
   // profile's (the office-wide $2,000 figure lives there, not duplicated onto every artist).
-  const hours = standardHoursFor(ev.type) || (payeeProfile && payeeProfile.defaultHours) || '5 hours';
+  const hours = standardHoursFor(ev.type) || hoursText(getPricing(ev.artistId, ev.type).hours);
   const houseDepositAmount = housePayeeProfile().defaultDepositAmount || 0;
   const depositPercent = (payeeProfile && payeeProfile.defaultDepositPercent) || 0;
   const depositAmount = (payeeProfile && payeeProfile.defaultDepositAmount) || houseDepositAmount || 0;
@@ -1023,7 +991,7 @@ function doCreateContractFromLead(eventId, template, opts={}){
     snapshot: { clientName: ev.clientName||'', clientEmail: ev.clientEmail||'', clientPhone: ev.clientPhone||'', eventName:'', eventDate: ev.date||'', venue: ev.venue||'', address: ev.address||'', city: ev.city||'', state: ev.state||'', occasion: ev.type||'' },
     performerArtistId, performerLabel:'',
     payeeProfileId: payeeProfile ? payeeProfile.id : null,
-    fee: { amount: ev.price || (payeeProfile && payeeProfile.defaultFee) || 0, note:'' },
+    fee: { amount: Number(ev.price) || 0, note:'' },
     deposit: depositPercent ? { amount:0, percent:depositPercent, nonRefundable:false }
       : depositAmount ? { amount:depositAmount, percent:0, nonRefundable:false }
       : { amount:0, percent:15, nonRefundable:false },
@@ -1076,7 +1044,7 @@ function doCreateContractFromLead(eventId, template, opts={}){
     // (primary + additional) instead of leaving the editor empty, since the data already exists.
     if((ev.additionalArtists||[]).length){
       contract.lineItems = [
-        { id:'LI-'+Math.random().toString(36).slice(2,7), label: performerArtist?performerArtist.name:'', performerArtistId, fee: ev.price || (payeeProfile && payeeProfile.defaultFee) || 0, date:'', overtimeRate:'', notes:'', travelClause: blankTravelClause() },
+        { id:'LI-'+Math.random().toString(36).slice(2,7), label: performerArtist?performerArtist.name:'', performerArtistId, fee: Number(ev.price) || 0, date:'', overtimeRate:'', notes:'', travelClause: blankTravelClause() },
         ...ev.additionalArtists.map(x=>{
           const a = artistById(x.artistId);
           return { id:'LI-'+Math.random().toString(36).slice(2,7), label: a?a.name:x.artistId, performerArtistId: x.artistId, fee: x.feeAmount||0, date:'', overtimeRate:'', notes:'', travelClause: blankTravelClause() };
@@ -1097,7 +1065,7 @@ function doRefreshContractFromLead(id){
   const ev = getEvent(c.leadId); if(!ev){ toast('The original lead no longer exists.', 'system'); return; }
   c.snapshot = { clientName: ev.clientName||'', clientEmail: ev.clientEmail||'', clientPhone: ev.clientPhone||'', eventName: c.snapshot.eventName||'', eventDate: ev.date||'', venue: ev.venue||'', address: ev.address||'', city: ev.city||'', state: ev.state||'', occasion: c.snapshot.occasion || ev.type||'' };
   // The lead's negotiated price wins; otherwise keep the fee already on the contract (typed or prefilled); the profile default only fills a blank.
-  if(c.template!=='multiline'){ const profile = getPayeeProfile(c.payeeProfileId); c.fee.amount = ev.price || Number(c.fee.amount) || (profile && profile.defaultFee) || 0; }
+  if(c.template!=='multiline'){ const profile = getPayeeProfile(c.payeeProfileId); c.fee.amount = ev.price || Number(c.fee.amount) || 0; }
   refreshAutoOvertime(c);
   c.updatedAt = new Date().toISOString();
   saveContracts();
@@ -2581,8 +2549,15 @@ const PRICING_LS_KEY = 'asp_mock_pricing_v1';
 function loadPricing(){ try{ const raw = localStorage.getItem(PRICING_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
 function savePricing(){ const r = persist(PRICING_LS_KEY, PRICING, 'pricing'); if(SHARED) SHARED.settings.schedule(); return r; }
 let PRICING = loadPricing() || {};
+// The typed event type finds its price: the same name (any case), else a priced type inside it ("Wedding – third dance").
+function pricingKey(artistId, type){
+  const row = PRICING[artistId] || {}, t = String(type||'').trim().toLowerCase(); if(!t) return null;
+  const keys = Object.keys(row);
+  return keys.find(k=>k.toLowerCase()===t) || keys.filter(k=>k!=='Other' && t.includes(k.toLowerCase())).sort((a,b)=>b.length-a.length)[0] || null;
+}
 function getPricing(artistId, type){
-  const p = (PRICING[artistId] && PRICING[artistId][type]) || {};
+  const k = pricingKey(artistId, type);
+  const p = (k && PRICING[artistId][k]) || {};
   return { fee:Number(p.fee)||0, outOfTownFee:Number(p.outOfTownFee)||0, hours:Number(p.hours)||0, note:String(p.note||'') };
 }
 // Out of town = the lead needs a flight (the office ticks it); then the out-of-town fee, when there is one.
@@ -2599,11 +2574,12 @@ function applyStandardPricing(){
 const PRICE_CONFIRM_AFTER_DEFAULT = '2027-04-29';   // the day after Pesach 5787 ends
 function priceConfirmAfter(){ return ORG_SETTINGS.priceConfirmAfter || PRICE_CONFIRM_AFTER_DEFAULT; }
 function leadPriceHint(f){
-  if(!f.artistId || !f.type) return '';
+  if(!f.artistId) return '';
   const p = getPricing(f.artistId, f.type), bits = [];
+  const other = !pricingKey(f.artistId, f.type) && getPricing(f.artistId, 'Other').note;   // e.g. "Case by case"
   if(p.fee) bits.push(`List: ${money(p.fee)}${p.hours ? ` · ${p.hours<1 ? Math.round(p.hours*60)+' min' : p.hours+' h'}` : ''}`);
   if(p.outOfTownFee) bits.push(`Out of town ${money(p.outOfTownFee)} + travel`);
-  if(p.note) bits.push(esc(p.note));
+  if(p.note) bits.push(esc(p.note)); else if(other) bits.push(esc(other));
   const warn = f.date && f.date > priceConfirmAfter() ? `<div style="color:var(--warn-ink);font-weight:600;" data-testid="price-confirm">Date after ${esc(fmtDateShort(priceConfirmAfter()))}: confirm the price with Moshe first.</div>` : '';
   return bits.length || warn ? `<div style="font-size:11.5px;color:var(--ink-3);margin-top:4px;line-height:1.45;" data-testid="price-hint">${bits.join(' · ')}${warn}</div>` : '';
 }
@@ -2618,7 +2594,8 @@ function leadEndTime(f){ return f.endTime!==undefined ? f.endTime : leadDefaultE
 function setPricing(artistId, type, patch){
   PRICING[artistId] = PRICING[artistId] || {};
   const { fee, outOfTownFee, hours, note } = Object.assign({}, PRICING[artistId][type], patch);
-  PRICING[artistId][type] = { fee:Number(fee)||0, outOfTownFee:Number(outOfTownFee)||0, hours:Number(hours)||0, note:String(note||'').slice(0,300) };
+  const row = { fee:Number(fee)||0, outOfTownFee:Number(outOfTownFee)||0, hours:Number(hours)||0, note:String(note||'').slice(0,300) };
+  if(row.fee || row.outOfTownFee || row.hours || row.note) PRICING[artistId][type] = row; else delete PRICING[artistId][type];   // an emptied row goes
   savePricing();
 }
 const CHARGE_PRESETS = ['Travel','Flights','Hotel & Lodging','Sound & Production Rider','Musicians & Band','Other'];
@@ -3824,7 +3801,7 @@ function fillLeadFormFrom(f, x){
     if(!/^\d+(\.\d{1,2})?$/.test(String(x.price||'').replace(/[$,\s]/g,''))) x = { ...x, price:'' }; else x = { ...x, price:String(x.price).replace(/[$,\s]/g,'') };
     set('clientName', x.clientName); set('clientEmail', x.clientEmail); set('clientPhone', x.clientPhone);
     set('date', x.date); set('venue', x.venue); set('city', x.city); set('state', x.state); set('price', x.price);
-    if(x.type && EVENT_TYPES.includes(x.type)) f.type = x.type;
+    if(x.type) f.type = String(x.type).trim().slice(0,60);
     if(x.artistName){ const a = ARTISTS.find(a=>a.name===x.artistName); if(a) f.artistId = a.id; }
     if(x.time){ f.time = x.time; f.timeTbd = false; }
     if(x.endTime){ f.endTime = x.endTime; f.endTimeManual = true; } else if(!f.endTimeManual) delete f.endTime;
@@ -4075,6 +4052,9 @@ function fmtFlightDateTime(s){
 }
 function addMinutesToTime(t, mins){ const [h,m]=t.split(':').map(Number); const total=(h*60+m+mins+1440)%1440; return `${String(Math.floor(total/60)).padStart(2,'0')}:${String(total%60).padStart(2,'0')}`; }
 function daysUntil(iso){ const today=new Date(); today.setHours(0,0,0,0); const d=new Date(iso+'T00:00:00'); return Math.round((d-today)/86400000); }
+// Gigs on one day in time order; a gig with no time yet (imported, TBD) goes first instead of crashing the
+// whole calendar month (owner 2026-11-10: "there's no january in the app" -- one such day hid January).
+function byTime(a,b){ return String((a&&a.time)||'').localeCompare(String((b&&b.time)||'')); }
 function isPast(iso){ return daysUntil(iso) < 0; }
 // Standard follow-up cadence: every 2 weeks, tightening to weekly once the gig is under a month out.
 function defaultReminderCadence(iso){ return daysUntil(iso) > 30 ? 14 : 7; }
@@ -4462,6 +4442,30 @@ document.addEventListener('click', e=>{
   if(bnDrag.synthetic || Date.now() > bnDrag.swallowUntil) return;
   if(e.target.closest && e.target.closest('.bottom-nav')){ bnDrag.swallowUntil = 0; e.preventDefault(); e.stopPropagation(); }   // once
 }, true);
+/* ---- Calendar: one step back / forward (the arrows, and a swipe -- owner 2026-11-10: "i want to be able to swipe,
+   days, weeks and months in the calendar like google calendar"). The new day / week / month slides in from the side
+   it came from. ---- */
+function calStep(dir, slide){
+  if(S.calViewMode==='week') S.calDate.setDate(S.calDate.getDate()+7*dir);
+  else if(S.calViewMode==='day') S.calDate.setDate(S.calDate.getDate()+dir);
+  else S.calMonth.setMonth(S.calMonth.getMonth()+dir);
+  render();
+  if(slide){ const c = document.querySelector('.content'); if(c){ c.classList.remove('cal-in-next','cal-in-prev'); void c.offsetWidth; c.classList.add(dir>0 ? 'cal-in-next' : 'cal-in-prev'); } }
+}
+const calSwipe = { on:false, x:0, y:0, t:0 };
+document.addEventListener('touchstart', e=>{
+  calSwipe.on = false;
+  if(e.touches.length!==1 || !e.target.closest) return;
+  const c = e.target.closest('.content');
+  if(!c || !c.querySelector('[data-cal-swipe]') || e.target.closest('.chip-row, input, select, textarea, .overlay, .sheet, .modal')) return;
+  Object.assign(calSwipe, { on:true, x:e.touches[0].clientX, y:e.touches[0].clientY, t:Date.now() });
+}, { passive:true });
+document.addEventListener('touchend', e=>{
+  if(!calSwipe.on) return; calSwipe.on = false;
+  const p = e.changedTouches[0], dx = p.clientX - calSwipe.x, dy = p.clientY - calSwipe.y;
+  if(Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)*1.5 || Date.now() - calSwipe.t > 900) return;   // a scroll or a tap, not a swipe
+  calStep(dx < 0 ? 1 : -1, true);
+}, { passive:true });
 /* ============ RENDER: SHELL ============ */
 // Search boxes that re-render on every keystroke need their cursor back after render -- but only
 // if they had it, or just appeared (a modal opened). Focusing them unconditionally on every render
@@ -4623,7 +4627,7 @@ function renderDayEventRow(e, isAdmin, action, opts={}){
 function renderDayList(){
   const iso = S.dayListDate;
   const isAdmin = isAdminUser(S.user);
-  const evs = S.events.filter(e=>e.date===iso && (isAdmin || crewUser() || e.artistId===S.user)).sort((a,b)=>a.time.localeCompare(b.time)); // crew: S.events is already their own list
+  const evs = S.events.filter(e=>e.date===iso && (isAdmin || crewUser() || e.artistId===S.user)).sort((a,b)=>byTime(a,b)); // crew: S.events is already their own list
   return `<div class="overlay center" data-action="dayoverlay-close">
     <div class="modal" data-stop style="width:400px;">
       <div class="sheet-head"><h2 style="font-size:1.1rem;">${fmtDate(iso)}</h2><button class="icon-btn" data-action="close-daylist" aria-label="Close">${ICO.x}</button></div>
@@ -4655,7 +4659,7 @@ function renderUserChip(){
 
 const MGMT_NAV_ITEMS = [
   ['dashboard','Dashboard',ICO.dash], ['calendar','Calendar',ICO.cal], ['leads','Leads',ICO.leads],
-  ['artists','Artists',ICO.artists], ['clients','Clients',ICO.client], ['travel','Travel',ICO.suitcase], ['projects','Projects',ICO.kanban], ['pricing','Pricing',ICO.tag], ['financials','Financials',ICO.money],
+  ['artists','Artists',ICO.artists], ['travel','Travel',ICO.suitcase], ['projects','Projects',ICO.kanban], ['pricing','Pricing',ICO.tag], ['financials','Financials',ICO.money],
   ['contracts','Contracts',ICO.leads],
   ['messages','Inbox',ICO.sms],
   ['videos','Media',ICO.film],
@@ -4708,7 +4712,7 @@ function portalNavItems(){ return crewUser() ? (isTravelCrew() ? TRAVEL_CREW_NAV
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.70'; // bump on every release so a phone can tell it has updated. v1.9.70: the price list -- a flat fee per singer x event type (+ out of town, hours, note); New Lead fills it (never over a typed price) and flags dates after Pesach. v1.9.69: Clients list (one client -> all their gigs, booked total, still owed; worked out from the gigs). v1.9.68: one singer profile page (contact, commission, Zelle/payee, rider, bio, photo; riders moved off Settings). v1.9.66: navigate buttons compact on a computer, big on a phone; a line mic icon instead of the photo. v1.9.65: a new gig never reuses a deleted gig's id (an old contract attached itself); dropdowns styled like the fields; This week leads with the singer. v1.9.64: the phone tab bar slides (press, drag the bubble, let go to open). v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.71'; // bump on every release so a phone can tell it has updated. v1.9.71: search a date to open that day; swipe the calendar (days, weeks, months); the opener in the app's navy; v1.9.71: the Inbox says when email reading has stopped (e.g. AI credit ran out); v1.9.71: a day with a no-time gig no longer blanks its calendar month (January was missing); v1.9.71: event type is typed (3 suggestions); fees and hours only from the price list (old estimates and the $2,000 deposit default gone; deposits 15%); '45 minutes' counts as 45 minutes. v1.9.70: the price list -- a flat fee per singer x event type (+ out of town, hours, note); New Lead fills it (never over a typed price) and flags dates after Pesach. v1.9.69: Clients list (one client -> all their gigs, booked total, still owed; worked out from the gigs). v1.9.68: one singer profile page (contact, commission, Zelle/payee, rider, bio, photo; riders moved off Settings). v1.9.66: navigate buttons compact on a computer, big on a phone; a line mic icon instead of the photo. v1.9.65: a new gig never reuses a deleted gig's id (an old contract attached itself); dropdowns styled like the fields; This week leads with the singer. v1.9.64: the phone tab bar slides (press, drag the bubble, let go to open). v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -5207,6 +5211,23 @@ function gigSearchText(e){
     MONTHS[d.getMonth()], MONTHS[d.getMonth()].slice(0,3)+' '+d.getDate(), MONTHS[d.getMonth()]+' '+d.getDate(), d.toLocaleDateString('en-US',{weekday:'long'}), String(d.getFullYear())] : [];
   return [a.name, ...extra, e.clientName, e.venue, e.address, e.city, e.state, e.type, e.id, ...dates].filter(Boolean).join(' | ').toLowerCase();
 }
+// A search that is a date ("Nov 11", "11/11", "11/11/27", "2027-02-15", "11 Nov 2027") -> that day (owner
+// 2026-11-10: "can i search a date ... and it will open even if there are no other gigs"). No year = the next one.
+function searchDateISO(q){
+  const t = String(q||'').trim().toLowerCase().replace(/,/g,' ').replace(/\s+/g,' ');
+  if(!t) return null;
+  const monthOf = w=>{ if(!w || w.length<3) return 0; const i = MONTHS.findIndex(x=>x.startsWith(w)); return i+1; };
+  let y=0, m=0, d=0, x;
+  if((x = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))){ y=+x[1]; m=+x[2]; d=+x[3]; }
+  else if((x = t.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?$/))){ m=+x[1]; d=+x[2]; if(x[3]) y = x[3].length===2 ? 2000 + +x[3] : +x[3]; }
+  else if((x = t.match(/^([a-z]+)\.? (\d{1,2})(?:st|nd|rd|th)?(?: (\d{4}))?$/))){ m=monthOf(x[1]); d=+x[2]; if(x[3]) y=+x[3]; }
+  else if((x = t.match(/^(\d{1,2})(?:st|nd|rd|th)? ([a-z]+)\.?(?: (\d{4}))?$/))){ m=monthOf(x[2]); d=+x[1]; if(x[3]) y=+x[3]; }
+  else return null;
+  if(!m || m>12 || !d || d>31) return null;
+  if(!y){ const now = new Date(), today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); y = now.getFullYear(); if(new Date(y, m-1, d) < today) y++; }
+  const dt = new Date(y, m-1, d);
+  return dt.getMonth()===m-1 ? localISO(dt) : null;
+}
 function homeSearchResults(q){
   const words = String(q||'').toLowerCase().replace(/,/g,' ').split(/\s+/).filter(Boolean);
   if(!words.length) return [];
@@ -5218,10 +5239,15 @@ function homeSearchResults(q){
 function renderHomeSearch(){
   const q = S.homeSearch || '';
   const hits = homeSearchResults(q);
+  const day = searchDateISO(q);
+  const dayCount = day ? S.events.filter(e=>!e.unpaid && e.date===day).length : 0;
+  const dayRow = day ? `<div class="kv-row" data-action="open-search-date" data-date="${esc(day)}" data-testid="search-date" style="cursor:pointer;padding:10px 14px;gap:10px;align-items:center;">
+      <span style="display:flex;align-items:center;gap:8px;min-width:0;">${ICO.cal}<strong>${esc(fmtDateWeekday(day))}</strong></span>
+      <span style="font-size:12.5px;color:var(--ink-2);white-space:nowrap;">${dayCount ? `${dayCount} gig${dayCount===1?'':'s'} · ` : 'Free · '}Open day ${ICO.chev('r')}</span></div>` : '';
   return `<div style="margin-bottom:20px;" data-testid="home-search">
     <label class="u-label" for="homeSearchInput" style="display:block;margin-bottom:6px;">Search gigs</label>
     <input id="homeSearchInput" type="search" data-home-search data-focus-key="home-search" value="${esc(q)}" placeholder="Name, date or hall — e.g. Goldberg, Nov 11, Rockleigh" autocomplete="off" style="width:100%;box-sizing:border-box;padding:12px 14px;font-size:15px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);"/>
-    ${q.trim() ? (hits.length ? `<div class="card" style="margin-top:8px;">${hits.map(e=>{ const a = artistById(e.artistId)||{}; const sm = statusMeta(e);
+    ${q.trim() ? (hits.length || day ? `<div class="card" style="margin-top:8px;">${dayRow}${hits.map(e=>{ const a = artistById(e.artistId)||{}; const sm = statusMeta(e);
       return `<div class="kv-row" data-action="open-event" data-id="${e.id}" style="cursor:pointer;padding:10px 14px;gap:10px;align-items:flex-start;">
         <div style="min-width:0;"><strong style="display:block;">${esc(e.clientName||'(no client)')}</strong>
           <span style="font-size:12.5px;color:var(--ink-2);">${esc(e.date? fmtDateWeekday(e.date) : 'No date')} · ${esc(a.name||'')}${e.venue? ' · '+esc(e.venue) : ''}${e.city? ', '+esc(e.city) : ''}</span></div>
@@ -5259,7 +5285,7 @@ function statTile(label, val, sub, view){
 function renderUpcomingGigsCard(events, opts={}){
   const days = opts.days || 7;
   const upcoming = events.filter(e=>!isPast(e.date) && daysUntil(e.date)<days && isConfirmed(e))
-    .sort((a,b)=> a.date===b.date ? a.time.localeCompare(b.time) : a.date.localeCompare(b.date));
+    .sort((a,b)=> a.date===b.date ? byTime(a,b) : a.date.localeCompare(b.date));
   return `
   <div class="section-head"><h2>Upcoming — Next ${days} Days</h2></div>
   ${upcoming.length? `<div class="card">${upcoming.map(e=>renderDayEventRow(e, !!opts.showArtist, 'open-event', {showDate:true})).join('')}</div>`
@@ -5386,9 +5412,9 @@ function renderCalendarPage(events, opts={}){
   </div>`;
 
   const head = (label)=>`
-    <div class="cal-head">
+    <div class="cal-head" ${opts.miniEmbed ? '' : 'data-cal-swipe'}>
       <div class="cal-nav">
-        <button class="icon-btn" data-action="cal-prev" aria-label="Previous">${ICO.chev('l')}</button>
+        <button class="icon-btn" data-action="cal-prev" aria-label="Previous" title="Previous (or swipe right)">${ICO.chev('l')}</button>
         <strong style="font-family:var(--font-display);font-size:1.05rem;min-width:150px;text-align:center;">${label}</strong>
         <button class="icon-btn" data-action="cal-next" aria-label="Next">${ICO.chev('r')}</button>
         <button class="btn btn-sm btn-ghost" data-action="cal-today">Today</button>
@@ -5405,7 +5431,7 @@ function renderCalendarPage(events, opts={}){
     return head(rangeLabel) + `<div style="display:flex;flex-direction:column;gap:10px;">
       ${days.map(d=>{
         const iso = localISO(d);
-        const evs = filtered.filter(e=>e.date===iso).sort((a,b)=>a.time.localeCompare(b.time));
+        const evs = filtered.filter(e=>e.date===iso).sort((a,b)=>byTime(a,b));
         return `<div class="card card-pad">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:${evs.length?'6px':'0'};">
             <strong style="font-family:var(--font-display);">${d.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})}</strong>
@@ -5420,7 +5446,7 @@ function renderCalendarPage(events, opts={}){
 
   if(mode==='day'){
     const iso = localISO(S.calDate);
-    const evs = filtered.filter(e=>e.date===iso).sort((a,b)=>a.time.localeCompare(b.time));
+    const evs = filtered.filter(e=>e.date===iso).sort((a,b)=>byTime(a,b));
     return head(S.calDate.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})) + `
       ${isAdmin? `<button class="btn btn-sm btn-primary" data-action="quick-add-event" data-date="${iso}" style="margin-bottom:12px;">${ICO.plus} Add Event</button>` : ''}
       <div class="card card-pad">
@@ -5446,7 +5472,7 @@ function renderCalendarPage(events, opts={}){
       ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div class="cal-dow">${d}</div>`).join('')}
       ${cells.map(c=>{
         if(c.out) return `<div class="cal-cell out"><span class="cal-date">${c.d}</span></div>`;
-        const evs = (byDate[c.iso]||[]).sort((a,b)=>a.time.localeCompare(b.time));
+        const evs = (byDate[c.iso]||[]).sort((a,b)=>byTime(a,b));
         const max = 3;
         return `<div class="cal-cell ${c.iso===todayIso?'today':''}" data-action="open-day-view" data-date="${c.iso}" style="cursor:pointer;">
           ${isAdmin? `<button class="cal-add-btn" data-action="quick-add-event" data-date="${c.iso}" title="Add event">${ICO.plus}</button>`:''}
@@ -5504,6 +5530,7 @@ function renderLeadsPage(){
   const open = base.filter(e=>isOpenLead(e)).sort((a,b)=>a.date.localeCompare(b.date));
   const pending = base.filter(e=>e.status==='booked' && !e.balanceReceived).sort((a,b)=>a.date.localeCompare(b.date));
   return `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:8px;"><button class="btn btn-sm" data-action="nav" data-view="clients" data-testid="open-clients">${ICO.client} Clients</button></div>
     ${renderArtistFilterRow(artistFilter, 'filter-leads-artist')}
     ${needsReviewCount? `<div class="card card-pad" style="border-color:var(--warn);background:var(--warn-wash);margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
       <div style="font-size:13px;color:var(--warn-ink);font-weight:700;">${needsReviewCount} gig${needsReviewCount===1?'':'s'} imported from calendar, not yet reviewed</div>
@@ -5709,9 +5736,13 @@ async function loadInbox(){
   if(!supabaseClient || !S.realSession || S.inboxBusy) return;
   S.inboxBusy = true;
   try{
-    const { data, error } = await supabaseClient.from('inbox_items').select('*').eq('status','new').order('received_at', { ascending:false }).limit(200);
+    const [{ data, error }, st] = await Promise.all([
+      supabaseClient.from('inbox_items').select('*').eq('status','new').order('received_at', { ascending:false }).limit(200),
+      supabaseClient.from('inbox_scan_state').select('last_run_at, last_error').eq('id', 1).maybeSingle(),
+    ]);
     if(error){ toast('Could not load the inbox: ' + error.message, 'system'); S.inboxItems = S.inboxItems || []; return; }
     S.inboxItems = data || [];
+    S.inboxScanState = st && st.data || null;
   } finally { S.inboxBusy = false; render(); }
 }
 async function doInboxCheckNow(){
@@ -5732,7 +5763,7 @@ function doInboxAct(id){
   const x = it.extracted || {};
   const gig = it.event_legacy_id && getEvent(it.event_legacy_id);
   if(it.kind==='booking_inquiry'){
-    closeAllOverlays(); S.newLeadForm = { kind:'client' }; fillLeadFormFrom(S.newLeadForm, x); S.showNewLead = true; render(); return;
+    closeAllOverlays(); S.newLeadForm = { kind:'client', type:'Wedding' }; fillLeadFormFrom(S.newLeadForm, x); S.showNewLead = true; render(); return;
   }
   if(!gig){ toast("This email isn't matched to a gig — open the gig yourself.", 'system'); return; }
   openEvent(gig.id);
@@ -5847,6 +5878,14 @@ function inboxMoneyHtml(it){
   return `<div style="font-size:13px;overflow-wrap:anywhere;"><strong>${esc(inboxMoneyText(x))}</strong>${x.bank_verified?` <span class="pill pill-good">${esc(x.bank)} alert</span>`:''}</div>
     <div style="font-size:12px;color:var(--ink-2);overflow-wrap:anywhere;">Pays: ${what} ${fit}</div>`;
 }
+// Email reading stopped (2026-11-10: the AI account ran out of credit and nothing said so for two days).
+function renderInboxScanWarning(){
+  const e = S.inboxScanState && S.inboxScanState.last_error; if(!e) return '';
+  const credit = /credit balance/i.test(e);
+  return `<div class="card card-pad" data-testid="inbox-scan-error" style="border-color:var(--crit);background:var(--crit-wash, #FBEDED);margin-bottom:12px;">
+    <strong style="color:var(--crit);display:block;margin-bottom:4px;">Email reading has stopped</strong>
+    <span style="font-size:13px;">${credit ? 'The AI account that reads the emails is out of credit. Add credit at console.anthropic.com → Plans &amp; Billing; nothing is lost — the waiting emails are read as soon as it works again.' : esc(e.slice(0, 300))}</span></div>`;
+}
 function renderMessagesPage(){
   if(S.inboxItems==null && !S.inboxBusy) setTimeout(loadInbox, 0);
   const items = (S.inboxItems || []).slice().sort((a,b)=>(b.money?1:0)-(a.money?1:0));
@@ -5854,6 +5893,7 @@ function renderMessagesPage(){
   return `
   <div class="section-head"><h2>Inbox${items.length?` (${items.length})`:''}</h2>
     <button class="btn btn-sm" data-action="inbox-check-now" ${S.inboxScanBusy?'disabled':''}>${S.inboxScanBusy?'Checking…':'Check now'}</button></div>
+  ${renderInboxScanWarning()}
   <p style="font-size:11.5px;color:var(--ink-3);margin:-8px 0 12px;">Every connected mailbox (Settings → Gmail Mailboxes) is read every 10 minutes. Each email is matched to its gig with a suggested next step. Payments come first: a bank's own alert for exactly what's due is recorded automatically; anything else waits for your click.</p>
   ${S.inboxItems==null? `<div class="card card-pad" style="font-size:13px;color:var(--ink-2);">Loading…</div>`
   : !items.length? `<div class="card empty">Nothing waiting — you're all caught up.</div>`
@@ -6777,7 +6817,7 @@ function renderPricingPage(){
     <table>
       <thead><tr><th>Event type</th><th>Fee (local)</th><th>Out of town (+ travel)</th><th>Hours</th><th>Note</th><th>Overtime (per ½ hour)</th></tr></thead>
       <tbody>
-        ${EVENT_TYPES.map(type=>{ TYPE = type;
+        ${[...new Set([...EVENT_TYPES, ...Object.keys(PRICING[artistId]||{})])].map(type=>{ TYPE = type;
           const p = getPricing(artistId, type);
           return `<tr data-testid="pricing-row" data-type="${esc(type)}">
             <td data-label="Event type">${esc(type)}</td>
@@ -6791,6 +6831,9 @@ function renderPricingPage(){
       </tbody>
     </table>
   </div>
+  <div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap;">
+    <input data-pricing-new-type placeholder="Add an event type (e.g. Dinner)" maxlength="60" class="pricing-in" style="width:240px;"/>
+    <button class="btn btn-sm" data-action="pricing-add-type" data-artist="${esc(artistId)}">Add</button></div>
   <div class="field" style="max-width:360px;margin-top:14px;"><label>Prices need Moshe's OK for dates after</label>
     <input type="date" data-price-confirm-after value="${esc(priceConfirmAfter())}"/></div>
   <p style="font-size:11px;color:var(--ink-3);margin-top:10px;">Editing ${esc(artist.name)}'s prices — changes save automatically and every office login sees them.</p>
@@ -7824,10 +7867,11 @@ function renderNewLeadModal(){
         ${!isInternal? renderAdditionalArtistsSection(f) : ''}
         <div class="field-row">
           ${!isInternal? `<div class="field"><label>Client Name</label><input data-field="clientName" value="${esc(f.clientName||'')}" placeholder="Full name"/></div>` : ''}
-          <div class="field"><label>Event Type</label><select data-action="pick-event-type">${typeList.map(t=>`<option ${f.type===t?'selected':''}>${t}</option>`).join('')}</select></div>
+          ${isInternal ? `<div class="field"><label>Event Type</label><select data-action="pick-event-type">${typeList.map(t=>`<option ${f.type===t?'selected':''}>${t}</option>`).join('')}</select></div>`
+            : `<div class="field"><label>Event Type</label><input data-field="type" data-testid="lead-type" list="event-type-list" value="${esc(f.type||'')}" placeholder="Wedding, Bar Mitzvah, Concert…" autocomplete="off"/><datalist id="event-type-list">${EVENT_TYPES.map(t=>`<option value="${esc(t)}"></option>`).join('')}</datalist></div>`}
         </div>
-        ${f.type==='Other'? `<div class="field"><label>Describe the Event Type</label><input data-field="customType" value="${esc(f.customType||'')}" placeholder="${isInternal?'e.g. Photo Shoot':'e.g. Bris, Vort, Studio Session'}"/></div>` : ''}
-        ${f.type==='Wedding'? renderBandFieldsSection(f) : ''}
+        ${isInternal && f.type==='Other'? `<div class="field"><label>Describe the Event Type</label><input data-field="customType" value="${esc(f.customType||'')}" placeholder="e.g. Photo Shoot"/></div>` : ''}
+        ${!isInternal && isWeddingType(f.type)? renderBandFieldsSection(f) : ''}
         ${!isInternal? `<div class="field-row">
           <div class="field"><label>Client Email</label><input data-field="clientEmail" value="${esc(f.clientEmail||'')}" placeholder="name@example.com"/></div>
           <div class="field"><label>Client Phone</label><input data-field="clientPhone" value="${esc(f.clientPhone||'')}" placeholder="(555) 555-5555"/></div>
@@ -8089,7 +8133,7 @@ function renderEventSheet(ev){
         <div class="card card-pad" style="display:flex;flex-direction:column;gap:9px;">
           ${!ev.unpaid ? `<div class="kv-row" ${isAdmin?`data-action="open-client-contact" data-id="${ev.id}" style="cursor:pointer;"`:''}><span style="color:var(--ink-2);">${ICO.pin} Client</span><strong${isAdmin?' style="color:var(--accent);"':''}>${esc(ev.clientName)}</strong></div>` : ''}
           <div class="kv-row"><span style="color:var(--ink-2);">Type</span><strong>${esc(ev.type)}</strong></div>
-          ${ev.type==='Wedding' ? `<div class="kv-row"><span style="color:var(--ink-2);">Band</span><strong style="text-align:right;">${ev.band? esc(ev.band) : `<span style="color:var(--ink-3);font-weight:500;">${isAdmin?'Not set':'TBD'}</span>`}${ev.bandSize?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(String(ev.bandSize))} piece${Number(ev.bandSize)===1?'':'s'}</span>`:''}</strong></div>` : ''}
+          ${isWeddingType(ev.type) ? `<div class="kv-row"><span style="color:var(--ink-2);">Band</span><strong style="text-align:right;">${ev.band? esc(ev.band) : `<span style="color:var(--ink-3);font-weight:500;">${isAdmin?'Not set':'TBD'}</span>`}${ev.bandSize?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(String(ev.bandSize))} piece${Number(ev.bandSize)===1?'':'s'}</span>`:''}</strong></div>` : ''}
           <div class="kv-row"><span style="color:var(--ink-2);">${ICO.clock} Date &amp; Time</span><strong class="u-mono">${fmtDate(ev.date)} · ${fmtTimeRange(ev.time, ev.endTime)}</strong></div>
           <div class="kv-row">
             <span style="color:var(--ink-2);">${ICO.pin} Venue</span>
@@ -8436,7 +8480,7 @@ function renderContactCopyRow(c, ev){
 // filled in at app.aspmgmt.com/form/. The server (gig-form) pours the answers into this gig's Gig Info and keeps
 // all of them on ev.clientForm; the questions per kind of gig live in supabase/functions/_shared/gigform.ts.
 // Concerts get no form.
-const gigHasClientForm = ev=>!!ev && ev.type!=='Concert' && !ev.unpaid;
+const gigHasClientForm = ev=>!!ev && !/concert/i.test(String(ev.type||'')) && !ev.unpaid;   // same rule as formKindFor (gigform.ts)
 function renderClientFormBlock(ev, isAdmin){
   if(!gigHasClientForm(ev)) return '';
   const cf = ev.clientForm;
@@ -8849,9 +8893,10 @@ function renderEditEventFormOverlay(){
       <div class="sheet-body">
         <div class="field-row">
           ${!ev.unpaid? `<div class="field"><label>Client Name</label><input data-field="clientName" value="${esc(f.clientName!==undefined?f.clientName:(ev.clientName||''))}"/></div>`:''}
-          <div class="field"><label>Event Type</label><select class="edit-event-type-select">${typeList.map(t=>`<option ${type===t?'selected':''}>${esc(t)}</option>`).join('')}${!typeList.includes(type)?`<option selected>${esc(type)}</option>`:''}</select></div>
+          ${ev.unpaid ? `<div class="field"><label>Event Type</label><select class="edit-event-type-select">${typeList.map(t=>`<option ${type===t?'selected':''}>${esc(t)}</option>`).join('')}${!typeList.includes(type)?`<option selected>${esc(type)}</option>`:''}</select></div>`
+            : `<div class="field"><label>Event Type</label><input data-field="type" list="event-type-list-edit" value="${esc(type||'')}" maxlength="60" autocomplete="off"/><datalist id="event-type-list-edit">${EVENT_TYPES.map(t=>`<option value="${esc(t)}"></option>`).join('')}</datalist></div>`}
         </div>
-        ${type==='Wedding'? renderBandFieldsSection(f, ev) : ''}
+        ${isWeddingType(type)? renderBandFieldsSection(f, ev) : ''}
         ${!ev.unpaid? `<div class="field-row">
           <div class="field"><label>Client Email</label><input data-field="clientEmail" value="${esc(f.clientEmail!==undefined?f.clientEmail:(ev.clientEmail||''))}"/></div>
           <div class="field"><label>Client Phone</label><input data-field="clientPhone" value="${esc(f.clientPhone!==undefined?f.clientPhone:(ev.clientPhone||''))}"/></div>
@@ -9394,7 +9439,7 @@ function renderContractBuilderModal(){
         </div>
         <div class="field-row">
           <div class="field"><label>State</label><input data-contract-field="snapshot.state" value="${esc(c.snapshot.state||'')}"/></div>
-          ${!isCreative? `<div class="field"><label>Occasion</label><input data-contract-field="snapshot.occasion" data-testid="contract-occasion" list="contract-occasions" data-render-on-change value="${esc(c.snapshot.occasion||'')}" placeholder="e.g. Wedding, Purim Party, Bar Mitzvah"/><datalist id="contract-occasions">${STANDARD_HOURS.map(([k])=>`<option value="${esc(k)}"></option>`).join('')}</datalist></div>` : ''}
+          ${!isCreative? `<div class="field"><label>Occasion</label><input data-contract-field="snapshot.occasion" data-testid="contract-occasion" list="contract-occasions" data-render-on-change value="${esc(c.snapshot.occasion||'')}" placeholder="e.g. Wedding, Purim Party, Bar Mitzvah"/><datalist id="contract-occasions">${EVENT_TYPES.map(k=>`<option value="${esc(k)}"></option>`).join('')}</datalist></div>` : ''}
         </div>
         ${!isCreative? `<div class="field"><label>Hours of Engagement</label><input data-contract-field="top.hoursOfEngagement" data-testid="contract-hours" data-focus-key="top.hoursOfEngagement" data-live value="${esc(c.hoursOfEngagement||'')}" placeholder="e.g. 5 hours"/></div>` : ''}
 
@@ -10444,12 +10489,9 @@ function renderPayeeProfileFormModal(){
         <div class="field"><label>Default Overtime Interval</label>
           <div class="chip-row">${['half_hour','15_min','hour'].map(iv=>`<button class="filter-chip ${(f.defaultOvertimeInterval||'half_hour')===iv?'sel':''}" data-action="pick-payee-overtime-interval" data-value="${esc(iv)}">${overtimeIntervalLabel(iv)}</button>`).join('')}</div>
         </div>
+        <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Fees and hours are on the Pricing page.</p>
         <div class="field-row">
-          <div class="field"><label>Standard Fee ($, optional)</label><input type="number" data-field="defaultFee" value="${esc(f.defaultFee||'')}" placeholder="prefills new contracts, never overwrites a known price"/></div>
-          <div class="field"><label>Standard Hours (optional)</label><input data-field="defaultHours" value="${esc(f.defaultHours||'')}" placeholder="e.g. 5 hours"/></div>
-        </div>
-        <div class="field-row">
-          <div class="field"><label>Standard Deposit ($, optional)</label><input type="number" data-field="defaultDepositAmount" value="${esc(f.defaultDepositAmount||'')}" placeholder="flat amount, e.g. 2000"/></div>
+          <div class="field"><label>Standard Deposit ($, optional)</label><input type="number" data-field="defaultDepositAmount" value="${esc(f.defaultDepositAmount||'')}" placeholder="flat amount (blank = 15%)"/></div>
           <div class="field"><label>— or Deposit (% of total)</label><input type="number" data-field="defaultDepositPercent" value="${esc(f.defaultDepositPercent||'')}" placeholder="% wins if both are set"/></div>
         </div>
         <div class="field"><label>Notes</label><textarea data-field="notes" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(f.notes||'')}</textarea></div>
@@ -10857,7 +10899,7 @@ function doSaveEditEvent(id){
     if(f.clientPhone!==undefined) p.clientPhone = f.clientPhone.trim();
   }
   if(f.type!==undefined) p.type = f.type;
-  if((p.type ?? ev.type)==='Wedding'){
+  if(isWeddingType(p.type ?? ev.type)){
     if(f.band!==undefined) p.band = f.band.trim()||null;
     if(f.bandSize!==undefined) p.bandSize = f.bandSize? Number(f.bandSize) : null;
   }
@@ -11394,7 +11436,7 @@ function doSubmitLead(){
   const price = isInternal ? 0 : (Number(f.price)||0);
   const commission = isInternal ? 0 : standardCommission(price, f.artistId);
   const typeList = isInternal ? INTERNAL_EVENT_TYPES : EVENT_TYPES;
-  const resolvedType = (f.type==='Other'? (f.customType||'').trim()||'Other' : f.type)||typeList[0];
+  const resolvedType = isInternal ? ((f.type==='Other'? (f.customType||'').trim()||'Other' : f.type)||typeList[0]) : (String(f.type||'').trim().slice(0,60) || 'Event');
   const ev = {
     id:newEventId(), artistId:f.artistId, type: resolvedType,
     unpaid: isInternal,
@@ -11412,8 +11454,8 @@ function doSubmitLead(){
       return { artistId:x.artistId, feeAmount:fee, aspCut:cut, netAmount:fee-cut };
     }),
     ...(f.mezumin && !isInternal ? { paymentMethod:'cash' } : {}), // Mezumin = paid in cash (owner 2026-10-14)
-    band: f.type==='Wedding' ? (f.band||'').trim()||null : null,
-    bandSize: f.type==='Wedding' && f.bandSize ? Number(f.bandSize) : null,
+    band: isWeddingType(f.type) ? (f.band||'').trim()||null : null,
+    bandSize: isWeddingType(f.type) && f.bandSize ? Number(f.bandSize) : null,
     log:[{ts:new Date().toISOString(), type:'system', text: isInternal? `${resolvedType} scheduled for ${artistById(f.artistId).name}.` : `Lead created for ${artistById(f.artistId).name} — client info entered by management.`}],
   };
   if(!isInternal && f.pasteNotes) ev.log.push({ts:new Date().toISOString(), type:'system', text:`From the pasted message: ${f.pasteNotes}`});
@@ -11715,7 +11757,7 @@ function bindGlobal(){
           [['address',v.address],['city',v.city],['state',v.state]].forEach(([k,val])=>{ target[k] = val; const inp = box.querySelector(`[data-field="${k}"]`); if(inp) inp.value = val; }); }
       }
       if(target===S.newLeadForm && key==='endTime') S.newLeadForm.endTimeManual = true;
-      if(target===S.newLeadForm && (key==='flightNeeded' || key==='date')){ applyStandardPricing(); renderPreservingFocus(); }
+      if(target===S.newLeadForm && (key==='flightNeeded' || key==='date' || (key==='type' && S.newLeadForm.kind!=='internal'))){ applyStandardPricing(); renderPreservingFocus(); }
       if(target===S.newLeadForm && key==='time' && !S.newLeadForm.endTimeManual){
         const endEl = el.closest('[data-form]')?.querySelector('[data-field="endTime"]');
         if(endEl) endEl.value = leadDefaultEndTime(S.newLeadForm);
@@ -11866,8 +11908,8 @@ function bindGlobal(){
       case 'open-event-from-day': S.dayListDate = null; openEvent(id); break;
       case 'open-artist': navigate('artist_detail', {artistDetailId:id}); break;
       case 'open-client': navigate('client_detail', {clientKey:id}); break;
-      case 'open-new-lead': closeAllOverlays(); S.newLeadForm={date:'',time:'19:00'}; S.showNewLead=true; render(); break;
-      case 'quick-add-event': closeAllOverlays(); S.newLeadForm={date:t.getAttribute('data-date'),time:'19:00'}; S.showNewLead=true; render(); break;
+      case 'open-new-lead': closeAllOverlays(); S.newLeadForm={date:'',time:'19:00',type:'Wedding'}; S.showNewLead=true; render(); break;
+      case 'quick-add-event': closeAllOverlays(); S.newLeadForm={date:t.getAttribute('data-date'),time:'19:00',type:'Wedding'}; S.showNewLead=true; render(); break;
       case 'open-block-time': closeAllOverlays(); S.blockTimeForm={}; S.showBlockTime=true; render(); break;
       case 'submit-block-time': doSubmitBlockTime(); break;
       case 'open-ask-ai': closeAllOverlays(); S.showAskAI=true; render(); break;
@@ -11882,7 +11924,7 @@ function bindGlobal(){
         else S.newLeadForm.additionalArtists.push({artistId:id, feeAmount:0});
         render(); break;
       }
-      case 'pick-booking-kind': { const kind = t.getAttribute('data-kind'); S.newLeadForm.kind = kind; S.newLeadForm.type = null; render(); break; }
+      case 'pick-booking-kind': { const kind = t.getAttribute('data-kind'); S.newLeadForm.kind = kind; S.newLeadForm.type = kind==='internal' ? null : 'Wedding'; render(); break; }
       case 'switch-to-outside-booking': { const carryDate = S.newLeadForm.date; closeAllOverlays(); S.newOutsideBookingForm={date:carryDate||''}; S.showNewOutsideBooking=true; render(); break; }
       case 'submit-lead': doSubmitLead(); break;
       case 'add-lead-charge': {
@@ -11900,16 +11942,8 @@ function bindGlobal(){
         S.newLeadForm.charges.splice(Number(t.getAttribute('data-idx')), 1);
         render(); break;
       }
-      case 'cal-prev':
-        if(S.calViewMode==='week') S.calDate.setDate(S.calDate.getDate()-7);
-        else if(S.calViewMode==='day') S.calDate.setDate(S.calDate.getDate()-1);
-        else S.calMonth.setMonth(S.calMonth.getMonth()-1);
-        render(); break;
-      case 'cal-next':
-        if(S.calViewMode==='week') S.calDate.setDate(S.calDate.getDate()+7);
-        else if(S.calViewMode==='day') S.calDate.setDate(S.calDate.getDate()+1);
-        else S.calMonth.setMonth(S.calMonth.getMonth()+1);
-        render(); break;
+      case 'cal-prev': calStep(-1); break;
+      case 'cal-next': calStep(1); break;
       case 'cal-today':
         S.calMonth = (()=>{const d=new Date(); d.setDate(1); return d;})();
         S.calDate = (()=>{const d=new Date(); d.setHours(0,0,0,0); return d;})();
@@ -11921,6 +11955,8 @@ function bindGlobal(){
         S.calViewMode = mode; render(); break;
       }
       case 'open-day-view': S.calViewMode='day'; S.calDate=new Date(t.getAttribute('data-date')+'T00:00:00'); render(); break;
+      case 'open-search-date': { const d = new Date(t.getAttribute('data-date')+'T00:00:00'); S.homeSearch = '';
+        navigate(isAdminUser(S.user) ? 'calendar' : crewUser() ? 'c_calendar' : 'a_calendar', { calViewMode:'day', calDate:d, calMonth:new Date(d.getFullYear(), d.getMonth(), 1) }); break; }
       case 'cal-filter': {
         const i = S.calArtistFilter.indexOf(id);
         if(i>-1) S.calArtistFilter.splice(i,1); else S.calArtistFilter.push(id);
@@ -12017,6 +12053,11 @@ function bindGlobal(){
       case 'filter-contracts-status': S.contractsStatusFilter = t.getAttribute('data-status'); render(); break;
       case 'add-payee-for-artist': { closeAllOverlays(); const ar = artistById(id); S.showPayeeProfileForm=true; S.editingPayeeProfileId=null; S.payeeStripeEmail=null; S.payeeStripeLink=null;
         S.payeeProfileForm = { artistId:id, entityName: ar ? ar.name : '', defaultOvertimeInterval:'half_hour', zelleActive:true }; render(); break; }
+      case 'pricing-add-type': { const inp = document.querySelector('[data-pricing-new-type]'); const name = (inp && inp.value || '').trim().slice(0,60);
+        if(!name){ toast('Type the event type first.', 'system'); break; }
+        const aid = t.getAttribute('data-artist'); PRICING[aid] = PRICING[aid] || {};
+        if(!PRICING[aid][name]){ PRICING[aid][name] = { fee:0, outOfTownFee:0, hours:0, note:' ' }; savePricing(); }
+        render(); break; }
       case 'open-payee-profile-form': S.showPayeeProfileForm=true; S.editingPayeeProfileId=id||null; S.payeeStripeEmail=null; S.payeeStripeLink=null; if(id && stripeReady()) refreshStripePayees(); S.payeeProfileForm = id? (()=>{ const p=getPayeeProfile(id); return p? {entityName:p.entityName, artistId:p.artistId, zelle:p.zelle, checkPayee:p.checkPayee, checkAddress:p.checkAddress, wireBankName:p.wireBankName, wireAccountName:p.wireAccountName, wireAccountNumber:p.wireAccountNumber, wireRoutingNumber:p.wireRoutingNumber, wireSwift:p.wireSwift, notes:p.notes, defaultOvertimeInterval:p.defaultOvertimeInterval, zelleRecipientLabel:p.zelleRecipientLabel, zelleInstructions:p.zelleInstructions, zelleActive:p.zelleActive, zelleQrDataUrl:p.zelleQrDataUrl, zelleQrUrl:p.zelleQrUrl||null} : {}; })() : {defaultOvertimeInterval:'half_hour', zelleActive:true};
       render(); break;
       case 'close-payee-profile-form': S.showPayeeProfileForm=false; S.payeeProfileForm={}; S.editingPayeeProfileId=null; render(); break;

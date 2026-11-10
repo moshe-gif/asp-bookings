@@ -98,9 +98,8 @@ def test_occasion_fills_standard_hours_unless_typed(live_server, page):
     b = page.locator('#contractBuilderOverlayHost .sheet')
     b.wait_for(state='visible')
     occ, hrs = b.locator('[data-testid="contract-occasion"]'), b.locator('[data-testid="contract-hours"]')
-    occ.fill("Concert"); occ.blur()
-    assert b.locator('[data-testid="contract-hours"]').input_value().startswith("2.5 hour show")
-    occ = b.locator('[data-testid="contract-occasion"]'); occ.fill("Wedding"); occ.blur()
+    # Owner 2026-11-10 ("use only this info"): weddings are 5 hours; anything else is agreed per event.
+    occ.fill("Wedding"); occ.blur()
     assert b.locator('[data-testid="contract-hours"]').input_value() == "5 hours"
     hrs = b.locator('[data-testid="contract-hours"]'); hrs.fill("6 hours"); hrs.blur()
     occ = b.locator('[data-testid="contract-occasion"]'); occ.fill("Bar Mitzvah"); occ.blur()

@@ -15,10 +15,10 @@ def test_band_fields_hidden_until_wedding_selected(live_server, page):
     band_input = page.locator('input[data-field="band"]')
     assert not band_input.is_visible(), "band field visible before Wedding is explicitly selected"
 
-    page.locator('[data-action="pick-event-type"]').select_option("Bar Mitzvah")
+    page.locator('[data-testid="lead-type"]').fill("Bar Mitzvah")
     assert not band_input.is_visible(), "band field visible for a non-Wedding event type"
 
-    page.locator('[data-action="pick-event-type"]').select_option("Wedding")
+    page.locator('[data-testid="lead-type"]').fill("Wedding")
     assert band_input.is_visible(), "band field did not appear after selecting Wedding"
     assert page.locator('input[data-field="bandSize"]').is_visible(), "band size field did not appear after selecting Wedding"
 
@@ -34,7 +34,7 @@ def test_band_fields_saved_and_shown_on_new_lead(live_server, page):
     page.locator('select[data-action="pick-artist"]').select_option("benny")
     page.locator('input[data-field="clientName"]').fill("Wedding Band Test Client")
     page.locator('input[data-field="date"]').fill("2027-06-15")
-    page.locator('[data-action="pick-event-type"]').select_option("Wedding")
+    page.locator('[data-testid="lead-type"]').fill("Wedding")
     page.locator('input[data-field="band"]').fill("Simcha Players")
     page.locator('input[data-field="bandSize"]').fill("5")
     submit_lead(page)
@@ -59,7 +59,7 @@ def test_band_fields_editable_and_hidden_for_other_types(live_server, page):
     page.locator('select[data-action="pick-artist"]').select_option("benny")
     page.locator('input[data-field="clientName"]').fill("Concert To Wedding Client")
     page.locator('input[data-field="date"]').fill("2027-07-01")
-    page.locator('[data-action="pick-event-type"]').select_option("Concert")
+    page.locator('[data-testid="lead-type"]').fill("Concert")
     submit_lead(page)
 
     sheet = page.locator(".sheet")
