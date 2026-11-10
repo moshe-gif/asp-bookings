@@ -168,9 +168,9 @@ async function quoteFor(r: Row, confirmationTokenId: string) {
   if (t.livemode !== (stripeMode() === "live")) return { error: "bad_payment_details" as const };
   const prev = t.payment_method_preview || {};
   const method = prev.type;
-  if (method !== "card" && method !== "us_bank_account") return { error: "unsupported_method" as const };
+  if (method !== "card" && method !== "us_bank_account") { console.error("client-pay unsupported method", method, prev.card?.wallet?.type || ""); return { error: "unsupported_method" as const }; }
   // Wallets are turned off on the page (their payment sheet shows a fixed amount before the fee is known).
-  if (method === "card" && prev.card?.wallet) return { error: "unsupported_method" as const };
+  if (method === "card" && prev.card?.wallet) { console.error("client-pay wallet card", prev.card.wallet?.type || ""); return { error: "unsupported_method" as const }; }
   const funding = method === "card" ? (prev.card?.funding || "unknown") : null;
   const fee = cardFeeCents(r.amount_cents, r.card_fee_bps, method, funding);
   return {

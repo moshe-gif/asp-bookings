@@ -159,7 +159,7 @@
         appearance:{ theme:'stripe', variables:{ colorPrimary:'#4C6FA5', fontFamily:'Inter, -apple-system, Segoe UI, Roboto, Arial, sans-serif', borderRadius:'8px' } },
       });
       // Wallets off: Apple/Google Pay show a fixed amount before the card's fee is known.
-      const pe = elements.create('payment', { layout:'tabs', wallets:{ applePay:'never', googlePay:'never' }, defaultValues:{ billingDetails:{ name:p.clientName||'' } } });
+      const pe = elements.create('payment', { layout:'tabs', wallets:{ applePay:'never', googlePay:'never', link:'never' }, defaultValues:{ billingDetails:{ name:p.clientName||'' } } });
       pe.on('ready', ()=>{ btn.disabled = false; });
       pe.mount(step.querySelector('#pay-element'));
       btn.onclick = async ()=>{
