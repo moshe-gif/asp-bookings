@@ -152,9 +152,12 @@ export async function gigCardFeeBps(sb: Sb, ev: Doc): Promise<number> {
 // online is ASP's (its own Stripe account, paid out to its main Mercury account) and the mercury
 // function splits each artist's share into their own Mercury account; otherwise each artist's own
 // Stripe account (Stripe Connect, above).
+// Owner decision 2026-11-09, confirmed 2026-11-12 (audit #10.2): ASP collects ALL client money -- card and bank
+// balances as well as Zelle -- and pays singers monthly. So this is a fixed rule now, not a setting anyone can
+// flip back; the per-artist Stripe Connect path below is no longer used for balances.
+// deno-lint-ignore no-unused-vars
 export async function payoutViaMercury(sb: Sb): Promise<boolean> {
-  const { data } = await sb.from("app_records").select("app_doc").eq("collection", "settings").eq("legacy_id", "org").maybeSingle();
-  return data?.app_doc?.value?.payoutVia === "mercury";
+  return true;
 }
 
 // Stripe's view of a connected account -> the stripe_payees status columns.

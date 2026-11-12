@@ -212,7 +212,9 @@ def test_settings_shows_the_mercury_bank_card(live_server, page):
     page.wait_for_function("() => window.S && S.mercuryStatus", timeout=20000)
     text = card.inner_text().lower()
     assert 'mercury' in text and ('not set up' in text or 'connected' in text)
-    assert card.locator('select[data-field="payoutVia"]').count() == 1
+    # Audit #10.2: balances always go to ASP (owner 2026-11-09) -- a fixed rule, no longer a setting to flip.
+    assert card.locator('select[data-field="payoutVia"]').count() == 0
+    assert 'balances paid online go to asp' in text
     assert not errors, f"console errors in the app: {errors}"
 
 

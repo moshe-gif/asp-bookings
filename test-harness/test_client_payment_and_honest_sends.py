@@ -31,7 +31,7 @@ def test_reminder_preview_never_uses_artist_login_email(live_server, page):
     preview.wait_for(state="visible")
     text = preview.inner_text()
     assert "@aspmanagement.com" not in text, f"preview tells the client to Zelle an app login email: {text}"
-    assert ("directly to" in text) or ("send to" in text) or ("scan the code" in text) or ("contact the office" in text), text
+    assert ("directly to" in text) or ("send to" in text) or ("with Zelle to" in text) or ("scan the code" in text) or ("contact the office" in text), text
     assert not errors, f"console errors: {errors}"
 
 

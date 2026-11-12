@@ -106,6 +106,28 @@ function persist(key, value, label){
     return { ok:false, error:e };
   }
 }
+// A load-time "additive defaults" migration (migrateContract, the project/external-event fills) changes
+// cached records mechanically. Sync used to read that as "unsent edits" and push this browser's old copy
+// over newer office changes on its next sign-in (2026-11-12 audit #3.3). For every record that was in step
+// with the server before the migration, the sync marker is moved to the migrated copy, so it stays "clean"
+// and the server's copy wins as usual. Real edits (marker already different) are untouched.
+// Ids a restored backup added, per shared collection: at the next sign-in only these (not new work) are
+// offered for upload, and the person confirms (audit #3.4).
+const RESTORED_IDS_KEY = 'asp_restored_ids';
+function restoredIdsFor(name){ try{ return new Set((JSON.parse(localStorage.getItem(RESTORED_IDS_KEY)||'{}'))[name] || []); }catch(e){ return new Set(); } }
+function clearRestoredIds(name){ try{ const m = JSON.parse(localStorage.getItem(RESTORED_IDS_KEY)||'{}'); if(m[name]){ delete m[name]; localStorage.setItem(RESTORED_IDS_KEY, JSON.stringify(m)); } }catch(e){} }
+function migrateKeepingSync(markerKey, records, migrateAll){
+  let marker = null;
+  try{ marker = JSON.parse(localStorage.getItem(markerKey)||'null'); }catch(e){}
+  const before = marker ? new Map(records.map(r=>[r.id, hashStr(canon(r))])) : null;
+  const changed = migrateAll();
+  if(changed && marker){
+    let touched = false;
+    records.forEach(r=>{ const b = before.get(r.id); if(b && marker[r.id]===b){ const a = hashStr(canon(r)); if(a!==b){ marker[r.id] = a; touched = true; } } });
+    if(touched){ try{ localStorage.setItem(markerKey, JSON.stringify(marker)); }catch(e){ console.error('could not save sync marker', markerKey, e); } }
+  }
+  return changed;
+}
 
 /* ============ SEED DATA ============ */
 function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
@@ -209,6 +231,29 @@ function seedProjects(){
   }
   return projects;
 }
+// Additive defaults for a project (load-time cache migration and every copy arriving from the server).
+function migrateProject(p){
+  let migrated = false;
+  if(!p.comments){ p.comments = []; migrated = true; }
+  if(!p.images){ p.images = []; migrated = true; }
+  if(!p.links){ p.links = []; migrated = true; }
+  if(p.dueDate === undefined){ p.dueDate = null; migrated = true; }
+  if(p.type==='Video'){ p.type='Music Video'; migrated = true; }
+  if(!p.people){ p.people = []; migrated = true; }
+  p.people.forEach(person=>{
+    if(person.kind===undefined){ person.kind = 'external'; migrated = true; }
+    if(person.email===undefined){ person.email = ''; migrated = true; }
+    if(person.phone===undefined){ person.phone = ''; migrated = true; }
+    if(person.refId===undefined){ person.refId = null; migrated = true; }
+  });
+  if(!p.financials){ p.financials = {income:[], expenses:[]}; migrated = true; }
+  if(p.recordingEventId===undefined){ p.recordingEventId = null; migrated = true; }
+  if(p.subtitle===undefined){ p.subtitle = ''; migrated = true; }
+  if(p.coverImage===undefined){ p.coverImage = null; migrated = true; }
+  if(!p.boardCards){ p.boardCards = buildDefaultBoardCards(); migrated = true; }
+  (p.tasks||[]).forEach(t=>{ if(t.assignedTo===undefined){ t.assignedTo = null; migrated = true; } });
+  return migrated;
+}
 const PROJECTS_LS_KEY = 'asp_mock_projects_v1';
 function loadProjects(){ try{ const raw = localStorage.getItem(PROJECTS_LS_KEY); if(raw) return JSON.parse(raw); }catch(e){} return null; }
 function saveProjects(){ const r = persist(PROJECTS_LS_KEY, PROJECTS, 'projects'); if(SHARED) SHARED.projects.schedule(); return r; }
@@ -218,27 +263,7 @@ let PROJECTS = loadProjects();
 if(!PROJECTS){ PROJECTS = []; saveProjects(); }
 else {
   PROJID = PROJECTS.reduce((max,p)=>{ const n=parseInt(String(p.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, PROJID);
-  let migrated = false;
-  PROJECTS.forEach(p=>{
-    if(!p.comments){ p.comments = []; migrated = true; }
-    if(!p.images){ p.images = []; migrated = true; }
-    if(!p.links){ p.links = []; migrated = true; }
-    if(p.dueDate === undefined){ p.dueDate = null; migrated = true; }
-    if(p.type==='Video'){ p.type='Music Video'; migrated = true; }
-    if(!p.people){ p.people = []; migrated = true; }
-    p.people.forEach(person=>{
-      if(person.kind===undefined){ person.kind = 'external'; migrated = true; }
-      if(person.email===undefined){ person.email = ''; migrated = true; }
-      if(person.phone===undefined){ person.phone = ''; migrated = true; }
-      if(person.refId===undefined){ person.refId = null; migrated = true; }
-    });
-    if(!p.financials){ p.financials = {income:[], expenses:[]}; migrated = true; }
-    if(p.recordingEventId===undefined){ p.recordingEventId = null; migrated = true; }
-    if(p.subtitle===undefined){ p.subtitle = ''; migrated = true; }
-    if(p.coverImage===undefined){ p.coverImage = null; migrated = true; }
-    if(!p.boardCards){ p.boardCards = buildDefaultBoardCards(); migrated = true; }
-    (p.tasks||[]).forEach(t=>{ if(t.assignedTo===undefined){ t.assignedTo = null; migrated = true; } });
-  });
+  const migrated = migrateKeepingSync('asp_sync_projects', PROJECTS, ()=>{ let m = false; PROJECTS.forEach(p=>{ if(migrateProject(p)) m = true; }); return m; });
   if(migrated) saveProjects();
 }
 function getProject(id){ return PROJECTS.find(p=>p.id===id); }
@@ -346,8 +371,7 @@ else {
   { const fake = ['weiss.family@example.com','events@continentalballroom.com'];
     const kept = OUTSIDE_BOOKINGS.filter(b=>!fake.includes(b.clientEmail));
     if(kept.length!==OUTSIDE_BOOKINGS.length){ OUTSIDE_BOOKINGS = kept; saveOutsideBookings(); } }
-  let anyObMigrated = false;
-  OUTSIDE_BOOKINGS.forEach(b=>{ if(migrateOutsideBooking(b)) anyObMigrated = true; });
+  const anyObMigrated = migrateKeepingSync('asp_sync_outside_bookings', OUTSIDE_BOOKINGS, ()=>{ let m = false; OUTSIDE_BOOKINGS.forEach(b=>{ if(migrateOutsideBooking(b)) m = true; }); return m; });
   if(anyObMigrated) saveOutsideBookings();
   OBID = OUTSIDE_BOOKINGS.reduce((max,b)=>{ const n=parseInt(String(b.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, OBID);
 }
@@ -800,8 +824,7 @@ function migrateContract(c){
 let CONTRACTS = loadContracts();
 if(!CONTRACTS){ CONTRACTS = []; }
 else {
-  let anyMigrated = false;
-  CONTRACTS.forEach(c=>{ if(migrateContract(c)) anyMigrated = true; });
+  const anyMigrated = migrateKeepingSync('asp_sync_contracts', CONTRACTS, ()=>{ let m = false; CONTRACTS.forEach(c=>{ if(migrateContract(c)) m = true; }); return m; });
   if(anyMigrated) saveContracts();
   CTID = CONTRACTS.reduce((max,c)=>{ const n=parseInt(String(c.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, CTID);
 }
@@ -1688,10 +1711,8 @@ function balancePayBlocker(ev){
     if(x.aspCut==null) return `${a?a.name:'An artist on this gig'}'s share isn't set on the gig.`;
     payees.push(p);
   }
-  // Balances paid to ASP and split through Mercury (Settings → Bank): no artist Stripe account needed (the server agrees).
-  if(ORG_SETTINGS.payoutVia==='mercury') return '';
-  const notReady = payees.find(p=>!stripePayeeActive(stripePayeeOf(p.id)));
-  if(notReady) return `${notReady.entityName||'A payee'} hasn't finished setting up online payouts (Settings → Payee Profiles).`;
+  // Balances always go to ASP and are split in the monthly payout (owner 2026-11-09, audit #10.2; the server
+  // agrees): no artist Stripe account needed.
   return '';
 }
 async function createBalancePayLink(ev){
@@ -2960,13 +2981,16 @@ function idNumber(id){ const n = parseInt(String(id).split('-').pop(), 10); retu
 // cfg: name, label, table, collection (app_records only), get(), set(list), saveLocal(),
 //      prefix ('CT-'), getCounter(), setCounter(n), sameRecord(a,b), remapRefs(Map oldId→newId)
 function createSharedCollection(cfg){
-  const st = { on:false, starting:false, synced:new Map(), rowIds:new Map(), timer:null, channel:null, flushing:false, subscribedOnce:false, lastResync:0 };
+  const st = { on:false, starting:false, synced:new Map(), rowIds:new Map(), timer:null, retryTimer:null, channel:null, flushing:false, subscribedOnce:false, lastResync:0, gen:0 };
   const markerKey = cfg.markerKey || ('asp_sync_' + cfg.name);
   const backupKey = cfg.backupKey || ('asp_presync_backup_' + cfg.name);
   const isApp = cfg.table === 'app_records';
   const loadMarker = ()=>{ try{ return JSON.parse(localStorage.getItem(markerKey)||'null'); }catch(e){ return null; } };
   const saveMarker = ()=>{ const m={}; st.synced.forEach((c,id)=>{ m[id]=hashStr(c); }); try{ localStorage.setItem(markerKey, JSON.stringify(m)); }catch(e){ console.error('could not save sync marker', cfg.name, e); } };
   const isDirty = r=>st.synced.get(r.id)!==canon(r);
+  // The server's copy gets the same additive defaults as the cache (audit #3.3 review): st.synced keeps the
+  // raw server canon, so a copy that needed them is uploaded once, built on the server's latest version.
+  const migrated = doc=>{ if(!cfg.migrate || !doc) return doc; const d = JSON.parse(JSON.stringify(doc)); cfg.migrate(d); return d; };
   const base = ()=>{ let q = supabaseClient.from(cfg.table); return q; };
   const rowOf = (id, doc)=> isApp ? { collection:cfg.collection, legacy_id:id, app_doc:doc } : { legacy_id:id, app_doc:doc };
   const bumpCounter = ()=>{ const max = cfg.get().reduce((m,r)=>Math.max(m, (idNumber(r.id)||0)+1), 1); if(cfg.getCounter() < max) cfg.setCounter(max); };
@@ -2985,9 +3009,10 @@ function createSharedCollection(cfg){
   async function start(){
     if(st.on || st.starting || !sharedSyncAllowed()) return;
     st.starting = true;
+    const gen = st.gen;   // a sign-out while starting ends this run (review of audit #3.2)
     try{
       const { rows, error } = await fetchAll();
-      if(!sharedSyncAllowed()) return;
+      if(!sharedSyncAllowed() || gen!==st.gen) return;
       if(error){ toast(`Could not load the shared ${cfg.label} — working from this browser's copy for now. ` + (error.message||''), 'system'); return; }
       const marker = loadMarker();
       if(!marker && cfg.get().length){ try{ localStorage.setItem(backupKey, JSON.stringify({ savedAt:new Date().toISOString(), records:cfg.get() })); }catch(e){} }
@@ -3003,33 +3028,49 @@ function createSharedCollection(cfg){
         return;
       }
       const known = marker || {};
-      const remote = new Map(rows.map(r=>[r.legacy_id, r.app_doc]));
+      const remote = new Map(rows.map(r=>[r.legacy_id, migrated(r.app_doc)]));
       st.synced = new Map(rows.map(r=>[r.legacy_id, canon(r.app_doc)]));
       st.rowIds = new Map(rows.filter(r=>r.id).map(r=>[r.id, r.legacy_id]));
       const taken = new Set([...remote.keys(), ...cfg.get().map(r=>r.id)]);
       const maxRemote = Math.max(1, ...[...remote.keys()].map(id=>(idNumber(id)||0)+1));
       if(cfg.getCounter() < maxRemote) cfg.setCounter(maxRemote);
       bumpCounter();
-      const byId = new Map(rows.map(r=>[r.legacy_id, r.app_doc]));
+      const byId = new Map(rows.map(r=>[r.legacy_id, remote.get(r.legacy_id)]));
       const remap = new Map();
       let uploaded = 0;
+      // Records the office doesn't have and this browser never shared: from a restored backup, an old cache,
+      // or made while signed out. Some may have been deleted by the office since, so the person confirms
+      // before they are uploaded (2026-11-12 audit #3.4); declined ones leave this browser (backup kept).
+      // Only records that came back from a restored backup, or everything when this browser has never synced
+      // at all -- never new work that simply hasn't reached the office yet (review of audit #3.4).
+      const restored = restoredIdsFor(cfg.name);
+      const neverShared = cfg.get().filter(r=>!remote.has(r.id) && !known[r.id] && (!marker || restored.has(r.id)));
+      let shareNew = true;
+      if(neverShared.length){
+        const names = neverShared.slice(0, 8).map(r=>r.id + (r.clientName ? ' ' + r.clientName : r.title ? ' ' + r.title : r.name ? ' ' + r.name : '')).join('\n');
+        shareNew = confirm(`This browser has ${neverShared.length} ${neverShared.length===1 ? cfg.one : cfg.label} the office doesn't have:\n\n${names}${neverShared.length>8 ? '\n…' : ''}\n\nShare ${neverShared.length===1 ? 'it' : 'them'} with the office? (Cancel removes ${neverShared.length===1 ? 'it' : 'them'} from this browser — choose Cancel if ${neverShared.length===1 ? 'it was' : 'they were'} deleted on purpose. A copy is kept in this browser's backup.)`);
+      }
+      const declined = [];
       for(const rec of cfg.get()){
         const shared = remote.get(rec.id);
         const lastServerHash = known[rec.id];
         const localHash = hashStr(canon(rec));
         if(!shared){
           if(lastServerHash && lastServerHash===localHash) continue;       // deleted elsewhere, no local edits → drop
-          byId.set(rec.id, rec); uploaded++; continue;                      // never synced, or edited since → keep & upload
+          if(!lastServerHash && !shareNew && neverShared.includes(rec)){ declined.push(rec); continue; } // the person said no
+          byId.set(rec.id, rec); uploaded++; continue;                      // new (confirmed), or edited since → keep & upload
         }
         if(lastServerHash){ if(lastServerHash!==localHash && canon(rec)!==canon(shared)) byId.set(rec.id, rec); continue; } // unsent local edits win
         if(canon(rec)===canon(shared)) continue;
         // Office settings: a browser that never synced this doc (e.g. an old cache from before the venue
         // list existed) must not overwrite the shared copy -- that is how the venues were wiped (2026-10-21).
         if(cfg.serverWinsUnsynced) continue;
-        if(cfg.sameRecord(rec, shared)){ byId.set(rec.id, rec); continue; } // same record, this browser's version wins once (backup kept)
+        if(cfg.sameRecord(rec, shared)) continue;                           // same record never synced here: the office's copy wins (audit #3.4)
         const newId = nextFreeId(taken); taken.add(newId);                   // a DIFFERENT record with the same id
         remap.set(rec.id, newId); byId.set(newId, { ...rec, id:newId }); uploaded++;
       }
+      if(declined.length){ try{ localStorage.setItem('asp_declined_' + cfg.name + '_' + Date.now(), JSON.stringify(declined)); }catch(e){} }
+      clearRestoredIds(cfg.name);
       cfg.set([...byId.values()]);
       if(remap.size) cfg.remapRefs(remap);
       bumpCounter();
@@ -3037,6 +3078,7 @@ function createSharedCollection(cfg){
       saveMarker();
       cfg.saveLocal();
       await flush();
+      if(gen!==st.gen) return;
       if(uploaded) toast(`Shared ${uploaded} ${uploaded===1 ? cfg.one : cfg.label} from this browser with the office.`, 'success');
       subscribe();
       render();
@@ -3058,6 +3100,10 @@ function createSharedCollection(cfg){
     if(!st.on) return;
     if(st.flushing){ schedule(); return; }
     st.flushing = true;
+    // A sign-out / Face ID relock (stop()) while this save is in flight starts a new generation. This run
+    // must then not touch the sync state or write the marker: it used to save a half-empty marker, and the
+    // next sign-in re-uploaded stale copies and brought back deleted records (2026-11-12 audit #3.2).
+    const gen = st.gen;
     try{
       const snap = cfg.get().map(r=>({ id:r.id, c:canon(r) })).filter(x=>st.synced.get(x.id)!==x.c);
       const isNew = x=>!st.synced.has(x.id);
@@ -3066,6 +3112,7 @@ function createSharedCollection(cfg){
       for(const [group, opts] of [[snap.filter(isNew), { onConflict:conflictKey, ignoreDuplicates:true }], [snap.filter(x=>!isNew(x)), { onConflict:conflictKey }]]){
         if(!group.length) continue;
         const { saved, failed } = await upsertRows(group.map(x=>rowOf(x.id, JSON.parse(x.c))), opts);
+        if(gen!==st.gen) return;
         saved.forEach(r=>{ if(r.id) st.rowIds.set(r.id, r.legacy_id); });
         const savedIds = new Set(saved.map(r=>r.legacy_id));
         group.forEach(x=>{ if(savedIds.has(x.id)) st.synced.set(x.id, x.c); });
@@ -3087,11 +3134,19 @@ function createSharedCollection(cfg){
         let q = base().delete().in('legacy_id', deletes);
         if(isApp) q = q.eq('collection', cfg.collection);
         const { error } = await q;
+        if(gen!==st.gen) return;
         if(error) problems.push('removing '+deletes.length+' ('+error.message+')');
         else deletes.forEach(id=>st.synced.delete(id));
       }
       saveMarker();
-      if(problems.length) toast(`Some ${cfg.label} could not be saved to the shared list (kept in this browser, will retry): ` + problems.slice(0,3).join('; '), 'system');
+      // Retry by itself (audit #3.1): a failed save used to wait for the next edit or app re-open, and a
+      // record left unsent for hours later overwrote everyone's newer changes to it.
+      clearTimeout(st.retryTimer);
+      if(problems.length){
+        if(!st.failing) toast(`Some ${cfg.label} could not be saved to the shared list (kept in this browser, retrying): ` + problems.slice(0,3).join('; '), 'system');
+        st.failing = true;
+        st.retryTimer = setTimeout(flush, 30000);
+      } else if(st.failing){ st.failing = false; toast(`The ${cfg.label} waiting to be saved are now shared with the office.`, 'success'); }
     } finally { st.flushing = false; }
   }
   function applyRemote(row){
@@ -3104,7 +3159,9 @@ function createSharedCollection(cfg){
     if(i>=0 && isDirty(list[i])) return false;                   // unsent local edits win
     if(st.synced.get(row.legacy_id)===c && i>=0) return false;   // our own save echoing back
     st.synced.set(row.legacy_id, c);
-    if(i>=0) list[i] = row.app_doc; else list.push(row.app_doc);
+    const doc = migrated(row.app_doc);
+    if(i>=0) list[i] = doc; else list.push(doc);
+    if(canon(doc)!==c) schedule();   // it needed the new defaults: save them once
     return true;
   }
   function afterRemoteChange(){ bumpCounter(); saveMarker(); cfg.saveLocal(); scheduleRemoteRender(); }
@@ -3136,8 +3193,9 @@ function createSharedCollection(cfg){
   async function resync(){
     if(!st.on || Date.now()-st.lastResync < 5000) return;
     st.lastResync = Date.now();
+    const gen = st.gen;
     const { rows, error } = await fetchAll();
-    if(error || !st.on) return;
+    if(error || !st.on || gen!==st.gen) return;
     const remoteIds = new Set(rows.map(r=>r.legacy_id));
     let changed = rows.map(applyRemote).some(Boolean);
     const before = cfg.get().length;
@@ -3150,11 +3208,21 @@ function createSharedCollection(cfg){
     flush();
   }
   function stop(){
-    clearTimeout(st.timer);
+    st.gen++; st.failing = false;
+    clearTimeout(st.timer); clearTimeout(st.retryTimer);
     if(st.channel && supabaseClient) supabaseClient.removeChannel(st.channel);
     st.channel = null; st.on = false; st.synced = new Map(); st.rowIds = new Map();
   }
-  async function flushAndStop(){ if(st.on){ clearTimeout(st.timer); try{ await flush(); }catch(e){} } stop(); }
+  // Wait for a save already in flight (up to 10 s) and then save what is left, before stopping -- flush()
+  // returns at once while another flush runs, so signing out could drop the last edit (audit #3.2).
+  async function flushAndStop(){
+    if(st.on){
+      clearTimeout(st.timer);
+      for(let i=0; st.flushing && i<100; i++) await new Promise(r=>setTimeout(r, 100));
+      try{ await flush(); }catch(e){}
+    }
+    stop();
+  }
   return { name:cfg.name, start, schedule, flush, resync, stop, flushAndStop, isDirty, get on(){ return st.on; } };
 }
 // Re-numbering a record must carry every reference to it along.
@@ -3187,7 +3255,7 @@ var SHARED = {
   contracts: createSharedCollection({ name:'contracts', label:'contracts', one:'contract', table:'app_records', collection:'contracts',
     get:()=>CONTRACTS, set:v=>{ CONTRACTS = v; }, saveLocal:()=>persist(CONTRACTS_LS_KEY, CONTRACTS, 'contracts'),
     prefix:'CT-', getCounter:()=>CTID, setCounter:n=>{ CTID = n; },
-    sameRecord:(a,b)=>a.leadId===b.leadId && a.createdAt===b.createdAt, remapRefs:map=>remapState(['contractBuilderId'], map) }),
+    sameRecord:(a,b)=>a.leadId===b.leadId && a.createdAt===b.createdAt, remapRefs:map=>remapState(['contractBuilderId'], map), migrate:migrateContract }),
   payee_profiles: createSharedCollection({ name:'payee_profiles', label:'payee profiles', one:'payee profile', table:'app_records', collection:'payee_profiles',
     get:()=>PAYEE_PROFILES, set:v=>{ PAYEE_PROFILES = v; }, fromSeed:()=>PAYEE_PROFILES_FROM_SEED || payeeProfilesSeedOnly(), saveLocal:()=>persist(PAYEE_PROFILES_LS_KEY, PAYEE_PROFILES, 'payee profiles'),
     prefix:'PP-', getCounter:()=>PPID, setCounter:n=>{ PPID = n; },
@@ -3195,13 +3263,13 @@ var SHARED = {
     remapRefs:map=>{ if(remapIn(CONTRACTS,'payeeProfileId',map)) saveContracts(); remapState(['editingPayeeProfileId'], map); } }),
   projects: createSharedCollection({ name:'projects', label:'projects', one:'project', table:'app_records', collection:'projects',
     get:()=>PROJECTS, set:v=>{ PROJECTS = v; }, saveLocal:()=>persist(PROJECTS_LS_KEY, PROJECTS, 'projects'),
-    prefix:'PR-', getCounter:()=>PROJID, setCounter:n=>{ PROJID = n; }, sameRecord:sameByCreated, remapRefs:map=>remapState(['projectId'], map) }),
+    prefix:'PR-', getCounter:()=>PROJID, setCounter:n=>{ PROJID = n; }, sameRecord:sameByCreated, remapRefs:map=>remapState(['projectId'], map), migrate:migrateProject }),
   invoices: createSharedCollection({ name:'invoices', label:'invoices', one:'invoice', table:'app_records', collection:'invoices',
     get:()=>CUSTOM_INVOICES, set:v=>{ CUSTOM_INVOICES = v; }, saveLocal:()=>persist(INVOICES_LS_KEY, CUSTOM_INVOICES, 'invoices'),
     prefix:'INV-', getCounter:()=>INVID, setCounter:n=>{ INVID = n; }, sameRecord:sameByCreated, remapRefs:map=>remapState(['invoiceDocId'], map) }),
   outside_bookings: createSharedCollection({ name:'outside_bookings', label:'external events', one:'external event', table:'app_records', collection:'outside_bookings',
     get:()=>OUTSIDE_BOOKINGS, set:v=>{ OUTSIDE_BOOKINGS = v; }, saveLocal:()=>persist(OUTSIDE_BOOKINGS_LS_KEY, OUTSIDE_BOOKINGS, 'external events'),
-    prefix:'OB-', getCounter:()=>OBID, setCounter:n=>{ OBID = n; }, sameRecord:sameByCreated,
+    prefix:'OB-', getCounter:()=>OBID, setCounter:n=>{ OBID = n; }, sameRecord:sameByCreated, migrate:migrateOutsideBooking,
     remapRefs:map=>{ let hit=false; DOCUMENTS.forEach(d=>{ if(d.subjectType==='outside' && map.has(d.subjectId)){ d.subjectId=map.get(d.subjectId); hit=true; } }); if(hit) saveDocuments(); remapState(['outsideBookingDetailId'], map);
       if(S.documentForm && map.has(S.documentForm.subjectId)) S.documentForm.subjectId = map.get(S.documentForm.subjectId); } }),
   documents: createSharedCollection({ name:'documents', label:'documents', one:'document', table:'app_records', collection:'documents',
@@ -4192,6 +4260,29 @@ function applyPendingLog(){
   PENDING_LOG.clear();
 }
 
+/* ============ UPDATE CHECK (2026-11-12 audit #14) ============
+   A phone or laptop that keeps the app open for days kept running the old release after a deploy. When the
+   app comes back on screen (and every 30 minutes) it asks the server -- a HEAD request, no download --
+   whether workspaces/asp.js changed since this page loaded; if so a bar offers Reload. It never reloads on
+   its own, so nothing being typed is lost. */
+let appScriptTag = null;
+async function checkForAppUpdate(){
+  if(S.updateReady || location.protocol!=='https:' && location.hostname!=='localhost' && location.hostname!=='127.0.0.1') return;
+  try{
+    const r = await fetch('workspaces/asp.js', { method:'HEAD', cache:'no-store' });
+    const tag = r.ok && (r.headers.get('etag') || r.headers.get('last-modified'));
+    if(!tag) return;
+    if(appScriptTag===null){ appScriptTag = tag; return; }
+    if(tag!==appScriptTag){ S.updateReady = true; render(); }
+  }catch(e){}
+}
+function renderUpdateBar(){
+  return S.updateReady ? `<div class="preview-banner" data-testid="update-bar"><span>A new version of ASP Bookings is ready.</span><button class="btn btn-sm btn-primary" data-action="reload-app">Reload</button></div>` : '';
+}
+checkForAppUpdate();
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') checkForAppUpdate(); });
+setInterval(checkForAppUpdate, 30*60*1000);
+
 /* ============ INSTALL PROMPT ============ */
 let deferredInstallPrompt = null;
 function isStandalone(){ return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; }
@@ -4573,6 +4664,7 @@ function appHtml(){
     <div class="shell">
       ${isAdmin ? renderRail() : ''}
       <div class="main">
+        ${renderUpdateBar()}
         ${S.previewFrom ? `<div class="preview-banner" data-testid="preview-banner"><span>Previewing <strong>${esc((artistById(S.user)||{}).name||'')}</strong>'s app · read-only, built from the office's copy of their gigs</span><button class="btn btn-sm" data-action="exit-preview">Exit preview</button></div>` : ''}
         ${isAdmin ? '' : renderArtistTopTabs()}
         <div class="topbar">
@@ -4728,7 +4820,7 @@ function portalNavItems(){ return crewUser() ? (isTravelCrew() ? TRAVEL_CREW_NAV
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.74'; // bump on every release so a phone can tell it has updated. v1.9.74: Settings shows an expired Gmail connection (Reconnect); only the CEO/COO can hand out CEO, COO or Bookkeeping; the owner can void a sent payout with a reason after cancelling it in Mercury. v1.9.73: Send contract on a draft opens its questions again; invoices ask the client's state (no card fee in CT/MA); a new browser's sample payee list can never overwrite the office's; record ids escaped everywhere. v1.9.72: typing Wedding in Edit Details shows the band fields. v1.9.71: search a date to open that day; swipe the calendar (days, weeks, months); the opener in the app's navy; v1.9.71: the Inbox says when email reading has stopped (e.g. AI credit ran out); v1.9.71: a day with a no-time gig no longer blanks its calendar month (January was missing); v1.9.71: event type is typed (3 suggestions); fees and hours only from the price list (old estimates and the $2,000 deposit default gone; deposits 15%); '45 minutes' counts as 45 minutes. v1.9.70: the price list -- a flat fee per singer x event type (+ out of town, hours, note); New Lead fills it (never over a typed price) and flags dates after Pesach. v1.9.69: Clients list (one client -> all their gigs, booked total, still owed; worked out from the gigs). v1.9.68: one singer profile page (contact, commission, Zelle/payee, rider, bio, photo; riders moved off Settings). v1.9.66: navigate buttons compact on a computer, big on a phone; a line mic icon instead of the photo. v1.9.65: a new gig never reuses a deleted gig's id (an old contract attached itself); dropdowns styled like the fields; This week leads with the singer. v1.9.64: the phone tab bar slides (press, drag the bubble, let go to open). v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.75'; // bump on every release so a phone can tell it has updated. v1.9.75: balances paid online always go to ASP (the owner's rule, no longer a setting); a Reload bar when a new version is out; failed saves retry by themselves; signing out mid-save can't bring back old copies; restored backups ask before sharing records with the office. v1.9.74: Settings shows an expired Gmail connection (Reconnect); only the CEO/COO can hand out CEO, COO or Bookkeeping; the owner can void a sent payout with a reason after cancelling it in Mercury. v1.9.73: Send contract on a draft opens its questions again; invoices ask the client's state (no card fee in CT/MA); a new browser's sample payee list can never overwrite the office's; record ids escaped everywhere. v1.9.72: typing Wedding in Edit Details shows the band fields. v1.9.71: search a date to open that day; swipe the calendar (days, weeks, months); the opener in the app's navy; v1.9.71: the Inbox says when email reading has stopped (e.g. AI credit ran out); v1.9.71: a day with a no-time gig no longer blanks its calendar month (January was missing); v1.9.71: event type is typed (3 suggestions); fees and hours only from the price list (old estimates and the $2,000 deposit default gone; deposits 15%); '45 minutes' counts as 45 minutes. v1.9.70: the price list -- a flat fee per singer x event type (+ out of town, hours, note); New Lead fills it (never over a typed price) and flags dates after Pesach. v1.9.69: Clients list (one client -> all their gigs, booked total, still owed; worked out from the gigs). v1.9.68: one singer profile page (contact, commission, Zelle/payee, rider, bio, photo; riders moved off Settings). v1.9.66: navigate buttons compact on a computer, big on a phone; a line mic icon instead of the photo. v1.9.65: a new gig never reuses a deleted gig's id (an old contract attached itself); dropdowns styled like the fields; This week leads with the singer. v1.9.64: the phone tab bar slides (press, drag the bubble, let go to open). v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -10201,11 +10293,7 @@ function renderMercuryCard(){
       ${st && st.lastRunAt ? `<span style="font-size:11.5px;color:var(--ink-3);">Last checked ${esc(new Date(st.lastRunAt).toLocaleString('en-US',{ month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }))}</span>` : ''}</div>
     ${st && st.lastError ? `<p style="font-size:11.5px;color:var(--warn-ink);margin:0 0 6px;overflow-wrap:anywhere;">${esc(st.lastError)}</p>` : ''}
     <p style="font-size:12.5px;color:var(--ink-3);margin:0 0 10px;">Money coming into Mercury shows in the Inbox and is matched to its gig. Each payment is saved with its split in Financials, and once a month Financials → Monthly Payouts sends each singer their total and the commission to the account below.${st && st.configured ? '' : ' Setup: <code>ops/MERCURY_SETUP.md</code>.'}</p>
-    <div class="field" style="max-width:420px;"><label>Balances paid online (Stripe) go to</label>
-      <select data-field="payoutVia" data-form="orgsettings">
-        <option value="" ${ORG_SETTINGS.payoutVia!=='mercury'?'selected':''}>Each artist's own Stripe account</option>
-        <option value="mercury" ${ORG_SETTINGS.payoutVia==='mercury'?'selected':''}>ASP, then split into singers' Mercury accounts</option>
-      </select></div>
+    <p style="font-size:12.5px;color:var(--ink-2);margin:0 0 10px;"><strong>Balances paid online go to ASP</strong>, like Zelle, and each singer's share is paid in the monthly payout (owner's rule, 2026-11-09).</p>
     ${accounts.length ? `<h4 style="margin:14px 0 6px;font-size:.95rem;">Accounts</h4>
       ${accounts.map(a=>`<div class="settings-row" style="flex-wrap:wrap;gap:8px;"><div style="min-width:0;flex:1 1 180px;"><h4 style="overflow-wrap:anywhere;">${esc(a.name||'Account')}</h4><p>${esc([a.kind, a.status].filter(Boolean).join(' · '))}</p></div>
         <select data-action="mercury-assign" data-id="${esc(a.account_id)}" style="max-width:100%;" ${S.mercuryBusy?'disabled':''}>
@@ -10408,13 +10496,16 @@ function doDownloadBackup(){
 function planRestore(file){
   if(!file || file.format!==BACKUP_FORMAT || !file.data || typeof file.data!=='object') return { error:'That file isn\'t an ASP Bookings backup.' };
   const steps = [];
-  Object.keys(file.data).filter(k=>k.startsWith('asp_') && k!==LAST_BACKUP_LS_KEY).forEach(k=>{
+  // Never the sync bookkeeping (markers, pre-sync backups, the seed flag): restored markers made restored
+  // records look already shared, so deleted ones came back for the whole office (2026-11-12 audit #3.4).
+  const syncKey = k=>/^asp_(sync_|events_synced$|presync_backup_|events_presync_backup$|payee_profiles_seed_only$|restored_ids$)/.test(k);
+  Object.keys(file.data).filter(k=>k.startsWith('asp_') && k!==LAST_BACKUP_LS_KEY && !syncKey(k)).forEach(k=>{
     const incoming = file.data[k];
     let local = null; try{ local = JSON.parse(localStorage.getItem(k)); }catch(e){ local = localStorage.getItem(k); }
     if(Array.isArray(incoming) && incoming.every(x=>x && typeof x==='object' && x.id!==undefined)){
       const have = new Set((Array.isArray(local)? local : []).map(x=>x.id));
       const add = incoming.filter(x=>!have.has(x.id));
-      if(add.length) steps.push({ key:k, merged:(Array.isArray(local)? local : []).concat(add), added:add.length });
+      if(add.length) steps.push({ key:k, merged:(Array.isArray(local)? local : []).concat(add), added:add.length, addedIds:add.map(x=>x.id) });
     } else if(local===null || local===undefined){
       steps.push({ key:k, merged:incoming, added:1, whole:true });
     }
@@ -10430,8 +10521,16 @@ function doRestoreFromFile(fileObj){
     if(plan.error){ toast(plan.error, 'system'); return; }
     if(!plan.steps.length){ toast('Nothing to restore — this browser already has everything in that file.', 'system'); return; }
     const summary = plan.steps.map(st=> st.whole ? `• ${st.key}: restore (none here yet)` : `• ${st.key}: add ${st.added} record${st.added===1?'':'s'}`).join('\n');
-    if(!confirm(`Restore from "${fileObj.name}"?\n\nThis only ADDS what this browser doesn't have — nothing here is changed or deleted.\n\n${summary}`)) return;
+    if(!confirm(`Restore from "${fileObj.name}"?\n\nThis only ADDS what this browser doesn't have — nothing here is changed or deleted. When you next sign in, you'll be asked before any restored record is shared with the office (records deleted since the backup stay deleted unless you say so).\n\n${summary}`)) return;
     for(const st of plan.steps){ const r = persist(st.key, st.merged, 'the restored data'); if(!r.ok) return; }
+    // Remember which shared records came from the backup: the next sign-in asks before sharing them (audit #3.4).
+    const nameOfKey = { [LS_KEY]:'events', [CONTRACTS_LS_KEY]:'contracts', [PAYEE_PROFILES_LS_KEY]:'payee_profiles', [PROJECTS_LS_KEY]:'projects',
+      [INVOICES_LS_KEY]:'invoices', [OUTSIDE_BOOKINGS_LS_KEY]:'outside_bookings', [DOCUMENTS_LS_KEY]:'documents', [TRAVEL_REQUESTS_LS_KEY]:'travel_requests' };
+    try{
+      const m = JSON.parse(localStorage.getItem(RESTORED_IDS_KEY)||'{}');
+      plan.steps.forEach(st=>{ const n = nameOfKey[st.key]; if(n && st.addedIds) m[n] = [...new Set([...(m[n]||[]), ...st.addedIds])]; });
+      localStorage.setItem(RESTORED_IDS_KEY, JSON.stringify(m));
+    }catch(e){}
     location.reload();
   };
   reader.readAsText(fileObj);
@@ -12132,6 +12231,7 @@ function bindGlobal(){
       case 'close-itinerary': S.showItinerary=false; S.itineraryEventId=null; render(); break;
       case 'itinerary-overlay-close': if(e.target===t) { S.showItinerary=false; S.itineraryEventId=null; render(); } break;
       case 'print-itinerary': window.print(); break;
+      case 'reload-app': location.reload(); break;
       case 'open-new-invoice': closeAllOverlays(); S.newInvoiceForm={items:[]}; S.showNewInvoice=true; render(); break;
       case 'add-invoice-item': {
         const f = S.newInvoiceForm; const label=(f.itemLabel||'').trim(); const amt=Number(f.itemAmount);
