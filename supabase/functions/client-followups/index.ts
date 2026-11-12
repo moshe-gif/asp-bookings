@@ -30,6 +30,7 @@ import { clientOwedCentsOf, depositCentsOf, gigContracts } from "../_shared/conn
 import { paymentOptionsHtml, depositZelle, balanceZelle, officePhone } from "../_shared/payblock.ts";
 import { createTemplates360, sendTemplate, waNumber } from "../_shared/whatsapp.ts";
 import { formKindFor, sendGigForm } from "../_shared/gigform.ts";
+import { readAllRows } from "../_shared/db.ts";
 
 const DAY = 86_400_000;
 const EVERY_DAYS = 7;
@@ -99,10 +100,11 @@ Deno.serve(async (req) => {
   const singersOf = (e: Row) => [e.artist_id || e.app_doc?.artistId, ...(((e.app_doc || {}).additionalArtists || []).map((x: Row) => x?.artistId))].filter(Boolean).map(String);
   const singerNames = (e: Row) => singersOf(e).map((r) => nameOf(r)).filter(Boolean).join(" & ") || "your event";
   const onceKinds = ["deposit_confirmed", "contract_sent", "balance_paid", "gig_reminder", "flight_reminder", "office_signed", "office_deposit", "office_balance", "gig_form", "gig_form_wa", "office_payouts", "gig_form_nudge", "gig_sheet", "thank_you", "singer_week", "office_unpaid", "cash_confirm", "cash_dayof", "office_report"];
-  const { data: doneRows } = await sb.from("client_followups").select("event_legacy_id, kind, ref").in("kind", onceKinds).eq("ok", true).limit(20000);
+  // Every row, paged (audit #2): a capped read forgot the newest sends and they went out again.
+  const doneRows = await readAllRows(() => sb.from("client_followups").select("event_legacy_id, kind, ref").in("kind", onceKinds).eq("ok", true));
   const done = new Set((doneRows || []).map((d: Row) => `${d.kind}|${d.event_legacy_id}|${d.ref || ""}`));
   // When each gig's form was really sent (not the 'baseline' rows for gigs from before the form existed).
-  const { data: formRows } = await sb.from("client_followups").select("event_legacy_id, sent_at").eq("kind", "gig_form").neq("sent_to", "baseline").limit(5000);
+  const formRows = await readAllRows(() => sb.from("client_followups").select("event_legacy_id, sent_at").eq("kind", "gig_form").neq("sent_to", "baseline"));
   const formSentAt = new Map((formRows || []).map((f: Row) => [f.event_legacy_id, Date.parse(f.sent_at)]));
   const results: Row[] = [];
   const once = async (kind: string, gig: string, ref: string, to: string, template: string, params: string[]) => {
@@ -323,10 +325,12 @@ Deno.serve(async (req) => {
   const notices = results.splice(0);
   if (!dryRun && fromCron) await createTemplates360().catch(() => null);   // submit any template Meta doesn't have yet
 
-  const { data: logs } = await sb.from("client_followups").select("event_legacy_id, kind, sent_at").eq("ok", true)
-    .order("sent_at", { ascending: false }).limit(5000);
+  // Last send per gig and kind, for the weekly / two-weekly reminders. Every row of the last 90 days, paged
+  // (audit #2) -- the longest cadence is 2 weeks, so older rows can't change the answer.
+  const since = new Date(Date.now() - 90 * 86400000).toISOString();
+  const logs = await readAllRows<Row>(() => sb.from("client_followups").select("id, event_legacy_id, kind, sent_at").eq("ok", true).gte("sent_at", since));
   const lastSent = new Map<string, number>();
-  for (const l of logs || []) { const k = `${l.event_legacy_id}|${l.kind}`; if (!lastSent.has(k)) lastSent.set(k, Date.parse(l.sent_at)); }
+  for (const l of logs) { const k = `${l.event_legacy_id}|${l.kind}`, t = Date.parse(l.sent_at); if (!(lastSent.get(k)! >= t)) lastSent.set(k, t); }
 
   const planned: Row[] = [];
   for (const e of events || []) {
