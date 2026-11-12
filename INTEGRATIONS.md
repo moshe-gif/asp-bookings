@@ -10,12 +10,12 @@
 > below (Firestore, droplets, the proxy) describe the kit's options, not what ASP Bookings uses.
 
 ## Status in this app (ASP Bookings) — keep current
-| Capability | How it's done here | Setup doc | Status (2026-10-10) |
+| Capability | How it's done here | Setup doc | Status (checked 2026-11-12) |
 |---|---|---|---|
 | Sign-in | Supabase Auth: passkeys + emailed one-time code, from office@aspmgmt.com via Google SMTP | §4 below | **Live** |
 | Client email (contracts, confirmations, reminders, travel requests) | `send-contract-email` Edge Function → Google Apps Script mail relay | `ops/SEND_CONTRACT_SETUP.md` | **Live** (admin-only) |
 | Client e-signature (contracts signed online, no login) | `contract-sign` Edge Function (public, token-gated) + `frontend/sign/` | `ops/CONTRACT_SIGN_SETUP.md` | **Live** (2026-10-13) |
-| Client online payments (Stripe: card + ACH, credit-card fee) | `client-pay` (public, token-gated), `stripe-webhook` (signature-gated), `stripe-status` + `frontend/sign/pay.js`, `frontend/pay/` | `ops/STRIPE_SETUP.md` | **Built, waiting on Stripe keys** (2026-10-13) |
+| Client online payments (Stripe: card + ACH, credit-card fee) | `client-pay` (public, token-gated), `stripe-webhook` (signature-gated), `stripe-status` + `frontend/sign/pay.js`, `frontend/pay/` | `ops/STRIPE_SETUP.md` | **Live** (live-mode keys; checked 2026-11-04) |
 | Bank (Mercury): money in, each payment's split, monthly payouts (singers + commission) | `mercury` (cron + admin), Settings → Bank (Mercury), Financials → Monthly Payouts | `ops/MERCURY_SETUP.md` | **Connected, watch-only** (token set; `MERCURY_LIVE` unset; 0078 applied 2026-11-04) |
 | Video library (private since 0069: signed-in owner / Ilan / crew; bulk upload to Supabase Storage, resumable via tus-js-client; signed file links) | app → Videos (browsed in the app; `frontend/videos/index.html` standalone copy), migrations 0068, 0069 | — | **Live** (2026-10-28) |
 | Video library → Google Drive backup (office@aspmgmt.com, scope drive.file; reuses the Gmail OAuth client + `gmail-oauth-callback`) | `library-drive-backup` (cron every 10 min), migration 0074 | GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_REDIRECT_URI, CRON_SECRET | **Built** (2026-10-29); needs the owner to press Connect Google Drive |
@@ -23,8 +23,10 @@
 | Crew: social media + videographer (calendar without money, videographer requests over WhatsApp, confirm in the app) | `supabase/functions/crew`, `staff-welcome` (creates the sign-in), migration 0069 | `WHATSAPP_CREW_TEMPLATE` (optional: an approved template name; otherwise plain text) | **Live** (2026-10-28); WhatsApp in test mode |
 | QuickBooks invoices + payment webhook | `qbo-*` Edge Functions | `ops/QUICKBOOKS_SETUP.md` | **Built, not connected** (client ID empty). Complete the go-live checklist (2026-10-09 audit W2-1) before connecting |
 | Google Calendar holds | `gcal-*` Edge Functions | `ops/GOOGLE_CALENDAR_SETUP.md` | **Built, not connected**; holds also stay paused until the app passes the gig's `events` row id (gigs are shared since 2026-10-10; the hold code still checks for a uuid — audit 4.5) |
-| Gmail (Zelle notice matching) | `gmail-*` Edge Functions | `ops/GMAIL_SETUP.md` | **Built, not connected** |
+| Gmail reading (payment emails + office inbox → Inbox / Money in) | `inbox-scan` (cron every 10 min; an AI model classifies each email), `gmail-*` Edge Functions | `ops/GMAIL_SETUP.md`, `ANTHROPIC_API_KEY` | **Live** for office@ and billing@ (the singers' payment inboxes are added but not connected). When reading stops (AI credit, expired Google connection) the Inbox shows a banner and the office gets one WhatsApp |
 | Flight status | `flightaware-status` Edge Function (on-demand check from the event sheet / travel request) | `ops/FLIGHTAWARE_SETUP.md` | **Live when `FLIGHTAWARE_API_KEY` is set**; no automatic polling/email yet |
+| **Test mode** (nothing reaches a client or singer) | Edge secrets `EMAIL_LIVE`, `WHATSAPP_LIVE`, `MERCURY_LIVE`: unless exactly `yes`, email goes to `TEST_EMAIL_TO` (+ `TEST_EMAIL_ALLOW` staff), WhatsApp to `TEST_WHATSAPP_TO` (+ allow list), and Mercury approvals only record what would move. Enforced in `_shared/mail.ts`, `_shared/whatsapp.ts`, `_shared/mercury.ts` -- the only send paths | owner sets them via `supabase/set-secret.sh` | **On** (none set to `yes`, 2026-11-12) |
+| **Scheduled jobs** (pg_cron in the live DB) | `inbox-scan` every 10 min · `deposit-confirmations` every 10 min (client-followups, deposit/form notices) · `client-followups` daily 14:00 UTC (reminders, weekly singer email, reports) · `library-drive-backup` every 10 min · `mercury-sync` every 10 min. Each calls its function with the `x-cron-secret` header | `supabase/README.md` | **Live**; the definitions live only in the DB today (moving into a migration is planned) |
 | Data | Gigs: shared `events` table; contracts, payees, projects, invoices, external events, documents, travel: shared `app_records` (live sync). office settings + pricing: shared `app_records` (`settings`). artist roster: Supabase `artists`. Personal preferences: per-browser localStorage | CLAUDE.md "Where data lives" | Gigs **live** (2026-10-10); other records **live** (2026-10-11) |
 
 ---

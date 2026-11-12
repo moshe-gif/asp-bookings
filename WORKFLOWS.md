@@ -1,9 +1,10 @@
 # Workflows & Automation Spec — ASP Bookings
 
 > The rules for every automated email/notification ASP Bookings sends or should send. What is
-> actually live today is in INTEGRATIONS.md "Status in this app": client emails (contracts,
-> confirmations, reminders, travel requests) really send through `send-contract-email`; anything
-> marked automatic/scheduled below is not built yet unless that table says so.
+> actually live today is in INTEGRATIONS.md "Status in this app". **Scheduled jobs DO run now**
+> (since 2026-10-26; see the "Scheduled jobs" row there): deposit and form notices every 10 minutes,
+> reminders / the weekly singer email / reports daily -- all in TEST MODE until the owner goes live.
+> Sections below written before that ("not built", "no cron") describe the original plan.
 
 ---
 

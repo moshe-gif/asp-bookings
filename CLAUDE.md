@@ -7,13 +7,13 @@
 > facts section is the owner's standing rules. Where a generic rule names something this repo
 > doesn't have — a proxy, SFTP — the facts section wins.)
 
-## This repo — facts (keep current; last verified 2026-10-09)
+## This repo — facts (keep current; last verified 2026-11-12)
 - **What it is:** ASP Bookings, the booking/ops app for ASP Management — live at
   https://app.aspmgmt.com. GitHub `moshe-gif/asp-bookings` — **the repo is PUBLIC**, and so is
   everything under `frontend/`. Never commit client personal data, bank/account numbers, secrets,
   or an audit that describes unfixed security holes.
 - **Frontend:** `frontend/index.html` (24-line shell) + `frontend/styles.css` +
-  `frontend/workspaces/asp.js` (~8k lines, the whole ASP workspace) + `sw.js` + `manifest.json`.
+  `frontend/workspaces/asp.js` (~12.5k lines, the whole ASP workspace) + `sw.js` + `manifest.json`.
   Vanilla JS, no build step, no framework: global `S` state, `render()` rebuilds via `innerHTML`,
   delegated `data-action` handlers, `data-form`/`data-field` binding, `esc()` on ALL interpolation.
   `workspaces/vox.js` and a `shell.js` do **not** exist yet (planned second workspace; the
@@ -25,12 +25,15 @@
   - Auth: passkeys + emailed one-time code (see INTEGRATIONS.md §4). Passkeys are bound to
     `app.aspmgmt.com`. New staff are created in Supabase → Authentication → Add user; a trigger
     (`link_new_user_to_roster`) links them to their `admin_users`/`artists` row by email.
-  - DB: `supabase/migrations/` — **applied by hand** in Supabase → SQL Editor, strictly in number
-    order; add an `-- Applied: <date>` header line when run. There is no migration ledger yet.
+  - DB: `supabase/migrations/` — applied with `supabase/run-sql.sh <file>`, strictly in number order,
+    **after committing the file**; it records each one in the `schema_migrations` table (0093) with
+    its commit and exits non-zero on a database error. Also add an `-- Applied: <date>` header line.
   - Edge Functions: `supabase/functions/*`, sharing `functions/_shared/` (CORS locked to the
     app's origin, admin check, brand/app URL, pinned imports) — deploy with
-    `supabase/deploy-function.sh <name>|all` (dashboard paste can't bundle `_shared`). JWT
-    verification is on except for OAuth callbacks/webhooks (see each `ops/*_SETUP.md`).
+    `supabase/deploy-function.sh <name>|all` (dashboard paste can't bundle `_shared`). It deploys
+    only committed, pushed code and records slug + commit in `deployed_functions` (0093). JWT
+    verification is off for the `PUBLIC` list in that script (OAuth callbacks, webhooks, client
+    links, cron jobs) -- every one of those must authenticate the caller in its own code.
     Secrets live in Edge Function secrets, never in the frontend.
 - **Where data lives today:**
   - **Gigs/events: the shared Supabase `events` table** (since 2026-10-10). Loaded 2026-10-12 from
@@ -78,14 +81,21 @@ Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM
 | Event balance / artist payout | `eventBalance()` / `artistPayout()` (derived, next to each other) | same |
 | Contract money | `contractPaymentFigures()` (derived) | same |
 | Client e-signatures | Supabase `contract_sign_requests` (0052; server-written by `contract-sign`); the contract's Signed status is applied from it by `applyClientSignatures()` | done (2026-10-13) |
-| Client online payments | Supabase `payment_requests` (0056; payment columns server-written by `client-pay` / `stripe-webhook`); deposit received / invoice paid applied from it by `applyClientPayments()`; money in the `payments` ledger (source `stripe`) | built (2026-10-13); needs Stripe keys |
+| Client online payments | Supabase `payment_requests` (0056; payment columns server-written by `client-pay` / `stripe-webhook`); deposit received / invoice paid applied from it by `applyClientPayments()`; money in the `payments` ledger (source `stripe`) | live (Stripe live mode since 2026-11-04) |
 | Commission rate | `artists.commission_pct` (0042; 15%, Dovie 10%) via `commissionRateFor()`; prefills each gig's own `commission` | done (2026-10-12) |
 | Overtime | `suggestedOvertimeRate()`: fee ÷ booked hours per half hour, auto until typed (`overtime.manual`) | done (2026-10-12) |
 | Event statuses | `EVENT_PIPELINE` + `STATUS_GROUPS` (+ `statusMeta()` labels); contracts `CONTRACT_STATUSES`; `ev.bookingStatus` no longer written | done (2026-10-12) |
 | Views / nav | nav arrays + `pageTitle` + `renderView` + CSS hide-list | one `VIEWS` registry |
 | Brand / sender | Supabase `brand_config`: app via `getBrandConfig()`, email via `_shared/config.ts brandFor()` | done (2026-10-12) |
 | Sign-in email template | `supabase/templates/signin-code.html` (pasted to dashboard) | same |
-| Schema | `supabase/migrations/` (hand-applied) | same + ledger |
+| Office price list | `app_records` settings row `pricing` (fee per singer × event type; never code) | done (2026-11-10) |
+| Money received (for payouts) | `money_ledger` + `money_ledger_parts` (0078; each payment's split) | every way of recording a payment should write it (planned) |
+| Monthly payouts | `monthly_payouts` (0078/0079; claimed under one lock, Mercury idempotency key = payout id) | done (2026-11-04) |
+| Test mode (who may be emailed / WhatsApped; may money move) | Edge secrets `EMAIL_LIVE`, `WHATSAPP_LIVE`, `MERCURY_LIVE` (+ `TEST_*`), enforced only in `_shared/mail.ts` / `whatsapp.ts` / `mercury.ts` | same; never add a send path that bypasses them |
+| "Was this notice sent?" | `client_followups` rows with `ok=true` -- read with `readAllRows()` (`_shared/db.ts`), never a capped read | same |
+| Scheduled jobs | pg_cron `cron.job` (live DB only; listed in INTEGRATIONS.md) | a migration |
+| Schema | `supabase/migrations/` + `schema_migrations` table (0093) | done (2026-11-12) |
+| Deployed Edge Functions | `deployed_functions` table (slug + commit, 0093) | done (2026-11-12) |
 
 ## Conventions to reuse
 - `updateEvent(id, patch)` + `reportEventSave()` for event writes (concurrency check + visible
@@ -99,6 +109,16 @@ Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM
 - `[key,label]` registries + lookup helpers (`PAYMENT_METHODS`) instead of inline lists.
 - Idempotency markers on multi-step side effects (`qboInvoiceId`, `calendarHoldsStatus`).
 - Dated "why" comments on non-obvious decisions.
+- Server money: integer cents; the server decides what is charged; claims are advisory-locked
+  SECURITY DEFINER RPCs (`claim_payment_attempt`, `claim_month_payout`) with stable idempotency keys;
+  a webhook body is only a hint -- re-read the object from the provider.
+- A payment is matched to a gig with `_shared/matching.ts` (`unambiguousGig`): an amount alone is
+  never proof when two gigs owe the same; the AI's pick is a suggestion.
+- Reading a whole table in an Edge Function: `readAllRows()` (`_shared/db.ts`). The API returns at most
+  1,000 rows per request, so `.limit(20000)` silently stops at 1,000.
+- Every interpolation into HTML, attributes included (ids too), goes through `esc()`.
+- Identity columns (`admin_users.user_id`, `artists.user_id`) are set only by the sign-up trigger or
+  the service role; guard triggers (0076, 0094) refuse browser writes. Copy that pattern for new ones.
 - Shared gigs: compare documents with `canon()` (sorted keys) -- Postgres jsonb reorders keys, so
   `JSON.stringify` comparisons never match. Unsent ("dirty") local edits always win over Realtime /
   resync; don't bypass `saveEvents()` (it is what schedules the sync).
@@ -115,6 +135,12 @@ Wiring in any third-party capability (email, payments, maps, scheduled jobs, LLM
 - "mock" / "Demo Mode" names on real data → accurate names via a read-old/write-new shim (don't
   rename storage keys directly).
 - `fmtISO(new Date())` for "today" (UTC) → a local-date helper.
+- Edge Functions spreading `{...doc}` back into `events.app_doc` (read-modify-write of the whole gig)
+  → a patch of only their own keys. Meanwhile: add no new ones.
+- "Send, then insert a log row and ignore the error" → claim, send, then mark; always check the insert.
+- Seed literals holding real business data (payee profiles, roster) → server only.
+- Exact-day checks in scheduled jobs (`date === inThree`) → "due and not yet sent" windows.
+- Email-address patterns as identity rules (e.g. `test-*@`) → explicit flags.
 
 ---
 
