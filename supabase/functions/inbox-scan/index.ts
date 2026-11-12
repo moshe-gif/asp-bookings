@@ -12,6 +12,7 @@
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 import { gmailToken } from "../_shared/mail.ts";
+import { nameTokens, unambiguousGig } from "../_shared/matching.ts";
 import { sendTemplate, waNumber } from "../_shared/whatsapp.ts";
 import { clientOwedCentsOf, depositCentsOf } from "../_shared/connect.ts";
 // Pinned here, not in _shared/deps.ts, so only the functions that call Claude load the SDK.
@@ -132,7 +133,18 @@ Deno.serve(async (req) => {
   const runs: Any[] = [];
   for (const box of boxes) {
     const gmail = await gmailToken(sb, box);
-    if (!gmail) continue;   // added in Settings but never connected
+    if (!gmail) {
+      // Never connected: nothing to read. Connected once but the token no longer refreshes (revoked, password
+      // changed, Google's 7-day limit for apps in Testing): reading has stopped, so it is an error the office
+      // sees and gets the alert for (2026-11-12 audit #13.2) -- it used to be skipped silently.
+      const { data: had } = await sb.from("gmail_oauth_tokens").select("gmail_mailbox_id").eq("gmail_mailbox_id", box.id).maybeSingle();
+      if (had) {
+        const error = "the Gmail connection has expired -- reconnect this mailbox in Settings";
+        await sb.from("gmail_mailboxes").update({ last_scan_at: new Date().toISOString(), last_scan_error: error }).eq("id", box.id);
+        runs.push({ mailbox: box.email, error });
+      }
+      continue;
+    }
     const r = await scanMailbox(box, gmail.token);
     runs.push({ mailbox: box.email, ...r });
   }
@@ -180,12 +192,16 @@ Deno.serve(async (req) => {
       (seen || []).forEach((r: Any) => seenSet.add(r.gmail_message_id));
     }
     const todo = ids.filter((id) => !seenSet.has(id)).reverse().slice(0, MAX_PER_RUN);
-    let newest = since, failedAt = Infinity;
+    let newest = since, failedAt = Infinity, readFailed = false;
     const results: Any[] = [];
     for (const id of todo) {
+      if (readFailed) break;   // Gmail itself failed: stop here (oldest first, so the read position stays before it)
       let internal = 0;
       try {
         const msg = await g(`/messages/${id}?format=full`);
+        // A failed read (expired token, 404, rate limit) used to come back as an email with no body, which
+        // the AI filed as "other" -- dismissed for good (2026-11-12 audit #13.1). Now it is an error.
+        if (msg.error || !msg.payload) { readFailed = true; throw new Error(`Gmail: ${String(msg.error?.message || msg.error || "no message body").slice(0, 150)}`); }
         internal = Number(msg.internalDate) || 0;
         if (internal > newest) newest = internal;
         const parts = { text: [] as string[], html: [] as string[], attach: [] as Any[] };
@@ -194,6 +210,7 @@ Deno.serve(async (req) => {
         const content: Anthropic.Beta.BetaContentBlockParam[] = [];
         for (const a of parts.attach.filter((x) => ATTACH_TYPES.includes(x.mimeType) && x.size <= MAX_ATTACH_BYTES).slice(0, 2)) {
           const att = await g(`/messages/${id}/attachments/${a.id}`);
+          if (att.error) { readFailed = true; throw new Error(`Gmail attachment: ${String(att.error.message || att.error).slice(0, 150)}`); }
           if (!att.data) continue;
           const data = b64urlToStd(att.data);
           content.push(a.mimeType === "application/pdf"
@@ -256,7 +273,12 @@ Deno.serve(async (req) => {
     } else if ((out.pays === "deposit" || out.pays === "balance") && gig) {
       const d = due.get(gig)!;
       const due_cents = out.pays === "deposit" ? d.deposit : d.balance;
-      if (Number.isFinite(due_cents) && due_cents > 0) match = { kind: out.pays, ref: gig, due_cents, exact: !!amount_cents && amount_cents === due_cents };
+      // Exact only if no other gig is due the same amount, or the payer's name/memo singles this one out (audit #12).
+      const candidates = (evs || []).map((e: Any) => ({ id: e.legacy_id, due_cents: out.pays === "deposit" ? due.get(e.legacy_id)!.deposit : due.get(e.legacy_id)!.balance,
+        names: nameTokens(`${e.client_name || ""} ${e.app_doc?.clientName || ""}`) }));
+      const sure = !!amount_cents && amount_cents === due_cents && unambiguousGig(gig, amount_cents, candidates, `${x.payer || ""} ${x.memo || ""}`);
+      const note = !!amount_cents && amount_cents === due_cents && !sure ? "another gig is due the same amount -- check which one" : undefined;
+      if (Number.isFinite(due_cents) && due_cents > 0) match = { kind: out.pays, ref: gig, due_cents, exact: sure, ...(note ? { note } : {}) };
       else match = { kind: out.pays, ref: gig, due_cents: 0, exact: false, note: "already recorded as received (or nothing due)" };
     }
     return { amount_cents, payer: String(x.payer || "").slice(0, 200), method: String(x.method || "").slice(0, 60), date: String(x.date || "").slice(0, 10), memo: String(x.memo || "").slice(0, 300), bank_verified: !!bank, bank, match };

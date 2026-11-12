@@ -26,6 +26,7 @@ import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 import { artistShares, clientOwedCentsOf, depositCentsOf } from "../_shared/connect.ts";
 import { mercuryApi, mercuryCanMoveMoney, mercuryConfigured, mercuryError, mercurySandbox } from "../_shared/mercury.ts";
 import { sendRelayEmail } from "../_shared/mail.ts";
+import { nameTokens } from "../_shared/matching.ts";
 import { emailHeaderHtml } from "../_shared/config.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -40,7 +41,6 @@ const KIND_METHOD: Record<string, string> = {
 const usd = (c: number) => "$" + (c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const nyDate = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(d);
 const monthEnd = (m: string) => { const [y, mo] = m.split("-").map(Number); return new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10); };
-const nameTokens = (s: string) => String(s || "").toLowerCase().split(/[^a-z]+/).filter((t) => t.length >= 3 && !["the", "and", "llc", "inc", "family"].includes(t));
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return preflight(req);
@@ -132,8 +132,32 @@ Deno.serve(async (req) => {
   // A payout rejected or cancelled in Mercury: its money goes back into the next payout and its gigs
   // lose Paid Out.
   if (action === "void_payout") {
-    const { data: gigs, error } = await sb.rpc("void_month_payout", { p_id: String(body.id || ""), p_by: userId });
+    // Void frees the payout's money for the next Send, which gets a NEW Mercury idempotency key -- so voiding
+    // a payout Mercury still carries out pays the singer twice (2026-11-12 audit #6). Allowed only when no
+    // money can have moved: it failed or never reached Mercury; a commission send Mercury reports rejected or
+    // cancelled; or the owner forces it with a written reason (singer transfers have no status lookup in
+    // Mercury's API, so the owner confirms in Mercury first).
+    const { data: po } = await sb.from("monthly_payouts").select("id, kind, status, mercury_request_id, created_at").eq("id", String(body.id || "")).maybeSingle();
+    if (!po) return json({ ok: false, error: "No such payout." }, 404);
+    const stuck = po.status === "sending" && !po.mercury_request_id && Date.parse(po.created_at) < Date.now() - 15 * 60_000;
+    let safe = po.status === "failed" && !po.mercury_request_id || stuck;
+    let why = "";
+    if (!safe && po.status === "sent" && po.kind === "commission" && po.mercury_request_id) {
+      const r = await mercuryApi("GET", `/request-send-money/${encodeURIComponent(po.mercury_request_id)}`);
+      const st = String(r.data?.status || "");
+      safe = r.ok && (st === "rejected" || st === "cancelled");
+      why = r.ok ? `Mercury says this transfer is ${st || "unknown"}.` : `Couldn't check it with Mercury (${mercuryError(r)}).`;
+    }
+    const reason = String(body.reason || "").trim().slice(0, 300);
+    if (!safe) {
+      const { data: me } = await sb.from("admin_users").select("role").eq("user_id", userId).maybeSingle();
+      if (!(body.force === true && me?.role === "admin_ceo" && reason.length >= 5)) {
+        return json({ ok: false, error: `This payout may already have been paid. ${why} Cancel or reject it in Mercury first; then only the owner can void it, with a reason.`.replace(/\s+/g, " ") }, 409);
+      }
+    }
+    const { data: gigs, error } = await sb.rpc("void_month_payout", { p_id: po.id, p_by: userId });
     if (error) return json({ ok: false, error: error.message }, 500);
+    if (reason) await sb.from("monthly_payouts").update({ error: `Voided by the owner: ${reason}` }).eq("id", po.id);
     for (const g of gigs || []) {
       const { data: row } = await sb.from("events").select("app_doc").eq("legacy_id", g.event_legacy_id).maybeSingle();
       const doc = row?.app_doc;
@@ -226,11 +250,11 @@ Deno.serve(async (req) => {
     if (!r.ok && (r.status === 0 || r.status >= 500 || r.status === 429)) r = await call(req);
     if (!r.ok) {
       const msg = mercuryError(r);
-      await sb.from("monthly_payouts").update({ status: "failed", error: msg }).eq("id", p.id);
+      await sb.from("monthly_payouts").update({ status: "failed", error: msg }).eq("id", p.id).eq("status", "sending");
       return { ok: false, name: p.payee_name, error: msg };
     }
     await sb.from("monthly_payouts").update({ status: "sent", sent_at: new Date().toISOString(), destination: dest.name,
-      mercury_request_id: r.data?.requestId || r.data?.id || null }).eq("id", p.id);
+      mercury_request_id: r.data?.requestId || r.data?.id || null }).eq("id", p.id).eq("status", "sending");   // a void meanwhile stays voided
     if (p.kind === "share") { try { await sendStatement({ ...p, destination: dest.name }); } catch (err) { console.error("mercury statement", String(err)); } }
     return { ok: true, name: p.payee_name };
   }
