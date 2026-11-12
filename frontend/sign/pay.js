@@ -160,7 +160,14 @@
       });
       // Wallets off: Apple/Google Pay show a fixed amount before the card's fee is known.
       const pe = elements.create('payment', { layout:'tabs', wallets:{ applePay:'never', googlePay:'never', link:'never' }, defaultValues:{ billingDetails:{ name:p.clientName||'' } } });
-      pe.on('ready', ()=>{ btn.disabled = false; });
+      // If Stripe's card box can't draw (a content blocker, a lost connection), say so instead of leaving a blank
+      // box and a grey Continue (owner's phone, 2026-11-12) -- with Stripe's own reason, Reload, and Zelle below.
+      let ready = false;
+      const stuck = why => { if(ready) return; err.innerHTML = `The card form didn’t load${why?` (${esc(why)})`:''}. <button class="pay-link" type="button" id="pay-retry" style="margin:0;">Reload</button> — or pay with Zelle below.`;
+        const r = step.querySelector('#pay-retry'); if(r) r.onclick = ()=>location.reload(); };
+      pe.on('ready', ()=>{ ready = true; btn.disabled = false; err.textContent = ''; });
+      pe.on('loaderror', e=>stuck(e && e.error && e.error.message));
+      setTimeout(()=>stuck('it took too long — a content blocker can stop it'), 20000);
       pe.mount(step.querySelector('#pay-element'));
       btn.onclick = async ()=>{
         err.textContent = ''; btn.disabled = true; btn.textContent = 'Checking…';
