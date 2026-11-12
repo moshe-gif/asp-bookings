@@ -17,6 +17,7 @@ import { sendTemplate, waNumber } from "../_shared/whatsapp.ts";
 import { clientOwedCentsOf, depositCentsOf } from "../_shared/connect.ts";
 // Pinned here, not in _shared/deps.ts, so only the functions that call Claude load the SDK.
 import Anthropic from "npm:@anthropic-ai/sdk@0.130.0";
+import { timeout } from "../_shared/timeout.ts";
 
 const MAX_PER_RUN = 20;   // per mailbox
 const FIRST_RUN_DAYS = 2;
@@ -164,7 +165,7 @@ Deno.serve(async (req) => {
   return json({ ok: true, scanned: runs.reduce((n, r) => n + (r.scanned || 0), 0), mailboxes: runs });
 
   async function scanMailbox(box: Any, token: string): Promise<Any> {
-    const g = (path: string) => fetch(`${GMAIL}${path}`, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json());
+    const g = (path: string) => fetch(`${GMAIL}${path}`, { signal: timeout(30_000), headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json());
     const since = Number(box.last_internal_date) || (Date.now() - FIRST_RUN_DAYS * 86_400_000);
     // Not "category:primary": this Workspace inbox has tabs off, so that matches nothing. Skip the bulk categories instead.
     const q = box.mailbox_type === "artist_payment"

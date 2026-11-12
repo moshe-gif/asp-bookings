@@ -5,6 +5,7 @@
 // MERCURY_API_BASE (optional; https://api-sandbox.mercury.com/api/v1 for Mercury's sandbox),
 // MERCURY_LIVE (exactly "yes" lets an approved transfer move real money; until then approving one on
 // the real bank only records what would have moved -- the app's test mode, owner 2026-10-14).
+import { timeout } from "./timeout.ts";
 
 const PROD = "https://api.mercury.com/api/v1";
 
@@ -32,6 +33,7 @@ export async function mercuryApi(method: "GET" | "POST", path: string, body?: un
   if (!token) return { ok: false, status: 500, data: { error: "Mercury is not configured" } };
   try {
     const r = await fetch(`${base()}${path}`, {
+      signal: timeout(30_000),
       method,
       headers: { Authorization: `Bearer ${token}`, Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
       body: body ? JSON.stringify(body) : undefined,

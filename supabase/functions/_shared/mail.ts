@@ -8,6 +8,7 @@
 //  - otherwise the Google Apps Script relay (ops/apps-script-mail-relay.gs): RELAY_URL / RELAY_SECRET.
 // Returns ok (+ the provider's message id when there is one) or the error.
 import { brandFor } from "./config.ts";
+import { timeout } from "./timeout.ts";
 // deno-lint-ignore no-explicit-any
 type Sb = any;
 
@@ -32,7 +33,7 @@ export async function gmailToken(sb: Sb, box: { id: string; email: string }): Pr
   const clientId = Deno.env.get("GMAIL_CLIENT_ID"), clientSecret = Deno.env.get("GMAIL_CLIENT_SECRET");
   if (!clientId || !clientSecret) return null;
   const resp = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    signal: timeout(), method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: tok.refresh_token, grant_type: "refresh_token" }),
   });
   const t = await resp.json().catch(() => ({}));
@@ -73,10 +74,16 @@ export async function sendRelayEmail(sb: Sb, original: { to: string; subject: st
       "",
       b64(new TextEncoder().encode(msg.html)).replace(/(.{76})/g, "$1\r\n"),
     ].join("\r\n");
-    const resp = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
-      method: "POST", headers: { Authorization: `Bearer ${gmail.token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ raw: b64url(new TextEncoder().encode(mime)) }),
-    });
+    let resp: Response;
+    try {
+      resp = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+        signal: timeout(), method: "POST", headers: { Authorization: `Bearer ${gmail.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ raw: b64url(new TextEncoder().encode(mime)) }),
+      });
+    } catch (err) {
+      // No answer: it may have gone out, so don't try another sender (that could send it twice).
+      return { ok: false, error: "Gmail didn't answer: " + String(err) };
+    }
     const out = await resp.json().catch(() => ({}));
     if (resp.ok) return { ok: true, brandKey: brand.key, id: out.id };
     console.error("Gmail send failed; trying the next sender", out.error?.message || resp.status);
@@ -88,7 +95,7 @@ export async function sendRelayEmail(sb: Sb, original: { to: string; subject: st
     let resp: Response;
     try {
       resp = await fetch("https://api.resend.com/emails", {
-        method: "POST",
+        signal: timeout(), method: "POST",
         headers: { "Authorization": `Bearer ${resendKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ from, to: [msg.to], subject: msg.subject, html: msg.html, ...(brand.replyTo ? { reply_to: brand.replyTo } : {}) }),
       });
@@ -106,7 +113,7 @@ export async function sendRelayEmail(sb: Sb, original: { to: string; subject: st
   let resp: Response;
   try {
     resp = await fetch(relayUrl, {
-      method: "POST",
+      signal: timeout(), method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ secret: relaySecret, to: msg.to, subject: msg.subject, html: msg.html, fromName: brand.senderName, replyTo: brand.replyTo || undefined }),
     });

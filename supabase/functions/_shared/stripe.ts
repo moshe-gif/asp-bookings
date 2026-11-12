@@ -6,6 +6,7 @@
 import { serviceClient } from "./auth.ts";
 import { sendRelayEmail } from "./mail.ts";
 import { brandFor, emailHeaderHtml, gigArtistNames, viaAsp } from "./config.ts";
+import { timeout } from "./timeout.ts";
 
 export function stripeConfigured(): boolean {
   return !!(Deno.env.get("STRIPE_SECRET_KEY") && Deno.env.get("STRIPE_PUBLISHABLE_KEY"));
@@ -40,7 +41,7 @@ export async function stripeApi(method: "GET" | "POST", path: string, params?: R
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   }
   try {
-    const resp = await fetch(`https://api.stripe.com/v1${path}`, { method, headers, body });
+    const resp = await fetch(`https://api.stripe.com/v1${path}`, { method, headers, body, signal: timeout(40_000) });
     return { ok: resp.ok, status: resp.status, data: await resp.json().catch(() => ({})) };
   } catch (err) {
     return { ok: false, status: 502, data: { error: { message: String(err) } } };

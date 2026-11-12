@@ -16,6 +16,7 @@
 
 import { serviceClient } from "./auth.ts";
 import { appUrl } from "./config.ts";
+import { timeout } from "./timeout.ts";
 
 export type WaMessage =
   | { to: string; template: { name: string; lang?: string; params?: string[]; headerImage?: string; button?: string }; text?: undefined }
@@ -81,8 +82,8 @@ async function sendNow(msg: WaMessage): Promise<{ ok: boolean; error?: string; i
     if (resp) await new Promise((r) => setTimeout(r, Math.min(20, Number(resp!.headers.get("retry-after")) || 4 * attempt) * 1000));
     try {
       resp = via360
-        ? await fetch("https://waba-v2.360dialog.io/messages", { method: "POST", headers: { "D360-API-KEY": token, "Content-Type": "application/json" }, body: JSON.stringify(body) })
-        : await fetch(`https://graph.facebook.com/${version}/${phoneId}/messages`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        ? await fetch("https://waba-v2.360dialog.io/messages", { signal: timeout(), method: "POST", headers: { "D360-API-KEY": token, "Content-Type": "application/json" }, body: JSON.stringify(body) })
+        : await fetch(`https://graph.facebook.com/${version}/${phoneId}/messages`, { signal: timeout(), method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
     } catch (err) {
       return { ok: false, error: "could not reach WhatsApp: " + String(err) };
     }
@@ -98,7 +99,7 @@ async function sendNow(msg: WaMessage): Promise<{ ok: boolean; error?: string; i
 export async function setWebhook360(url: string, secret: string): Promise<{ ok: boolean; error?: string }> {
   const token = Deno.env.get("WHATSAPP_TOKEN");
   if (!token) return { ok: false, error: "WhatsApp isn't connected yet (WHATSAPP_TOKEN missing)." };
-  const r = await fetch("https://waba-v2.360dialog.io/v1/configs/webhook", { method: "POST",
+  const r = await fetch("https://waba-v2.360dialog.io/v1/configs/webhook", { signal: timeout(), method: "POST",
     headers: { "D360-API-KEY": token, "Content-Type": "application/json" }, body: JSON.stringify({ url, headers: { "x-asp-webhook": secret } }) });
   const out = await r.json().catch(() => ({}));
   return r.ok ? { ok: true } : { ok: false, error: `360dialog: ${out?.meta?.developer_message || out?.error?.message || r.status}` };
@@ -220,7 +221,7 @@ export async function createTemplates360(): Promise<Record<string, string>> {
       ...(branded ? [{ type: "FOOTER", text: "ASP Management" }] : []),
       ...(b ? [{ type: "BUTTONS", buttons: [{ type: "URL", text: b.text, url: appUrl() + b.url, ...(b.example ? { example: [b.example] } : {}) }] }] : []),
     ];
-    const r = await fetch("https://waba-v2.360dialog.io/v1/configs/templates", { method: "POST",
+    const r = await fetch("https://waba-v2.360dialog.io/v1/configs/templates", { signal: timeout(), method: "POST",
       headers: { "D360-API-KEY": token, "Content-Type": "application/json" },
       body: JSON.stringify({ name, category: "UTILITY", language: "en_US", allow_category_change: true, components }) });
     const j = await r.json().catch(() => ({}));
@@ -232,7 +233,7 @@ export async function createTemplates360(): Promise<Record<string, string>> {
 export async function templateStatus360(): Promise<Record<string, string>> {
   const token = Deno.env.get("WHATSAPP_TOKEN");
   if (!token) return {};
-  const r = await fetch("https://waba-v2.360dialog.io/v1/configs/templates?limit=100", { headers: { "D360-API-KEY": token } });
+  const r = await fetch("https://waba-v2.360dialog.io/v1/configs/templates?limit=100", { signal: timeout(), headers: { "D360-API-KEY": token } });
   const j = await r.json().catch(() => ({}));
   const out: Record<string, string> = {};
   for (const t of j?.waba_templates || j?.data || []) if (WA_TEMPLATES[t.name] || WA_BRANDED[t.name]) out[t.name] = String(t.status || "").toLowerCase();
@@ -244,12 +245,12 @@ export async function templateStatus360(): Promise<Record<string, string>> {
 export async function fetchMedia360(mediaId: string): Promise<{ ok: true; bytes: ArrayBuffer; mime: string } | { ok: false; error: string }> {
   const token = Deno.env.get("WHATSAPP_TOKEN");
   if (!token) return { ok: false, error: "WhatsApp isn't connected" };
-  const meta = await fetch(`https://waba-v2.360dialog.io/${encodeURIComponent(mediaId)}`, { headers: { "D360-API-KEY": token } });
+  const meta = await fetch(`https://waba-v2.360dialog.io/${encodeURIComponent(mediaId)}`, { signal: timeout(), headers: { "D360-API-KEY": token } });
   const j = await meta.json().catch(() => ({}));
   if (!meta.ok || !j?.url) return { ok: false, error: `WhatsApp no longer has this file (${j?.error?.message || meta.status})` };
   const u = new URL(String(j.url).replace(/\\/g, ""));
   if (u.hostname !== "lookaside.fbsbx.com") return { ok: false, error: "unexpected media host" };
-  const file = await fetch(`https://waba-v2.360dialog.io${u.pathname}${u.search}`, { headers: { "D360-API-KEY": token } });
+  const file = await fetch(`https://waba-v2.360dialog.io${u.pathname}${u.search}`, { signal: timeout(60_000), headers: { "D360-API-KEY": token } });
   if (!file.ok) return { ok: false, error: `download failed (${file.status})` };
   return { ok: true, bytes: await file.arrayBuffer(), mime: j.mime_type || file.headers.get("content-type") || "application/octet-stream" };
 }
