@@ -37,10 +37,15 @@ def test_admin_cannot_raise_own_power(live_server, page):
       const self = await sb.from('admin_users').update({ role: 'admin_ceo' }).eq('user_id', uid).select('role');
       const relink = await sb.from('admin_users').update({ user_id: uid }).eq('role', 'admin_coo').select('id');
       const add = await sb.from('admin_users').insert({ name: 'Harness Fake CEO', email: 'harness-fake-ceo@aspmgmt.com', initials: 'HF', role: 'admin_ceo' }).select('id');
+      // Audit #11 (0094): nor add a bookkeeping (money) login, nor attach a login to a singer row.
+      const addBk = await sb.from('admin_users').insert({ name: 'Harness Fake Bookkeeper', email: 'harness-fake-bk@aspmgmt.com', initials: 'HB', role: 'admin_bookkeeping' }).select('id');
+      if (!addBk.error && addBk.data && addBk.data[0]) await sb.from('admin_users').delete().eq('id', addBk.data[0].id);
+      const linkArtist = await sb.from('artists').insert({ name: 'Harness Fake Singer', legacy_id: 'harness-fake-singer', slot: 1, initials: 'HS', role: 'Singer', user_id: uid }).select('id');
+      if (!linkArtist.error && linkArtist.data && linkArtist.data[0]) await sb.from('artists').delete().eq('id', linkArtist.data[0].id);
       const mine = await sb.from('admin_users').select('role').eq('user_id', uid).maybeSingle();
-      return { self: !!self.error, relink: !!relink.error, add: !!add.error, role: mine.data && mine.data.role };
+      return { self: !!self.error, relink: !!relink.error, add: !!add.error, addBk: !!addBk.error, linkArtist: !!linkArtist.error, role: mine.data && mine.data.role };
     }""")
-    assert out == {"self": True, "relink": True, "add": True, "role": "admin_bookings"}, out
+    assert out == {"self": True, "relink": True, "add": True, "addBk": True, "linkArtist": True, "role": "admin_bookings"}, out
 
 
 def test_artist_cannot_read_office_list(live_server, page):

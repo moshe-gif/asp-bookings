@@ -42,6 +42,13 @@ Deno.serve(async (req) => {
     if ((count ?? 0) <= 1) return json({ ok: false, error: "can't remove the last office admin" }, 400);
   }
 
+  // A singer row pointing at an office admin's login must not delete that login (audit #11: re-link an artist
+  // to the owner's login, then Remove -- now also blocked at the database by 0094).
+  if (table === "artists" && row.user_id) {
+    const { data: admin } = await sb.from("admin_users").select("id").eq("user_id", row.user_id).maybeSingle();
+    if (admin) return json({ ok: false, error: "that login belongs to an office admin -- remove them from the office list instead" }, 403);
+  }
+
   // 1) The login. A missing auth user (already deleted) is fine.
   if (row.user_id) {
     const { error: delAuthErr } = await sb.auth.admin.deleteUser(row.user_id);
