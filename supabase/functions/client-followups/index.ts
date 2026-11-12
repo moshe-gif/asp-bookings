@@ -89,6 +89,7 @@ Deno.serve(async (req) => {
   if (error) return json({ ok: false, error: error.message }, 500);
 
   // Submit any message template Meta doesn't have yet (also done by the daily run).
+  if (previewTo && body.only) return json({ ok: false, error: "previewTo is for the reminder emails only" }, 400);
   if (body.only === "submit_templates") return json({ ok: true, templates: await createTemplates360() });
 
   // Who's who, and what was already sent once (kind|gig|ref).
@@ -104,7 +105,7 @@ Deno.serve(async (req) => {
   const doneRows = await readAllRows(() => sb.from("client_followups").select("event_legacy_id, kind, ref").in("kind", onceKinds).eq("ok", true));
   const done = new Set((doneRows || []).map((d: Row) => `${d.kind}|${d.event_legacy_id}|${d.ref || ""}`));
   // When each gig's form was really sent (not the 'baseline' rows for gigs from before the form existed).
-  const formRows = await readAllRows(() => sb.from("client_followups").select("event_legacy_id, sent_at").eq("kind", "gig_form").neq("sent_to", "baseline"));
+  const formRows = await readAllRows(() => sb.from("client_followups").select("event_legacy_id, sent_at").eq("kind", "gig_form").eq("ok", true).neq("sent_to", "baseline"));
   const formSentAt = new Map((formRows || []).map((f: Row) => [f.event_legacy_id, Date.parse(f.sent_at)]));
   const results: Row[] = [];
   // Claim, send, settle (audit #2.2, 0097): a message's row is written BEFORE it is sent, under a unique claim key,
@@ -119,19 +120,31 @@ Deno.serve(async (req) => {
   };
   const settle = async (id: string | null, row: Row) => {
     if (!id || id === "dry") return;
-    const { error } = await sb.from("client_followups").update({ ...row, error: row.ok ? null : String(row.error || "failed").slice(0, 500), ...(row.ok ? {} : { claim_key: null }) }).eq("id", id);
+    const { note, ...rest } = row;
+    const { error } = await sb.from("client_followups").update({ ...rest, error: row.ok ? (note || null) : String(row.error || "failed").slice(0, 500), ...(row.ok ? {} : { claim_key: null }) }).eq("id", id);
     if (error) throw new Error(`couldn't record a send (${error.message})`);
   };
-  const release = async (id: string | null) => { if (id && id !== "dry") await sb.from("client_followups").delete().eq("id", id); };
-  if (!dryRun && !previewTo) await sb.from("client_followups").update({ error: "interrupted while sending -- check whether it went out" })
-    .eq("error", "sending").lt("sent_at", new Date(now - 3600_000).toISOString());
+  const release = async (id: string | null) => {
+    if (!id || id === "dry") return;
+    const { error } = await sb.from("client_followups").delete().eq("id", id);
+    if (error) console.error("followup release", error.message);
+  };
+  // A send that throws (a network error) is a failed send: its key is freed for the next run, never left held.
+  const sendWa = (to: string, template: string, params: string[]) => sendTemplate(to, template, params).catch((e: unknown) => ({ ok: false, error: String((e as Error)?.message || e), id: null } as Row));
+  const sendMail = (msg: Row) => sendRelayEmail(sb, msg as Parameters<typeof sendRelayEmail>[1]).catch((e: unknown) => ({ ok: false, error: String((e as Error)?.message || e) } as Row));
+  // A run that died mid-send (a timeout) holds its key; after an hour the key is freed so the message is tried again.
+  if (!dryRun && !previewTo) {
+    const { error: sweepErr } = await sb.from("client_followups").update({ error: "interrupted while sending (tried again)", claim_key: null })
+      .eq("error", "sending").lt("sent_at", new Date(now - 3600_000).toISOString());
+    if (sweepErr) console.error("followup sweep", sweepErr.message);
+  }
   const once = async (kind: string, gig: string, ref: string, to: string, template: string, params: string[]) => {
     if (done.has(`${kind}|${gig}|${ref}`) || results.length >= MAX_SENDS_PER_RUN) return;
     done.add(`${kind}|${gig}|${ref}`);
     if (dryRun) { results.push({ kind, gig, to, dryRun: true, ok: true }); return; }
     const id = await claim(`${kind}|${gig}|${ref}`, { event_legacy_id: gig, kind, ref: ref || null, sent_to: "whatsapp:" + waNumber(to) });
     if (!id) return;   // another run has it
-    const wa = await sendTemplate(to, template, params);
+    const wa = await sendWa(to, template, params);
     // Held until Meta approves the template: not logged, so the next run tries again.
     if (!wa.ok && /waiting for Meta/.test(String(wa.error))) { await release(id); done.delete(`${kind}|${gig}|${ref}`); results.push({ kind, gig, ok: false, held: true }); return; }
     await settle(id, { ok: wa.ok, error: wa.error, provider_id: wa.id || null });
@@ -160,12 +173,13 @@ Deno.serve(async (req) => {
           const emailId = wantEmail ? await claim(`gig_form|${e.legacy_id}|`, { event_legacy_id: e.legacy_id, kind: "gig_form" }) : null;
           const waId = wantWa ? await claim(`gig_form_wa|${e.legacy_id}|`, { event_legacy_id: e.legacy_id, kind: "gig_form_wa" }) : null;
           if (emailId || waId) {
-            const out = await sendGigForm(sb, { gig: e.legacy_id, ev, singers, when, email: !!emailId, whatsapp: !!waId });
+            const out: Row = await sendGigForm(sb, { gig: e.legacy_id, ev, singers, when, email: !!emailId, whatsapp: !!waId })
+              .catch((err: unknown) => { const f = { ok: false, error: String((err as Error)?.message || err), to: "" }; return { email: emailId ? f : null, whatsapp: waId ? f : null }; });
             // No email address / phone: mark that channel done so it isn't retried every 10 minutes.
-            if (emailId) { done.add(`gig_form|${e.legacy_id}|`); await settle(emailId, { sent_to: out.email?.to || "no email", ok: out.email ? out.email.ok : true, error: out.email ? out.email.error : "no client email" }); }
+            if (emailId) { done.add(`gig_form|${e.legacy_id}|`); await settle(emailId, { sent_to: out.email?.to || "no email", ok: out.email ? out.email.ok : true, error: out.email?.error, note: out.email ? null : "no client email" }); }
             if (waId) {
               if (out.whatsapp?.held) await release(waId);
-              else { done.add(`gig_form_wa|${e.legacy_id}|`); await settle(waId, { sent_to: out.whatsapp ? "whatsapp:" + waNumber(out.whatsapp.to) : "no phone", ok: out.whatsapp ? out.whatsapp.ok : true, error: out.whatsapp ? out.whatsapp.error : "no client phone" }); }
+              else { done.add(`gig_form_wa|${e.legacy_id}|`); await settle(waId, { sent_to: out.whatsapp ? "whatsapp:" + waNumber(out.whatsapp.to) : "no phone", ok: out.whatsapp ? out.whatsapp.ok : true, error: out.whatsapp?.error, note: out.whatsapp ? null : "no client phone" }); }
             }
             results.push({ kind: "gig_form", gig: e.legacy_id, ok: !out.email || out.email.ok, email: out.email || null, whatsapp: out.whatsapp || null });
           }
@@ -183,7 +197,8 @@ Deno.serve(async (req) => {
         else {
           const id = await claim(`gig_form_nudge|${e.legacy_id}|${nudge}`, { event_legacy_id: e.legacy_id, kind: "gig_form_nudge", ref: nudge });
           if (id) {
-            const out = await sendGigForm(sb, { gig: e.legacy_id, ev, singers, when, email: true, whatsapp: true, reminder: true });
+            const out: Row = await sendGigForm(sb, { gig: e.legacy_id, ev, singers, when, email: true, whatsapp: true, reminder: true })
+              .catch((err: unknown) => ({ email: { ok: false, error: String((err as Error)?.message || err) }, whatsapp: null }));
             const ok = !out.email || out.email.ok;
             await settle(id, { sent_to: out.email?.to || (out.whatsapp ? "whatsapp:" + waNumber(out.whatsapp.to) : "no contact"), ok, error: out.email?.error });
             results.push({ kind: "gig_form_nudge", gig: e.legacy_id, ok });
@@ -262,7 +277,7 @@ Deno.serve(async (req) => {
       const id = await claim(key, { event_legacy_id: "WEEK", kind: "singer_week", ref: `${artistId}@${nyDay}`, sent_to: a.email });
       if (!id) continue;
       const sheets = gigs.map((g) => gigSheetEmailHtml(g.app_doc || {}, a.name, fmtDate(g.date), phone)).join('<div style="height:24px"></div>');
-      const sent = await sendRelayEmail(sb, { to: a.email, brand: "asp", subject: `Your week — ${gigs.length} gig${gigs.length === 1 ? "" : "s"} from ${fmtDate(gigs[0].date)}`, html: sheets });
+      const sent = await sendMail({ to: a.email, brand: "asp", subject: `Your week — ${gigs.length} gig${gigs.length === 1 ? "" : "s"} from ${fmtDate(gigs[0].date)}`, html: sheets });
       await settle(id, { ok: sent.ok, error: sent.error });
       results.push({ kind: "singer_week", to: a.email, ok: sent.ok, error: sent.error });
     }
@@ -282,16 +297,17 @@ Deno.serve(async (req) => {
       const owed = clientOwedCentsOf(ev, await gigContracts(sb, e.legacy_id));
       const amount = Number.isFinite(owed) && owed > 0 ? money(owed / 100) : "the balance";
       const to = String(ev.clientEmail || "").trim();
-      if (e.date === plusDays(nyDay, 2) && !done.has(`cash_confirm|${e.legacy_id}|`) && results.length < MAX_SENDS_PER_RUN) {
+      const cashLeft = !done.has(`cash_confirm|${e.legacy_id}|`) || (hasPhone(ev.clientPhone) && !done.has(`cash_confirm|${e.legacy_id}|wa`));
+      if (e.date === plusDays(nyDay, 2) && cashLeft && results.length < MAX_SENDS_PER_RUN) {
         done.add(`cash_confirm|${e.legacy_id}|`);
         if (dryRun) results.push({ kind: "cash_confirm", gig: e.legacy_id, dryRun: true, ok: true });
         else {
           // The email and the WhatsApp are logged on their own (ref 'wa'), so a failed WhatsApp isn't recorded as sent.
-          const emailId = await claim(`cash_confirm|${e.legacy_id}|`, { event_legacy_id: e.legacy_id, kind: "cash_confirm", sent_to: to || "no email" });
+          const emailId = done.has(`cash_confirm|${e.legacy_id}|`) ? null : await claim(`cash_confirm|${e.legacy_id}|`, { event_legacy_id: e.legacy_id, kind: "cash_confirm", sent_to: to || "no email" });
           const waId = hasPhone(ev.clientPhone) ? await claim(`cash_confirm|${e.legacy_id}|wa`, { event_legacy_id: e.legacy_id, kind: "cash_confirm", ref: "wa", sent_to: "whatsapp:" + waNumber(ev.clientPhone) }) : null;
           let ok = true, err: string | undefined;
           if (emailId && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
-            const sent = await sendRelayEmail(sb, { to, brand: "asp", subject: viaAsp(singers === "your event" ? "" : singers, `Cash on ${when}`), html: emailHtml({
+            const sent = await sendMail({ to, brand: "asp", subject: viaAsp(singers === "your event" ? "" : singers, `Cash on ${when}`), html: emailHtml({
               artist: singers === "your event" ? "" : singers, greeting: `Dear ${who},`, phone,
               lines: [`Your event with <strong>${esc(singers)}</strong> is on <strong>${esc(when)}</strong>.`,
                 `As arranged, the balance of <strong>${esc(amount)}</strong> is paid in cash, handed to ${esc(singers)} when ${singers.includes("&") ? "they arrive" : "he arrives"} at the hall.`,
@@ -300,7 +316,7 @@ Deno.serve(async (req) => {
           }
           if (emailId) await settle(emailId, { ok, error: err });
           if (waId) {
-            const wa = await sendTemplate(ev.clientPhone, "cash_confirm", [who, amount, singers, when]);
+            const wa = await sendWa(ev.clientPhone, "cash_confirm", [who, amount, singers, when]);
             if (!wa.ok && /waiting for Meta/.test(String(wa.error))) await release(waId);
             else await settle(waId, { ok: wa.ok, error: wa.error, provider_id: wa.id || null });
             ok = ok && wa.ok;
@@ -332,7 +348,7 @@ Deno.serve(async (req) => {
     const table = (title: string, rows: string[], tot: number) => `<h3 style="font-size:14px;margin:18px 0 6px;">${title} — ${money(tot)} (${rows.length})</h3>${rows.length ? `<table style="width:100%;border-collapse:collapse;font-size:13px;">${rows.join("")}</table>` : '<p style="color:#67676D;font-size:13px;">None.</p>'}`;
     const reportId = brand.replyTo && !dryRun ? await claim(`office_report|REPORT|${nyDay.slice(0, 7)}`, { event_legacy_id: "REPORT", kind: "office_report", ref: nyDay.slice(0, 7), sent_to: brand.replyTo }) : null;
     if (reportId) {
-      const sent = await sendRelayEmail(sb, { to: brand.replyTo, brand: "asp", subject: `Outstanding on ${fmtDate(nyDay)}: ${money(depTot + balTot)}`,
+      const sent = await sendMail({ to: brand.replyTo, brand: "asp", subject: `Outstanding on ${fmtDate(nyDay)}: ${money(depTot + balTot)}`,
         html: `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#17171A;max-width:640px;">${emailHeaderHtml()}<h2 style="font-size:18px;margin:16px 0 0;">Outstanding — ${esc(fmtDate(nyDay))}</h2>${table("Deposits not yet in", deposits, depTot)}${table("Balances due", balances, balTot)}</div>` });
       await settle(reportId, { ok: sent.ok, error: sent.error });
     }
@@ -354,7 +370,7 @@ Deno.serve(async (req) => {
         else {
           const id = await claim(`thank_you|${e.legacy_id}|`, { event_legacy_id: e.legacy_id, kind: "thank_you", sent_to: clientTo });
           if (!id) continue;
-          const sent = await sendRelayEmail(sb, { to: clientTo, subject: viaAsp(artist, "Thank you"), brand: "asp", html: emailHtml({
+          const sent = await sendMail({ to: clientTo, subject: viaAsp(artist, "Thank you"), brand: "asp", html: emailHtml({
             artist, greeting: `Dear ${firstName(ev.clientName)},`, phone,
             lines: [`Thank you for having ${artist ? `<strong>${esc(artist)}</strong>` : "us"} at your ${esc(String(ev.type || "event").toLowerCase())} last night. It was a privilege to be part of your simcha.`,
               "We'd be grateful for a few words about your experience. Just reply to this email; with your permission we may share it (first names only) with future clients.",
@@ -452,7 +468,7 @@ Deno.serve(async (req) => {
       if (p.to) {
         const id = previewTo ? null : await claim(`${p.kind}|${p.gig}|@${nyToday()}`, { event_legacy_id: p.gig, contract_legacy_id: contract, kind: p.kind, sent_to: p.to });
         if (previewTo || id) {
-          const sent = await sendRelayEmail(sb, { to: p.to, subject: previewTo ? `[Preview] ${subject}` : subject, html, brand: "asp" });
+          const sent = await sendMail({ to: p.to, subject: previewTo ? `[Preview] ${subject}` : subject, html, brand: "asp" });
           if (previewTo) { results.push({ kind: p.kind, gig: p.gig, ok: sent.ok, error: sent.error, preview: true }); continue; }
           await settle(id, { ok: sent.ok, error: sent.error, provider_id: sent.id || null });
           results.push({ kind: p.kind, gig: p.gig, ok: sent.ok, error: sent.error });
@@ -461,7 +477,7 @@ Deno.serve(async (req) => {
       if (p.waTo && !previewTo) {
         const id = await claim(`${p.kind}|${p.gig}|@${nyToday()}:wa`, { event_legacy_id: p.gig, contract_legacy_id: contract, kind: p.kind, sent_to: "whatsapp:" + waNumber(p.waTo) });
         if (id) {
-          const wa = await sendTemplate(p.waTo, p.kind, waParams);
+          const wa = await sendWa(p.waTo, p.kind, waParams);
           await settle(id, { ok: wa.ok, error: wa.error, provider_id: wa.id || null });
           results.push({ kind: p.kind, gig: p.gig, channel: "whatsapp", ok: wa.ok, error: wa.error });
         }
