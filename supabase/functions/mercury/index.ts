@@ -23,7 +23,8 @@
 // nothing); Mercury then holds each move until someone approves it in Mercury.
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin, serviceClient } from "../_shared/auth.ts";
-import { artistShares, clientOwedCentsOf, depositCentsOf } from "../_shared/connect.ts";
+import { artistShares, clientOwedCentsOf, depositCentsOf, gigContracts } from "../_shared/connect.ts";
+import { readAllRows } from "../_shared/db.ts";
 import { mercuryApi, mercuryCanMoveMoney, mercuryConfigured, mercuryError, mercurySandbox } from "../_shared/mercury.ts";
 import { sendRelayEmail } from "../_shared/mail.ts";
 import { nameTokens } from "../_shared/matching.ts";
@@ -32,6 +33,8 @@ import { emailHeaderHtml } from "../_shared/config.ts";
 // deno-lint-ignore no-explicit-any
 type Any = any;
 const FIRST_DAYS = 45, OVERLAP_DAYS = 10;
+// Payments recorded on a gig from this date feed the payouts by themselves (owner 2026-11-12: backfill since Nov 1).
+const LEDGER_FROM = "2026-11-01";
 const MONEY_ROLES = ["admin_ceo", "admin_coo", "admin_bookkeeping"];
 // Credits that aren't a client paying: moves between ASP's own accounts, interest, refunds of fees.
 const NOT_CLIENT_KINDS = ["internalTransfer", "treasuryTransfer", "interestPayment"];
@@ -369,19 +372,30 @@ Deno.serve(async (req) => {
     }
     // Oldest first, so a gig's deposit is split before its balance.
     found.sort((x, y) => String(x.on).localeCompare(String(y.on)) || (x.kind === "deposit" ? -1 : 1));
+    // Then the office's own record of every other payment a gig is marked as having received (audit #4,
+    // 0096): Record deposit, Mark balance received, a bank's email alert. A bank or Stripe record of the same
+    // payment replaces it later (record_ledger_row), so nothing is counted twice.
+    found.push(...await officePayments());
     let n = 0;
     for (const f of found) {
       if (!(f.cents > 0) || !f.on || String(f.gig).startsWith("EV-TEST-")) continue;
       const { data: exists } = await sb.from("money_ledger").select("id").eq("source", f.source).eq("source_id", f.source_id).maybeSingle();
       if (exists) continue;
-      const { data: evRow } = await sb.from("events").select("app_doc").eq("legacy_id", f.gig).maybeSingle();
-      const ev = evRow?.app_doc;
+      const ev = f.ev || (await sb.from("events").select("app_doc").eq("legacy_id", f.gig).maybeSingle()).data?.app_doc;
       if (!ev) continue;
       if (f.kind === "balance" ? !ev.balanceReceived : !(ev.depositReceived || ev.balanceReceived)) continue;   // not recorded on the gig yet
-      let parts: Any[] = [], review: string | null = null, note: string | null = null;
-      if (f.went_to === "singer" || f.went_to === "singer_stripe") {
+      // The gig's earlier parts -- less an office record this payment replaces (nothing of it paid out yet).
+      const { data: before } = await sb.from("money_ledger_parts").select("kind, payee_key, cents, payout_id, ledger:money_ledger!inner(event_legacy_id, source, kind, id)").eq("ledger.event_legacy_id", f.gig);
+      const office = (before || []).filter((x: Any) => x.ledger?.source === "office" && x.ledger?.kind === f.kind);
+      const replaces = f.source !== "office" && !office.some((x: Any) => x.payout_id);
+      const counted = (before || []).filter((x: Any) => !(replaces && x.ledger?.source === "office" && x.ledger?.kind === f.kind));
+      const had = (key: string) => counted.filter((x: Any) => x.payee_key === key).reduce((t: number, x: Any) => t + Number(x.cents || 0), 0);
+      let parts: Any[] = [], review: string | null = f.review || null, note: string | null = f.note || null;
+      if (review) {
+        // Saved for a look; nothing is paid out from it until it's fixed and re-split.
+      } else if (f.went_to === "singer" || f.went_to === "singer_stripe" || f.went_to === "singer_cash") {
         // Nothing to move; ASP's commission comes out of the gig's next payment that reaches ASP instead.
-        note = "Went straight to the singer's own account -- nothing to move.";
+        note = note || "Went straight to the singer's own account -- nothing to move.";
       } else {
         // Across all of a gig's payments: ASP's commission comes out first, then each singer's share up to
         // what they're owed; anything over (a card fee, an overpayment) stays with ASP. So a deposit
@@ -390,8 +404,6 @@ Deno.serve(async (req) => {
         const shares = await artistShares(sb, f.gig, ev);
         const extras = (Array.isArray(ev.additionalArtists) ? ev.additionalArtists : []).filter((x: Any) => x && x.artistId);
         const commissionTotal = Math.round(((Number(ev.commission) || 0) + extras.reduce((t: number, x: Any) => t + (Number(x.aspCut) || 0), 0)) * 100);
-        const { data: before } = await sb.from("money_ledger_parts").select("kind, payee_key, cents, ledger:money_ledger!inner(event_legacy_id)").eq("ledger.event_legacy_id", f.gig);
-        const had = (key: string) => (before || []).filter((x: Any) => x.payee_key === key).reduce((t: number, x: Any) => t + Number(x.cents || 0), 0);
         let left = f.cents;
         const toAsp = Math.min(left, Math.max(0, commissionTotal - had("commission")));
         left -= toAsp;
@@ -411,16 +423,54 @@ Deno.serve(async (req) => {
         if (!review && toAsp + extraToAsp > 0) parts.push({ kind: "commission", payee_key: "commission", payee_name: "ASP commission", cents: toAsp + extraToAsp });
         if (review) parts = [];
       }
-      const { data: row, error } = await sb.from("money_ledger").insert({ source: f.source, source_id: f.source_id, event_legacy_id: f.gig, kind: f.kind,
-        received_on: f.on, amount_cents: f.cents, went_to: f.went_to, note, needs_review: review }).select("id").maybeSingle();
-      if (error || !row) { if (error && !/duplicate/.test(error.message)) console.error("ledger", error.message); continue; }
-      if (parts.length) {
-        const { error: pe } = await sb.from("money_ledger_parts").insert(parts.map((p) => ({ ...p, ledger_id: row.id })));
-        if (pe) { console.error("ledger parts", pe.message); await sb.from("money_ledger").delete().eq("id", row.id); continue; }
-      }
-      n++;
+      // The row and its parts in one transaction, under the payouts lock, only if the gig's parts are still
+      // the ones this split was worked out from (two checks at once can't take the commission twice).
+      const { data: res, error } = await sb.rpc("record_ledger_row", {
+        p_row: { source: f.source, source_id: f.source_id, event_legacy_id: f.gig, kind: f.kind, received_on: f.on, amount_cents: f.cents,
+          went_to: f.went_to, note, needs_review: review },
+        p_parts: parts, p_seen_count: counted.length, p_seen_cents: counted.reduce((t: number, x: Any) => t + Number(x.cents || 0), 0),
+      });
+      if (error) { console.error("ledger", f.gig, error.message); continue; }
+      if (res === "ok") n++;
     }
     return n;
+  }
+
+  // A deposit or balance the gig is marked as having received, on or after LEDGER_FROM, that no ledger row
+  // records yet: the office recorded it by hand (or from a bank's email alert). Where it went follows the
+  // owner's rules: ASP collects every payment, except cash, which the client hands to the singer
+  // (2026-11-09). A payment made online (Stripe) is recorded from Stripe itself, never from here.
+  async function officePayments(): Promise<Any[]> {
+    const rows = await readAllRows<Any>(() => sb.from("events").select("legacy_id, app_doc")
+      .or(`app_doc->>depositReceivedDate.gte.${LEDGER_FROM},app_doc->>balanceReceivedDate.gte.${LEDGER_FROM}`), "legacy_id");
+    if (!rows.length) return [];
+    const have = new Set((await readAllRows<Any>(() => sb.from("money_ledger").select("id, event_legacy_id, kind"))).map((l: Any) => `${l.event_legacy_id}|${l.kind}`));
+    const out: Any[] = [];
+    for (const r of rows) {
+      const ev = r.app_doc || {}, gig = r.legacy_id;
+      if (String(gig).startsWith("EV-TEST-")) continue;
+      const wants: string[] = [];
+      if (ev.depositReceived && String(ev.depositReceivedDate || "") >= LEDGER_FROM && !have.has(`${gig}|deposit`)) wants.push("deposit");
+      if (ev.balanceReceived && String(ev.balanceReceivedDate || "") >= LEDGER_FROM && !have.has(`${gig}|balance`)) wants.push("balance");
+      if (!wants.length) continue;
+      const cts = await gigContracts(sb, gig);
+      for (const kind of wants) {
+        const ver = kind === "deposit" ? (ev.depositVerification || {}) : {};
+        if (kind === "deposit" && (ver.method === "stripe" || ver.paymentRequestId)) continue;
+        const dep = depositCentsOf(ev, cts);
+        // A balance paid with no deposit before it is the whole price.
+        const cents = kind === "deposit" ? dep : clientOwedCentsOf(ev, cts) + (ev.depositReceived ? 0 : dep);
+        const cash = kind === "deposit" ? ver.method === "cash" : ev.paymentMethod === "cash";
+        const on = String(kind === "deposit" ? ev.depositReceivedDate : ev.balanceReceivedDate).slice(0, 10);
+        const how = kind === "deposit" ? (ver.note || ver.method || "recorded by the office") : (ev.paymentMethod || "standard");
+        out.push({ source: "office", source_id: `${gig}|${kind}`, gig, kind, on, ev,
+          cents: Number.isFinite(cents) && cents > 0 ? cents : 0,
+          went_to: cash ? "singer_cash" : "asp",
+          note: cash ? "Paid in cash to the singer -- nothing to move." : `Recorded on the gig (${String(how).slice(0, 120)}).` });
+        // No amount (a singer's figures missing on the gig): nothing to record -- Financials lists the gig as not in the payouts.
+      }
+    }
+    return out.filter((f) => f.cents > 0);
   }
 
   async function sync(): Promise<Any> {
