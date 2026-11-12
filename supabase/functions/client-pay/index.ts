@@ -249,9 +249,10 @@ Deno.serve(async (req) => {
       const doc = ev?.app_doc;
       if (doc) {
         when = doc.date ? ` (${doc.date})` : "";
-        const next = { ...doc, zelleReported: { ...(doc.zelleReported || {}), [r.kind]: { at, amountCents: r.amount_cents } },
-          log: [...(Array.isArray(doc.log) ? doc.log : []), { ts: at, type: "system", text: `${who} says they sent the ${what} (${amount}) by Zelle. Check it arrived, then record it.` }] };
-        const { error: upErr } = await sb.from("events").update({ app_doc: next }).eq("legacy_id", r.event_legacy_id);
+        // Only this key plus the log line, atomically (0095, audit #3.1).
+        const { error: upErr } = await sb.rpc("patch_event_doc", { p_legacy_id: r.event_legacy_id,
+          p_patch: { zelleReported: { ...(doc.zelleReported || {}), [r.kind]: { at, amountCents: r.amount_cents } } },
+          p_log: { ts: at, type: "system", text: `${who} says they sent the ${what} (${amount}) by Zelle. Check it arrived, then record it.` } });
         if (upErr) { console.error("client-pay zelle_sent", upErr.message); return json({ ok: false, error: "server" }, 500); }
       }
     }

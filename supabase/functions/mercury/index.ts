@@ -162,8 +162,8 @@ Deno.serve(async (req) => {
       const { data: row } = await sb.from("events").select("app_doc").eq("legacy_id", g.event_legacy_id).maybeSingle();
       const doc = row?.app_doc;
       if (!doc?.artistPaidOut) continue;
-      await sb.from("events").update({ app_doc: { ...doc, artistPaidOut: false, artistPaidOutDate: null,
-        log: [...(Array.isArray(doc.log) ? doc.log : []), { ts: new Date().toISOString(), type: "system", text: "Mercury payout voided -- the singer's money goes into the next payout." }] } }).eq("legacy_id", g.event_legacy_id);
+      await sb.rpc("patch_event_doc", { p_legacy_id: g.event_legacy_id, p_patch: { artistPaidOut: false, artistPaidOutDate: null },
+        p_log: { ts: new Date().toISOString(), type: "system", text: "Mercury payout voided -- the singer's money goes into the next payout." } });
     }
     return json({ ok: true });
   }
@@ -333,9 +333,8 @@ Deno.serve(async (req) => {
       if ([...need].some(([k, c]) => c > 0 && (sentTo.get(k) || 0) < c)) continue;
       const months = [...new Set((parts || []).filter((p: Any) => p.payout?.status === "sent").map((p: Any) => p.payout.month))].join(", ");
       const who = [...sentTo].map(([k, c]) => `${(parts || []).find((p: Any) => p.payee_key === k)?.payee_name || "artist"} ${usd(c)}`).join(", ");
-      const next = { ...doc, artistPaidOut: true, artistPaidOutDate: today,
-        log: [...(Array.isArray(doc.log) ? doc.log : []), { ts: new Date().toISOString(), type: "success", text: `Paid out in the ${months} Mercury payout: ${who}.` }] };
-      const { error } = await sb.from("events").update({ app_doc: next }).eq("legacy_id", gig);
+      const { error } = await sb.rpc("patch_event_doc", { p_legacy_id: gig, p_patch: { artistPaidOut: true, artistPaidOutDate: today },
+        p_log: { ts: new Date().toISOString(), type: "success", text: `Paid out in the ${months} Mercury payout: ${who}.` } });
       if (error) console.error("mercury: mark paid out", gig, error.message);
     }
   }

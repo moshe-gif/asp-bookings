@@ -106,11 +106,15 @@ Deno.serve(async (req) => {
     const next = applyAnswers(g.ev, def, answers, at);
     next.clientForm.submittedBy = { email: by, matches, onFile: onFile.length > 0 };
     const verb = first ? "filled in" : "updated";
-    next.log = [...(Array.isArray(g.ev.log) ? g.ev.log : []), matches
+    const logLine = matches
       ? { ts: at, type: "success", text: `The client ${verb} the event details form (${by}).` }
-      : { ts: at, type: "system", text: `⚠ The event details form was ${verb} from ${by || "an unknown sender (no email given)"}, which isn't the client's email on file${onFile.length ? ` (${onFile.join(", ")})` : " (none on file)"}. Check it's from the client.` }];
-    const { error: upErr } = await sb.from("events").update({ app_doc: next }).eq("legacy_id", g.e.legacy_id);
-    if (upErr) { console.error("gig-form save", upErr.message); return json({ ok: false, error: "server" }, 500); }
+      : { ts: at, type: "system", text: `⚠ The event details form was ${verb} from ${by || "an unknown sender (no email given)"}, which isn't the client's email on file${onFile.length ? ` (${onFile.join(", ")})` : " (none on file)"}. Check it's from the client.` };
+    // Only the fields the answers changed, merged atomically (0095, audit #3.1): an office edit to anything
+    // else on the gig, made while the client was filling in the form, is kept.
+    const patch: Record<string, unknown> = {};
+    for (const k of Object.keys(next)) if (k !== "log" && JSON.stringify(next[k]) !== JSON.stringify(g.ev[k])) patch[k] = next[k];
+    const { data: saved, error: upErr } = await sb.rpc("patch_event_doc", { p_legacy_id: g.e.legacy_id, p_patch: patch, p_log: logLine });
+    if (upErr || !saved) { console.error("gig-form save", upErr?.message || "gig not found"); return json({ ok: false, error: "server" }, 500); }
     await sb.from("gig_form_links").update({ submitted_at: at, submit_count: (link.submit_count || 0) + 1 }).eq("id", link.id);
 
     // Tell the office (best effort; the answers are saved).
