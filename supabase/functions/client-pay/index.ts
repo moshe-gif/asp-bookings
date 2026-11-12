@@ -29,7 +29,7 @@ import { cardFeeCents, recordPaymentIntent, stripeApi, stripeConfigured, stripeM
 import { balanceZelle, depositZelle, officePhone } from "../_shared/payblock.ts";
 import { sendRelayEmail } from "../_shared/mail.ts";
 import { sendTemplate, waNumber } from "../_shared/whatsapp.ts";
-import { balancePayeeProfile, balanceSplit, gigCardFeeBps, payoutViaMercury, splitAccounts } from "../_shared/connect.ts";
+import { balancePayeeProfile, balanceSplit, gigCardFeeBps, normalizeState, payoutViaMercury, splitAccounts } from "../_shared/connect.ts";
 
 const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
@@ -112,6 +112,8 @@ async function blocker(sb: any, r: Row, tokenHash: string): Promise<string | nul
     // counters that can be reused, and its createdAt is only a date).
     if (!doc || (doc.createdTs || doc.createdAt) !== r.invoice_created_at || doc.status === "void") return "void";
     if (doc.status === "paid") return "paid_elsewhere";
+    // No card fee for a client in a state that bans surcharges (audit #10.1).
+    if (r.card_fee_bps > 0 && ["CT", "MA"].includes(normalizeState(doc.clientState))) return "revoked";
   }
   return null;
 }

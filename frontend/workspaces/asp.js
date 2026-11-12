@@ -526,7 +526,13 @@ function seedPayeeProfiles(){
 let PAYEE_PROFILES = loadPayeeProfiles();
 // A browser with no stored profiles starts from the seed; the shared list replaces it on sign-in (never the reverse).
 const PAYEE_PROFILES_FROM_SEED = !PAYEE_PROFILES;
-if(!PAYEE_PROFILES){ PAYEE_PROFILES = seedPayeeProfiles(); savePayeeProfiles(); }
+// 2026-11-12 audit #8: "only the seed" is remembered across reloads. Before, a reload before the first
+// sign-in made the seed look like real edits, and it then overwrote the office's shared payee profiles
+// (blank wire numbers, old Zelle). Cleared by the first real edit or delete made in this browser.
+const PAYEE_SEED_ONLY_KEY = 'asp_payee_profiles_seed_only';
+function payeeProfilesSeedOnly(){ try{ return localStorage.getItem(PAYEE_SEED_ONLY_KEY)==='1'; }catch(e){ return false; } }
+function markPayeeProfilesEdited(){ try{ localStorage.removeItem(PAYEE_SEED_ONLY_KEY); }catch(e){} }
+if(!PAYEE_PROFILES){ PAYEE_PROFILES = seedPayeeProfiles(); try{ localStorage.setItem(PAYEE_SEED_ONLY_KEY, '1'); }catch(e){} savePayeeProfiles(); }
 else { PPID = PAYEE_PROFILES.reduce((max,p)=>{ const n=parseInt(String(p.id).split('-')[1],10); return isNaN(n)?max:Math.max(max,n+1); }, PPID); }
 // One-time-per-field backfill for already-stored profiles -- fills in real payment details that
 // were seeded blank before the office-drive audit, and adds the artist profiles that were missing
@@ -1241,7 +1247,7 @@ function doSavePayeeProfile(){
       defaultDepositPercent: f.defaultDepositPercent? Number(f.defaultDepositPercent) : 0,
     });
   }
-  savePayeeProfiles();
+  markPayeeProfilesEdited(); savePayeeProfiles();
   S.showPayeeProfileForm=false; S.payeeProfileForm={}; S.editingPayeeProfileId=null;
   toast('Payee profile saved.', 'success');
   render();
@@ -1252,7 +1258,7 @@ function doDeletePayeeProfile(id){
   if(p && !p.artistId && !PAYEE_PROFILES.some(x=>x.id!==id && !x.artistId)){ toast('At least one house (no-artist) profile is required.', 'system'); return; }
   if(!confirm('Delete this payee profile? Any contract still using it will fall back to the house profile.')) return;
   PAYEE_PROFILES = PAYEE_PROFILES.filter(p=>p.id!==id);
-  savePayeeProfiles();
+  markPayeeProfilesEdited(); savePayeeProfiles();
   toast('Payee profile deleted.', 'system');
   render();
 }
@@ -3183,7 +3189,7 @@ var SHARED = {
     prefix:'CT-', getCounter:()=>CTID, setCounter:n=>{ CTID = n; },
     sameRecord:(a,b)=>a.leadId===b.leadId && a.createdAt===b.createdAt, remapRefs:map=>remapState(['contractBuilderId'], map) }),
   payee_profiles: createSharedCollection({ name:'payee_profiles', label:'payee profiles', one:'payee profile', table:'app_records', collection:'payee_profiles',
-    get:()=>PAYEE_PROFILES, set:v=>{ PAYEE_PROFILES = v; }, fromSeed:()=>PAYEE_PROFILES_FROM_SEED, saveLocal:()=>persist(PAYEE_PROFILES_LS_KEY, PAYEE_PROFILES, 'payee profiles'),
+    get:()=>PAYEE_PROFILES, set:v=>{ PAYEE_PROFILES = v; }, fromSeed:()=>PAYEE_PROFILES_FROM_SEED || payeeProfilesSeedOnly(), saveLocal:()=>persist(PAYEE_PROFILES_LS_KEY, PAYEE_PROFILES, 'payee profiles'),
     prefix:'PP-', getCounter:()=>PPID, setCounter:n=>{ PPID = n; },
     sameRecord:(a,b)=>(a.entityName||'')===(b.entityName||'') && (a.artistId||null)===(b.artistId||null),
     remapRefs:map=>{ if(remapIn(CONTRACTS,'payeeProfileId',map)) saveContracts(); remapState(['editingPayeeProfileId'], map); } }),
@@ -4228,7 +4234,7 @@ function closeAllOverlays(){
   S.showContractBuilder=false; S.contractBuilderId=null; S.showContractBuilderDoc=false;
   S.showTemplatePicker=false; S.templatePickerLeadId=null;
   S.showPayeeProfileForm=false; S.payeeProfileForm={}; S.editingPayeeProfileId=null;
-  S.showSendContractConfirm=false; S.sendContractForm={}; S.sendContractBusy=false;
+  S.showSendContractConfirm=false; S.sendContractForm={}; S.sendContractBusy=false; S.contractQuestions=null;
   S.showVerifyDeposit=false; S.verifyDepositEventId=null; S.verifyDepositForm={};
   S.showTravelRequestDetail=false; S.travelRequestDetailId=null;
 }
@@ -4483,7 +4489,10 @@ let lastAppHtml = null, appTouched = true, appObserver = null; // see markAppRen
 // redraw with every flag off (owner 2026-11-02: the X on the print views did nothing).
 const BODY_OVERLAY_FLAGS = ['showFlightForm','showTransportForm','showDressCodeForm','showEditEvent','showTemplatePicker','showContractBuilder',
   'showContractBuilderDoc','showSendContractConfirm','showVerifyDeposit','showClientContact','showTravelDrop','showGigInfoForm','showGigInfoDoc',
-  'showItinerary','showInvoiceDoc','showDocumentBuilder'];
+  'showItinerary','showInvoiceDoc','showDocumentBuilder',
+  // 2026-11-12 audit #9: the Send-contract questions pop-up is drawn outside #app too; without it here the
+  // first redraw after "Send contract" was skipped (same #app html) and the button looked dead.
+  'contractQuestions'];
 function render(){
   if(renderDepth){ renderQueued = true; return; }
   // A finger is on the phone tab bar: hold the redraw until it lifts (bnEnd draws it), so the bubble isn't snapped back.
@@ -4562,7 +4571,7 @@ function appHtml(){
         <div class="topbar">
           <div style="display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;">
             <button class="icon-btn hamburger-btn" data-action="open-mobile-menu" title="Menu" aria-label="Menu">${ICO.menu}</button>
-            <h1 style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${pageTitle()}</h1>
+            <h1 style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(pageTitle())}</h1>
           </div>
           <div style="display:flex;align-items:center;gap:10px;flex:none;">
             ${crewUser() ? '' : `<button class="btn askai-btn" data-action="open-ask-ai" title="Ask AI" style="background:var(--accent-wash);color:var(--accent-ink);border-color:transparent;">${ICO.sparkle}<span class="btn-label">Ask AI</span></button>`}
@@ -4618,8 +4627,8 @@ function renderDayEventRow(e, isAdmin, action, opts={}){
     primary = `${timeLabel} — ${isAdmin?esc(a.name):esc(e.clientName||e.type)}`;
     secondary = `${isAdmin?esc(e.clientName||e.type):esc(e.venue)} &middot; ${esc(e.type)}`;
   }
-  return `<button class="chooser-row" data-action="${action}" data-id="${e.id}">
-    <span class="avatar" data-slot="${a.slot}" style="width:32px;height:32px;font-size:11px;">${esc(a.initials)}</span>
+  return `<button class="chooser-row" data-action="${action}" data-id="${esc(e.id)}">
+    <span class="avatar" data-slot="${esc(a.slot)}" style="width:32px;height:32px;font-size:11px;">${esc(a.initials)}</span>
     <span style="flex:1;min-width:0;"><strong>${primary}</strong><span class="chooser-email">${secondary}</span></span>
     <span class="pill ${sm.cls}">${esc(sm.label)}</span>
   </button>`;
@@ -4712,7 +4721,7 @@ function portalNavItems(){ return crewUser() ? (isTravelCrew() ? TRAVEL_CREW_NAV
 const ARTIST_NAV_ITEMS = [
   ['a_dashboard','Dashboard',ICO.dash], ['a_calendar','Calendar',ICO.cal], ['a_gigs','My Gigs',MIC_PHOTO_ICON], ['a_travel','Travel',ICO.suitcase], ['a_financials','Financials',ICO.money], ['a_projects','Projects',ICO.kanban],
 ];
-const APP_VERSION = 'v1.9.72'; // bump on every release so a phone can tell it has updated. v1.9.72: typing Wedding in Edit Details shows the band fields. v1.9.71: search a date to open that day; swipe the calendar (days, weeks, months); the opener in the app's navy; v1.9.71: the Inbox says when email reading has stopped (e.g. AI credit ran out); v1.9.71: a day with a no-time gig no longer blanks its calendar month (January was missing); v1.9.71: event type is typed (3 suggestions); fees and hours only from the price list (old estimates and the $2,000 deposit default gone; deposits 15%); '45 minutes' counts as 45 minutes. v1.9.70: the price list -- a flat fee per singer x event type (+ out of town, hours, note); New Lead fills it (never over a typed price) and flags dates after Pesach. v1.9.69: Clients list (one client -> all their gigs, booked total, still owed; worked out from the gigs). v1.9.68: one singer profile page (contact, commission, Zelle/payee, rider, bio, photo; riders moved off Settings). v1.9.66: navigate buttons compact on a computer, big on a phone; a line mic icon instead of the photo. v1.9.65: a new gig never reuses a deleted gig's id (an old contract attached itself); dropdowns styled like the fields; This week leads with the singer. v1.9.64: the phone tab bar slides (press, drag the bubble, let go to open). v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
+const APP_VERSION = 'v1.9.73'; // bump on every release so a phone can tell it has updated. v1.9.73: Send contract on a draft opens its questions again; invoices ask the client's state (no card fee in CT/MA); a new browser's sample payee list can never overwrite the office's; record ids escaped everywhere. v1.9.72: typing Wedding in Edit Details shows the band fields. v1.9.71: search a date to open that day; swipe the calendar (days, weeks, months); the opener in the app's navy; v1.9.71: the Inbox says when email reading has stopped (e.g. AI credit ran out); v1.9.71: a day with a no-time gig no longer blanks its calendar month (January was missing); v1.9.71: event type is typed (3 suggestions); fees and hours only from the price list (old estimates and the $2,000 deposit default gone; deposits 15%); '45 minutes' counts as 45 minutes. v1.9.70: the price list -- a flat fee per singer x event type (+ out of town, hours, note); New Lead fills it (never over a typed price) and flags dates after Pesach. v1.9.69: Clients list (one client -> all their gigs, booked total, still owed; worked out from the gigs). v1.9.68: one singer profile page (contact, commission, Zelle/payee, rider, bio, photo; riders moved off Settings). v1.9.66: navigate buttons compact on a computer, big on a phone; a line mic icon instead of the photo. v1.9.65: a new gig never reuses a deleted gig's id (an old contract attached itself); dropdowns styled like the fields; This week leads with the singer. v1.9.64: the phone tab bar slides (press, drag the bubble, let go to open). v1.9.63: travel-only login (gigs, calendar, travel requests; no money, no media); only the owner and Ilan delete gigs. v1.9.62: singers subscribe once to a calendar of their gigs (updates by itself); big Waze / Google Maps buttons; Zelle copy buttons + I've sent it. v1.9.61: one Contracts page (Contract Builder folded in), cleaner gig header, This week tags under the gig. v1.9.60: easy-to-read gig sheet, View as singer in the top bar, form sender flag, band suggestions, ASP app icon. v1.9.59: v1.9.59: the new look (Private Bank: white, navy, hairlines, pill buttons, Archivo light-wide titles). v1.9.58: home search (names, dates, halls); Add Lead makes the contract and asks Send contract. v1.9.57: Face ID on every app open (passkey gate; emailed code only reaches Set up Face ID), riders (Settings + Send rider on a gig). v1.9.56: This week card on the office home (gigs in 7 days + what's missing), out-of-town gig booked -> travel request to Rivky, balance Zelle to ASP. v1.9.55: client pay form fixed (a page-wide iframe rule covered Stripe's card fields), small dark ASP logo everywhere, the artist's name big in Archivo light-wide at the top of contracts / client pages / emails, subjects 'Artist via ASP', phone nav badges no longer clipped. v1.9.54: smoother booking -- Create Contract is the main button on a lead; one Review & send button (approves, shows the preview, send from there); rarely-changed terms fold under More terms; one Record deposit button; singers are paid only through the monthly payouts; contract deposits to the cent. v1.9.53: the client's event details form -- sent by itself after the deposit (not for concerts), one set of questions per kind of gig (wedding chuppah list, flash mob…), the answers fill in Gig Info; New Lead picks the singer from a dropdown. v1.9.52: monthly payouts in Financials (each payment's split saved; one Mercury transfer per singer a month, the commission to the account picked in Settings); the 39-venue list is built into the app and can only grow. v1.9.51: the X on the print views (gig info, itinerary, invoice, contract) closes them again. v1.9.50: a Content-Security-Policy -- the app runs only its own code (and the pinned Supabase library), so injected text can never run as a script. v1.9.49: one figure everywhere -- Price Breakdown, Daily Digest and Financials count every artist on a gig and the real deposit/balance; an Inbox payment records the amount that came in (a short balance asks first); a paid gig never drops back to booked; dates are local in the calendar's week/day views; sign-in retries when the device clock is a little behind. v1.9.48: smoother -- the screen redraws only when something on it changed (no more flashing); phone calendar days are bigger and a tap opens the day; WhatsApp sign/pay buttons. v1.9.47: a switch to stop offering Zelle (Stripe + Mercury only). v1.9.46: Media Library counts photos everywhere. v1.9.45: a new venue's address is looked up and filled in. v1.9.44: Media Library (photos too; artist cards show a picture); removing a login works; Confirm Booking on a lead. v1.9.43: Video Library backs up to Google Drive (office@). v1.9.42: the Video Library browses inside the app (no embedded page). v1.9.41: drag and drop PDFs onto Flight Info and Travel Confirmations. v1.9.40: WhatsApp shows reactions, plays voice notes / photos / videos / documents, and contacts can be named. v1.9.39: WhatsApp in the owner's phone bar (in Projects' place). v1.9.38: WhatsApp tab (owner only): the office number's chats, live, with replies. v1.9.37: Preview a singer's app (Artists -> singer -> Preview their app); phones never scroll sideways or zoom; library tabs become a dropdown on phones. v1.9.36: crew accounts (social media sees every gig without money and asks the videographer; videographer confirms his gigs); Video Library private (owner, Ilan, crew). v1.9.35: Video Library tidied (pill tabs, styled fields, singer photo circles, copy link; public page restyled). v1.9.34: the Videos tab opens on the library itself (Library tab). v1.9.33: Video Library -- public /videos/ page, bulk upload and tagging
 function navOrderIndex(v){
   const list = isAdminUser(S.user) ? MGMT_NAV_ITEMS : portalNavItems();
   return list.findIndex(([x])=>x===v);
@@ -4909,7 +4918,7 @@ function renderUsersDashboardCard(){
       <div><h4>${esc(u.name)} <span style="font-weight:400;color:var(--ink-3);">— ${esc(ADMIN_ROLE_LABELS[u.role]||u.role)}</span></h4><p>${esc(u.email)}</p></div>
       <span style="display:flex;align-items:center;gap:8px;flex:none;">
         <span class="pill ${u.user_id?'pill-good':''}">${u.user_id?'Active':'Invited'}</span>
-        <button class="icon-btn" data-action="open-edit-real-user" data-kind="admin" data-id="${u.id}" title="Edit" aria-label="Edit">${ICO.pencil}</button>
+        <button class="icon-btn" data-action="open-edit-real-user" data-kind="admin" data-id="${esc(u.id)}" title="Edit" aria-label="Edit">${ICO.pencil}</button>
       </span>
     </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0 0 12px;">No office accounts yet.</p>`}
     <div class="u-label" style="margin:14px 0 6px;">Artists</div>
@@ -4917,7 +4926,7 @@ function renderUsersDashboardCard(){
       <div><h4>${esc(a.name)} <span style="font-weight:400;color:var(--ink-3);">— ${esc(a.role)}</span></h4><p>${esc(a.email)}</p></div>
       <span style="display:flex;align-items:center;gap:8px;flex:none;">
         <span class="pill ${a.user_id?'pill-good':''}">${a.user_id?'Active':'Invited'}</span>
-        <button class="icon-btn" data-action="open-edit-real-user" data-kind="artist" data-id="${a.id}" title="Edit" aria-label="Edit">${ICO.pencil}</button>
+        <button class="icon-btn" data-action="open-edit-real-user" data-kind="artist" data-id="${esc(a.id)}" title="Edit" aria-label="Edit">${ICO.pencil}</button>
       </span>
     </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0;">No real artist accounts yet.</p>`}
     `}
@@ -4996,7 +5005,7 @@ function renderSettingsPage(){
     ${st.passkeys.map(pk=>`<div class="passkey-row">
       <div class="passkey-ico">${ICO.key}</div>
       <div style="flex:1;min-width:0;"><strong style="font-size:13px;">${esc(pk.label)}</strong><br/><span style="font-size:11.5px;color:var(--ink-3);">Added ${fmtDateShort(pk.addedAt)}</span></div>
-      ${st.passkeys.length>1 ? `<button class="icon-btn" data-action="remove-passkey" data-id="${pk.id}" title="Remove" aria-label="Remove">${ICO.x}</button>` : ''}
+      ${st.passkeys.length>1 ? `<button class="icon-btn" data-action="remove-passkey" data-id="${esc(pk.id)}" title="Remove" aria-label="Remove">${ICO.x}</button>` : ''}
     </div>`).join('')}
     <button class="btn btn-sm" style="margin-top:12px;" data-action="add-passkey">${ICO.plus} Add a passkey</button>
     `}
@@ -5178,7 +5187,7 @@ function renderMgmtDashboard(){
     <div style="display:flex;align-items:center;gap:8px;color:var(--crit-ink);font-weight:700;font-size:13px;">${ICO.alert} Scheduling conflicts (${conflictPairs.length})</div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px;">
       ${conflictPairs.map(([x,y])=>{const ax=artistById(x.artistId);
-        return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--crit-ink);cursor:pointer;" data-action="open-event" data-id="${x.id}">
+        return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--crit-ink);cursor:pointer;" data-action="open-event" data-id="${esc(x.id)}">
         <span><strong>${esc(ax.name)}</strong> — ${fmtDateShort(x.date)} (${esc(x.clientName||x.type)}) overlaps ${fmtDateShort(y.date)} (${esc(y.clientName||y.type)})</span>
         <span style="text-decoration:underline;">Resolve</span></div>`;}).join('')}
     </div>
@@ -5248,7 +5257,7 @@ function renderHomeSearch(){
     <label class="u-label" for="homeSearchInput" style="display:block;margin-bottom:6px;">Search gigs</label>
     <input id="homeSearchInput" type="search" data-home-search data-focus-key="home-search" value="${esc(q)}" placeholder="Name, date or hall — e.g. Goldberg, Nov 11, Rockleigh" autocomplete="off" style="width:100%;box-sizing:border-box;padding:12px 14px;font-size:15px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);"/>
     ${q.trim() ? (hits.length || day ? `<div class="card" style="margin-top:8px;">${dayRow}${hits.map(e=>{ const a = artistById(e.artistId)||{}; const sm = statusMeta(e);
-      return `<div class="kv-row" data-action="open-event" data-id="${e.id}" style="cursor:pointer;padding:10px 14px;gap:10px;align-items:flex-start;">
+      return `<div class="kv-row" data-action="open-event" data-id="${esc(e.id)}" style="cursor:pointer;padding:10px 14px;gap:10px;align-items:flex-start;">
         <div style="min-width:0;"><strong style="display:block;">${esc(e.clientName||'(no client)')}</strong>
           <span style="font-size:12.5px;color:var(--ink-2);">${esc(e.date? fmtDateWeekday(e.date) : 'No date')} · ${esc(a.name||'')}${e.venue? ' · '+esc(e.venue) : ''}${e.city? ', '+esc(e.city) : ''}</span></div>
         <span class="pill ${sm.cls}">${esc(sm.label)}</span></div>`; }).join('')}</div>`
@@ -5267,7 +5276,7 @@ function renderThisWeekCard(){
   return `<div class="section-head"><h2>This week</h2><button class="btn btn-sm btn-ghost" data-action="nav" data-view="calendar">Calendar ${ICO.chev('r')}</button></div>
   ${gigs.length ? `<div class="card" data-testid="this-week" style="margin-bottom:20px;">${gigs.map(e=>{
     const a = artistById(e.artistId) || {}, missing = gigMissing(e);
-    return `<div class="kv-row" data-action="open-event" data-id="${e.id}" style="cursor:pointer;padding:12px 16px;flex-direction:column;align-items:stretch;gap:8px;">
+    return `<div class="kv-row" data-action="open-event" data-id="${esc(e.id)}" style="cursor:pointer;padding:12px 16px;flex-direction:column;align-items:stretch;gap:8px;">
       <div style="min-width:0;"><strong style="display:block;font-size:15px;" data-testid="this-week-singer">${esc([a.name, ...(e.additionalArtists||[]).map(x=>(artistById(x.artistId)||{}).name)].filter(Boolean).join(' & ') || 'Singer TBD')}</strong>
         <span style="display:block;font-size:13px;color:var(--ink);margin-top:2px;">${esc(fmtDateWeekday(e.date))} · ${esc(fmtTimeRange(e.time, e.endTime))}</span>
         <span style="font-size:12.5px;color:var(--ink-2);">${esc([e.type && e.type!=='Unknown' ? e.type : '', e.clientName, e.venue].filter(Boolean).join(' · '))}</span></div>
@@ -5316,7 +5325,7 @@ function renderDailyDigestPage(){
   const awaitingDeposit = S.events.filter(e=>e.status==='contract_sent');
   const awaitingBalance = S.events.filter(e=>e.status==='booked' && !e.balanceReceived);
   const altPayment = altPaymentFollowUps();
-  const row = (e, extra)=>{ const a=artistById(e.artistId); return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;" data-action="open-event" data-id="${e.id}">
+  const row = (e, extra)=>{ const a=artistById(e.artistId); return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;" data-action="open-event" data-id="${esc(e.id)}">
     <span><strong>${esc(a.name)}</strong> — ${esc(e.clientName||e.type)}, ${fmtDateShort(e.date)}</span>
     <span class="u-label">${esc(extra)}</span>
   </div>`; };
@@ -5350,10 +5359,10 @@ function renderInternationalPage(){
   <div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     ${intlTrips.map(e=>{const ae=artistById(e.artistId);
       return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border);">
-      <span style="cursor:pointer;" data-action="open-event" data-id="${e.id}"><strong>${esc(ae.name)}</strong> — ${esc(e.city)}, ${esc(e.state)}, ${fmtDateShort(e.date)}</span>
+      <span style="cursor:pointer;" data-action="open-event" data-id="${esc(e.id)}"><strong>${esc(ae.name)}</strong> — ${esc(e.city)}, ${esc(e.state)}, ${fmtDateShort(e.date)}</span>
       <span style="display:flex;align-items:center;gap:10px;flex:none;">
-        <span style="cursor:pointer;text-decoration:underline;" data-action="open-event" data-id="${e.id}">View</span>
-        <button class="icon-btn" data-action="dismiss-intl" data-id="${e.id}" title="Dismiss" style="width:22px;height:22px;" aria-label="Dismiss">${ICO.x}</button>
+        <span style="cursor:pointer;text-decoration:underline;" data-action="open-event" data-id="${esc(e.id)}">View</span>
+        <button class="icon-btn" data-action="dismiss-intl" data-id="${esc(e.id)}" title="Dismiss" style="width:22px;height:22px;" aria-label="Dismiss">${ICO.x}</button>
       </span></div>`;}).join('')}
   </div>`}
   `;
@@ -5366,7 +5375,7 @@ function renderTravelPage(events, opts={}){
   const readyItineraries = events.filter(e=>upcoming(e) && (e.flightBooked || e.groundTransportBooked)).sort((a,b)=>a.date.localeCompare(b.date));
   const travelRow = (e, needLabel)=>{
     const a = artistById(e.artistId);
-    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;" data-action="open-event" data-id="${e.id}">
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;" data-action="open-event" data-id="${esc(e.id)}">
       <span>${showArtist?`<strong>${esc(a.name)}</strong> — `:''}${esc(e.type)}${e.clientName?` (${esc(e.clientName)})`:''}, ${fmtDateShort(e.date)}</span>
       <span class="pill pill-warn">${needLabel}</span>
     </div>`;
@@ -5389,11 +5398,11 @@ function renderTravelPage(events, opts={}){
       ${readyItineraries.map(e=>{
         const a = artistById(e.artistId);
         return `<tr>
-          ${showArtist?`<td data-label="Artist"><span style="display:flex;align-items:center;gap:7px;"><span class="avatar" data-slot="${a.slot}" style="width:22px;height:22px;font-size:9px;">${esc(a.initials)}</span>${esc(a.name)}</span></td>`:''}
+          ${showArtist?`<td data-label="Artist"><span style="display:flex;align-items:center;gap:7px;"><span class="avatar" data-slot="${esc(a.slot)}" style="width:22px;height:22px;font-size:9px;">${esc(a.initials)}</span>${esc(a.name)}</span></td>`:''}
           <td data-label="Type">${esc(e.type)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
           <td data-label="Flight">${e.flightBooked?`<span class="pill pill-good">Booked</span>`:'—'}</td>
           <td data-label="Ground">${e.groundTransportBooked?`<span class="pill pill-good">Booked</span>`:'—'}</td>
-          <td data-label=""><button class="btn btn-sm" data-action="view-itinerary" data-id="${e.id}">${ICO.suitcase} Itinerary</button></td>
+          <td data-label=""><button class="btn btn-sm" data-action="view-itinerary" data-id="${esc(e.id)}">${ICO.suitcase} Itinerary</button></td>
         </tr>`;
       }).join('')}
     </tbody></table></div>`}
@@ -5421,7 +5430,7 @@ function renderCalendarPage(events, opts={}){
         ${opts.showBlockButton && !artistReadOnly() ? `<button class="btn btn-sm" data-action="open-block-time">${ICO.clock} Block Time</button>` : ''}
         ${modeToggle}
       </div>
-      ${opts.showFilter ? `<div class="chip-row">${ARTISTS.map(a=>`<button class="filter-chip ${S.calArtistFilter.includes(a.id)?'sel':''}" data-action="cal-filter" data-id="${a.id}"><span class="dot" data-slot="${a.slot}"></span>${esc(a.name.split(' ')[0])}</button>`).join('')}</div>`:''}
+      ${opts.showFilter ? `<div class="chip-row">${ARTISTS.map(a=>`<button class="filter-chip ${S.calArtistFilter.includes(a.id)?'sel':''}" data-action="cal-filter" data-id="${esc(a.id)}"><span class="dot" data-slot="${esc(a.slot)}"></span>${esc(a.name.split(' ')[0])}</button>`).join('')}</div>`:''}
     </div>`;
 
   if(mode==='week'){
@@ -5474,15 +5483,15 @@ function renderCalendarPage(events, opts={}){
         if(c.out) return `<div class="cal-cell out"><span class="cal-date">${c.d}</span></div>`;
         const evs = (byDate[c.iso]||[]).sort((a,b)=>byTime(a,b));
         const max = 3;
-        return `<div class="cal-cell ${c.iso===todayIso?'today':''}" data-action="open-day-view" data-date="${c.iso}" style="cursor:pointer;">
-          ${isAdmin? `<button class="cal-add-btn" data-action="quick-add-event" data-date="${c.iso}" title="Add event">${ICO.plus}</button>`:''}
+        return `<div class="cal-cell ${c.iso===todayIso?'today':''}" data-action="open-day-view" data-date="${esc(c.iso)}" style="cursor:pointer;">
+          ${isAdmin? `<button class="cal-add-btn" data-action="quick-add-event" data-date="${esc(c.iso)}" title="Add event">${ICO.plus}</button>`:''}
           <span class="cal-date">${c.d}</span>
-          ${evs.slice(0,max).map(e=>{const a=artistById(e.artistId)||NO_ARTIST; const label = opts.singleArtist? (e.clientName||e.type).split(' ')[0] : a.name.split(' ')[0]; const timePrefix = (!e.time || e.time==='00:00') ? '' : fmtTime(e.time).replace(':00','')+' '; return `<div class="cal-evt" data-action="open-event" data-id="${e.id}"><span class="dot" data-slot="${a.slot}"></span><span>${timePrefix}${esc(label)}</span></div>`;}).join('')}
-          ${evs.length>max? `<span class="cal-more" data-action="open-day" data-date="${c.iso}">+${evs.length-max}<span class="cal-more-w"> more</span></span>`:''}
+          ${evs.slice(0,max).map(e=>{const a=artistById(e.artistId)||NO_ARTIST; const label = opts.singleArtist? (e.clientName||e.type).split(' ')[0] : a.name.split(' ')[0]; const timePrefix = (!e.time || e.time==='00:00') ? '' : fmtTime(e.time).replace(':00','')+' '; return `<div class="cal-evt" data-action="open-event" data-id="${esc(e.id)}"><span class="dot" data-slot="${esc(a.slot)}"></span><span>${timePrefix}${esc(label)}</span></div>`;}).join('')}
+          ${evs.length>max? `<span class="cal-more" data-action="open-day" data-date="${esc(c.iso)}">+${evs.length-max}<span class="cal-more-w"> more</span></span>`:''}
         </div>`;
       }).join('')}
     </div>
-    ${(!opts.noLegend) ? `<div class="legend">${ARTISTS.map(a=>`<span class="legend-item"><span class="dot" data-slot="${a.slot}"></span>${esc(a.name)}</span>`).join('')}</div>`:''}
+    ${(!opts.noLegend) ? `<div class="legend">${ARTISTS.map(a=>`<span class="legend-item"><span class="dot" data-slot="${esc(a.slot)}"></span>${esc(a.name)}</span>`).join('')}</div>`:''}
   `;
 }
 
@@ -5499,8 +5508,8 @@ function renderEventTable(events, opts={}){
       ${events.map(e=>{
         const a = artistById(e.artistId); const sm = statusMeta(e);
         const amountCell = e.unpaid? '—' : money(e.price);
-        return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
-          ${opts.showArtist?`<td data-label="Artist"><span style="display:flex;align-items:center;gap:7px;"><span class="avatar" data-slot="${a.slot}" style="width:22px;height:22px;font-size:9px;">${esc(a.initials)}</span>${esc(a.name)}</span></td>`:''}
+        return `<tr class="row-link" data-action="open-event" data-id="${esc(e.id)}">
+          ${opts.showArtist?`<td data-label="Artist"><span style="display:flex;align-items:center;gap:7px;"><span class="avatar" data-slot="${esc(a.slot)}" style="width:22px;height:22px;font-size:9px;">${esc(a.initials)}</span>${esc(a.name)}</span></td>`:''}
           <td data-label="Client">${e.clientName? esc(e.clientName) : '—'}${e.needsReview? ` <span class="pill pill-warn" title="Imported from calendar -- not yet confirmed">Needs Review</span>` : ''}</td><td data-label="Type">${esc(e.type)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
           <td data-label="Location">${esc(e.venue)||'—'}</td><td data-label="Price" class="u-mono">${amountCell}</td>
           <td data-label="Status"><span class="pill ${sm.cls}">${esc(sm.label)}</span></td>
@@ -5510,12 +5519,12 @@ function renderEventTable(events, opts={}){
 }
 function renderArtistFilterRow(current, action, opts={}){
   const dotOrAvatar = a => opts.avatar
-    ? `<span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${esc(a.initials)}</span>`
-    : `<span class="dot" data-slot="${a.slot}"></span>`;
+    ? `<span class="avatar" data-slot="${esc(a.slot)}" style="width:18px;height:18px;font-size:8px;">${esc(a.initials)}</span>`
+    : `<span class="dot" data-slot="${esc(a.slot)}"></span>`;
   return `
     <div class="chip-row artist-filter-chips" style="margin-bottom:16px;">
       ${opts.noAll ? '' : `<button class="filter-chip ${current==='all'?'sel':''}" data-action="${action}" data-id="all">All Artists</button>`}
-      ${ARTISTS.map(a=>`<button class="filter-chip ${current===a.id?'sel':''}" data-action="${action}" data-id="${a.id}">${dotOrAvatar(a)}${esc(a.name.split(' ')[0])}</button>`).join('')}
+      ${ARTISTS.map(a=>`<button class="filter-chip ${current===a.id?'sel':''}" data-action="${action}" data-id="${esc(a.id)}">${dotOrAvatar(a)}${esc(a.name.split(' ')[0])}</button>`).join('')}
     </div>
     <select class="artist-filter-select" data-action="${action}">
       ${opts.noAll ? '' : `<option value="all" ${current==='all'?'selected':''}>All Artists</option>`}
@@ -5557,15 +5566,15 @@ function renderNeedsReviewPage(){
       const a = artistById(e.artistId); const sm = statusMeta(e);
       return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
-          <div style="cursor:pointer;flex:1;min-width:0;" data-action="open-event" data-id="${e.id}">
+          <div style="cursor:pointer;flex:1;min-width:0;" data-action="open-event" data-id="${esc(e.id)}">
             <div style="display:flex;align-items:center;gap:7px;margin-bottom:3px;">
-              <span class="avatar" data-slot="${a.slot}" style="width:20px;height:20px;font-size:8px;">${esc(a.initials)}</span>
+              <span class="avatar" data-slot="${esc(a.slot)}" style="width:20px;height:20px;font-size:8px;">${esc(a.initials)}</span>
               <strong style="font-size:13.5px;">${e.clientName? esc(e.clientName) : '—'}</strong>
               <span class="pill ${sm.cls}">${esc(sm.label)}</span>
             </div>
             <div style="font-size:12px;color:var(--ink-2);">${esc(e.type)} &middot; ${fmtDateShort(e.date)}${e.venue?` &middot; ${esc(e.venue.split('\\n')[0])}`:''}${e.price?` &middot; ${money(e.price)}`:''}</div>
           </div>
-          <button class="btn btn-sm" data-action="mark-event-reviewed" data-id="${e.id}">${ICO.check} Mark Reviewed</button>
+          <button class="btn btn-sm" data-action="mark-event-reviewed" data-id="${esc(e.id)}">${ICO.check} Mark Reviewed</button>
         </div>
         <details style="font-size:11.5px;color:var(--ink-3);">
           <summary style="cursor:pointer;font-weight:600;">Original calendar notes</summary>
@@ -5584,9 +5593,9 @@ function renderArtistsPage(){
       const evs = eventsFor(a.id);
       const upcoming = evs.filter(e=>!isPast(e.date) && isConfirmed(e)).length;
       const ytdPayout = ytdPayoutOf(evs);
-      return `<div class="card card-pad" style="cursor:pointer;display:flex;flex-direction:column;gap:10px;" data-action="open-artist" data-id="${a.id}">
+      return `<div class="card card-pad" style="cursor:pointer;display:flex;flex-direction:column;gap:10px;" data-action="open-artist" data-id="${esc(a.id)}">
         <div style="display:flex;align-items:center;gap:10px;">
-          <span class="avatar" data-slot="${a.slot}" style="width:44px;height:44px;font-size:15px;">${esc(a.initials)}</span>
+          <span class="avatar" data-slot="${esc(a.slot)}" style="width:44px;height:44px;font-size:15px;">${esc(a.initials)}</span>
           <div><strong style="font-family:var(--font-display);font-size:1.05rem;display:block;">${esc(a.name)}</strong><span class="u-label">${esc(a.role||'Artist')}</span></div>
         </div>
         <div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--ink-2);padding-top:6px;border-top:1px solid var(--border);">
@@ -5627,7 +5636,7 @@ function renderArtistDetailPage(artistId){
   const photoUp = ls && canManageLibrary() ? `<label class="btn btn-sm" style="cursor:pointer;">${pic?'Change photo':'Add photo'}<input type="file" accept="image/jpeg,image/png,image/webp" data-profile-photo="${esc(ls.id)}" style="display:none;"/></label>` : '';
   return `
     <div class="profile-head" data-testid="singer-profile">
-      ${pic ? `<img class="profile-pic" src="${esc(pic)}" alt=""/>` : `<span class="avatar profile-pic" data-slot="${a.slot}">${esc(a.initials)}</span>`}
+      ${pic ? `<img class="profile-pic" src="${esc(pic)}" alt=""/>` : `<span class="avatar profile-pic" data-slot="${esc(a.slot)}">${esc(a.initials)}</span>`}
       <div class="profile-id"><h2 class="profile-name">${esc(a.name)}</h2><span class="u-label">${esc(a.role||'Artist')} · ${upcoming.length} upcoming · ${esc(money(ytdPayoutOf(evs)))} paid out this year</span></div>
       <span class="profile-actions">${photoUp}<button class="btn btn-sm" data-action="preview-as-artist" data-id="${esc(artistId)}" title="See the app the way ${first} sees it (read-only)">Preview their app</button></span>
     </div>
@@ -6063,7 +6072,7 @@ async function libUploadFile(file, path, contentType, onProgress){
 // Upload progress is drawn in place, not by render(): a full redraw every few seconds would close the
 // dropdown or steal the field someone is tagging in meanwhile.
 function libShowProgress(it){
-  const row = document.querySelector(`[data-lib-up="${it.key}"]`); if(!row) return;
+  const row = document.querySelector(`[data-lib-up="${esc(it.key)}"]`); if(!row) return;
   row.querySelector('[data-pct]').textContent = `${Math.round(it.pct*100)}%`;
   row.querySelector('[data-bar]').style.width = `${Math.round(it.pct*100)}%`;
 }
@@ -6634,7 +6643,7 @@ function renderLibResults(){
         <div class="lib-vf"><span>${v.recorded_on ? esc(new Date(v.recorded_on+'T00:00:00').toLocaleDateString('en-US',{ month:'short', year:'numeric' })) : ''}</span>
           <a class="btn btn-sm" href="${esc(libDownloadUrl(v))}" data-action="external-link" data-testid="download">${ICO.download} Download</a></div></div></div>`; }).join('')}</div>`
     : `<div class="card lib-empty">${any ? 'Nothing matches. Try removing a filter.' : 'Nothing here yet.'}</div>`;
-  return html + `<span hidden data-lib-n="${list.length}"></span>`;
+  return html + `<span hidden data-lib-n="${esc(list.length)}"></span>`;
 }
 function libRefreshResults(){
   const box = document.querySelector('[data-lib-results]'); if(!box) return;
@@ -7022,7 +7031,7 @@ function renderFinancialsPage(){
       const mx = Math.max(...spark,1);
       return `<div class="card card-pad">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-          <span class="avatar" data-slot="${a.slot}" style="width:26px;height:26px;font-size:10px;">${esc(a.initials)}</span>
+          <span class="avatar" data-slot="${esc(a.slot)}" style="width:26px;height:26px;font-size:10px;">${esc(a.initials)}</span>
           <strong style="font-size:13px;">${esc(a.name)}</strong>
         </div>
         <div class="sparkbar">${spark.map(v=>`<b style="height:${Math.max(6,(v/mx)*100)}%;"></b>`).join('')}</div>
@@ -7038,11 +7047,11 @@ function renderFinancialsPage(){
     <tbody>${CUSTOM_INVOICES.length? CUSTOM_INVOICES.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(inv=>{
       const t = invoiceTotal(inv);
       const itemsSummary = inv.items.length===1? inv.items[0].label : `${inv.items[0].label} +${inv.items.length-1} more`;
-      return `<tr class="row-link" data-action="view-invoice" data-id="${inv.id}">
+      return `<tr class="row-link" data-action="view-invoice" data-id="${esc(inv.id)}">
         <td data-label="Client">${esc(inv.clientName)}</td><td data-label="Items">${esc(itemsSummary)}</td>
         <td data-label="Total" class="u-mono">${money(t)}</td><td data-label="Date" class="u-mono">${fmtDateShort(inv.createdAt)}</td>
         <td data-label="Status"><span class="pill ${inv.status==='paid'?'pill-good':'pill-warn'}">${inv.status==='paid'?'Paid':'Open'}</span></td>
-        <td data-label="">${inv.status==='open'? `<button class="btn btn-sm" data-action="mark-invoice-paid" data-id="${inv.id}">Mark Paid</button>` : ''}</td></tr>`;
+        <td data-label="">${inv.status==='open'? `<button class="btn btn-sm" data-action="mark-invoice-paid" data-id="${esc(inv.id)}">Mark Paid</button>` : ''}</td></tr>`;
     }).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--ink-3);padding:20px;">No custom invoices yet.</td></tr>`}
     </tbody></table></div>
 
@@ -7050,7 +7059,7 @@ function renderFinancialsPage(){
   <div class="card table-cards"><table>
     <thead><tr><th>Artist</th><th>Client</th><th>Date</th><th>Price</th><th>Commission</th><th>Payout</th><th>Status</th></tr></thead>
     <tbody>${booked.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{const a=artistById(e.artistId); const sm=statusMeta(e);
-      return `<tr class="row-link" data-action="open-event" data-id="${e.id}">
+      return `<tr class="row-link" data-action="open-event" data-id="${esc(e.id)}">
         <td data-label="Artist">${esc(a.name)}</td><td data-label="Client">${esc(e.clientName)}</td><td data-label="Date" class="u-mono">${fmtDateShort(e.date)}</td>
         <td data-label="Price" class="u-mono">${money(e.price)}</td><td data-label="Commission" class="u-mono">${money(e.commission)}</td><td data-label="Payout" class="u-mono">${money(artistPayout(e))}</td>
         <td data-label="Status"><span class="pill ${sm.cls}">${esc(sm.label)}</span></td></tr>`;}).join('')}
@@ -7073,7 +7082,7 @@ function renderOutsideBookingsPage(){
     <thead><tr><th>Performer</th><th>Event</th><th>Client</th><th>Date</th><th>Total</th><th>ASP Cut</th><th>Payout</th><th>Reminders</th><th>Status</th><th></th></tr></thead>
     <tbody>${OUTSIDE_BOOKINGS.length? OUTSIDE_BOOKINGS.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(b=>{
       const openReminders = outsideBookingOpenReminders(b);
-      return `<tr class="row-link" data-action="open-outside-booking-detail" data-id="${b.id}">
+      return `<tr class="row-link" data-action="open-outside-booking-detail" data-id="${esc(b.id)}">
         <td data-label="Performer">${esc(b.performerName)}${b.showOnAspCalendar? ` <span class="pill pill-accent" title="Shown on ASP main calendar">ASP Cal</span>`:''}</td>
         <td data-label="Event">${esc(b.eventName)||'—'}</td>
         <td data-label="Client">${esc(b.clientName)}</td>
@@ -7082,8 +7091,8 @@ function renderOutsideBookingsPage(){
         <td data-label="Reminders">${openReminders.length? `<span class="pill pill-warn">${openReminders.length} due</span>` : `<span style="color:var(--ink-3);">—</span>`}</td>
         <td data-label="Status"><span class="pill ${b.status==='paid'?'pill-good':'pill-warn'}">${b.status==='paid'?'Paid':'Open'}</span></td>
         <td data-label="" style="display:flex;gap:6px;flex-wrap:wrap;">
-          ${b.status==='open'? `<button class="btn btn-sm" data-action="mark-outside-booking-paid" data-id="${b.id}">Mark Paid</button>` : ''}
-          <button class="btn btn-sm" data-action="open-outside-doc-builder" data-id="${b.id}">${DOCUMENTS.some(d=>d.subjectType==='outside'&&d.subjectId===b.id)?'Edit Document':'Document'}</button>
+          ${b.status==='open'? `<button class="btn btn-sm" data-action="mark-outside-booking-paid" data-id="${esc(b.id)}">Mark Paid</button>` : ''}
+          <button class="btn btn-sm" data-action="open-outside-doc-builder" data-id="${esc(b.id)}">${DOCUMENTS.some(d=>d.subjectType==='outside'&&d.subjectId===b.id)?'Edit Document':'Document'}</button>
         </td>
       </tr>`;
     }).join('') : `<tr><td colspan="10" style="text-align:center;color:var(--ink-3);padding:20px;">No external events yet.</td></tr>`}
@@ -7114,18 +7123,18 @@ function renderOutsideBookingRemindersSection(b){
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <h3 style="font-size:13.5px;margin:0;">Reminders</h3>
-      <button class="btn btn-sm" data-action="add-outside-booking-reminder" data-id="${b.id}">${ICO.plus} Add Reminder</button>
+      <button class="btn btn-sm" data-action="add-outside-booking-reminder" data-id="${esc(b.id)}">${ICO.plus} Add Reminder</button>
     </div>
     ${b.reminders.length? b.reminders.map(r=>`<div style="display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--surface-2);border-radius:8px;">
       <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
         <div class="field"><label>Due</label><input type="date" data-outside-reminder-field="${r.id}.dueAt" value="${esc(r.dueAt?r.dueAt.slice(0,10):'')}"/></div>
         <div class="field"><label>Owner</label><input data-outside-reminder-field="${r.id}.owner" value="${esc(r.owner||'')}" placeholder="e.g. Rivky"/></div>
         <div class="field" style="width:120px;"><label>Repeat (days)</label><input type="number" data-outside-reminder-field="${r.id}.recurrenceDays" value="${esc(r.recurrenceDays||'')}" placeholder="one-time"/></div>
-        <button class="icon-btn" data-action="remove-outside-booking-reminder" data-clause="${b.id}" data-id="${r.id}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
+        <button class="icon-btn" data-action="remove-outside-booking-reminder" data-clause="${esc(b.id)}" data-id="${esc(r.id)}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
       </div>
       <input data-outside-reminder-field="${r.id}.notes" value="${esc(r.notes||'')}" placeholder="What's this reminder for?"/>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        ${r.completedAt? `<span class="pill pill-good">Completed ${fmtDateShort(r.completedAt.slice(0,10))}</span>` : `<button class="btn btn-sm" data-action="complete-outside-booking-reminder" data-clause="${b.id}" data-id="${r.id}">Mark Done</button><button class="btn btn-sm btn-ghost" data-action="snooze-outside-booking-reminder" data-clause="${b.id}" data-id="${r.id}">Snooze 3 days</button>`}
+        ${r.completedAt? `<span class="pill pill-good">Completed ${fmtDateShort(r.completedAt.slice(0,10))}</span>` : `<button class="btn btn-sm" data-action="complete-outside-booking-reminder" data-clause="${esc(b.id)}" data-id="${esc(r.id)}">Mark Done</button><button class="btn btn-sm btn-ghost" data-action="snooze-outside-booking-reminder" data-clause="${esc(b.id)}" data-id="${esc(r.id)}">Snooze 3 days</button>`}
         ${r.snoozedUntil && !r.completedAt? `<span class="pill pill-neutral">Snoozed to ${fmtDateShort(r.snoozedUntil)}</span>` : ''}
       </div>
     </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0;">No reminders yet.</p>`}
@@ -7187,8 +7196,8 @@ function renderOutsideBookingDetailSheet(){
         ${renderOutsideBookingRemindersSection(b)}
 
         <div style="display:flex;gap:8px;">
-          ${b.status==='open'? `<button class="btn btn-sm" data-action="mark-outside-booking-paid" data-id="${b.id}">Mark Paid</button>` : ''}
-          <button class="btn btn-sm" data-action="open-outside-doc-builder" data-id="${b.id}">${DOCUMENTS.some(d=>d.subjectType==='outside'&&d.subjectId===b.id)?'Edit Document':'Document'}</button>
+          ${b.status==='open'? `<button class="btn btn-sm" data-action="mark-outside-booking-paid" data-id="${esc(b.id)}">Mark Paid</button>` : ''}
+          <button class="btn btn-sm" data-action="open-outside-doc-builder" data-id="${esc(b.id)}">${DOCUMENTS.some(d=>d.subjectType==='outside'&&d.subjectId===b.id)?'Edit Document':'Document'}</button>
           <button class="btn btn-sm btn-primary btn-block" data-action="close-outside-booking-detail">Done</button>
         </div>
       </div>
@@ -7204,7 +7213,7 @@ function renderDocumentsPage(){
   ${DOCUMENTS.length? `<div class="card table-cards"><table>
     <thead><tr><th>Title</th><th>For</th><th>Letterhead</th><th>Date</th><th>Status</th></tr></thead>
     <tbody>${DOCUMENTS.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(d=>{
-      return `<tr class="row-link" data-action="open-document" data-id="${d.id}">
+      return `<tr class="row-link" data-action="open-document" data-id="${esc(d.id)}">
         <td data-label="Title">${esc(d.title)}</td>
         <td data-label="For">${esc(documentSubjectLabel(d))}</td>
         <td data-label="Letterhead">${esc(getBrandConfig(d.brand).label)}</td>
@@ -7280,14 +7289,14 @@ function renderProjectFolderCard(p, opts={}){
   const isAdmin = isAdminUser(S.user);
   const overdue = p.dueDate && isPast(p.dueDate);
   const coverStyle = p.coverImage? `background-image:url('${safeDataUrl(p.coverImage)}');` : `background:var(--cat-${a?.slot||1});`;
-  return `<div class="project-folder" data-action="open-project" data-id="${p.id}">
+  return `<div class="project-folder" data-action="open-project" data-id="${esc(p.id)}">
     <div class="project-folder-cover" style="${coverStyle}">
       ${!p.coverImage? `<span class="project-folder-cover-fallback">${esc((p.title||'?').trim().slice(0,1).toUpperCase())}</span>`:''}
-      ${isAdmin? `<label class="project-folder-cover-upload" data-action="upload-project-cover" data-id="${p.id}" title="Set cover image">
+      ${isAdmin? `<label class="project-folder-cover-upload" data-action="upload-project-cover" data-id="${esc(p.id)}" title="Set cover image">
         ${ICO.image}
-        <input type="file" accept="image/*" data-action="upload-project-cover" data-id="${p.id}" style="display:none;"/>
+        <input type="file" accept="image/*" data-action="upload-project-cover" data-id="${esc(p.id)}" style="display:none;"/>
       </label>` : ''}
-      ${p.coverImage && isAdmin? `<button class="icon-btn project-folder-cover-remove" data-action="remove-project-cover" data-id="${p.id}" title="Remove cover" style="width:24px;height:24px;" aria-label="Remove cover">${ICO.x}</button>`:''}
+      ${p.coverImage && isAdmin? `<button class="icon-btn project-folder-cover-remove" data-action="remove-project-cover" data-id="${esc(p.id)}" title="Remove cover" style="width:24px;height:24px;" aria-label="Remove cover">${ICO.x}</button>`:''}
     </div>
     <div class="project-folder-body">
       ${opts.showArtist? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;"><span class="avatar" data-slot="${a?a.slot:0}" style="width:18px;height:18px;font-size:8px;">${a?esc(a.initials):'—'}</span><span style="font-size:11px;color:var(--ink-2);">${a?esc(a.name):'General'}</span></div>`:''}
@@ -7328,7 +7337,7 @@ function personInitials(name){
 function renderPersonAvatar(person, size){
   size = size||16;
   const artist = person.kind==='internal' ? artistById(person.refId) : null;
-  if(artist) return `<span class="avatar" data-slot="${artist.slot}" style="width:${size}px;height:${size}px;font-size:${Math.round(size*0.44)}px;flex:none;">${esc(artist.initials)}</span>`;
+  if(artist) return `<span class="avatar" data-slot="${esc(artist.slot)}" style="width:${size}px;height:${size}px;font-size:${Math.round(size*0.44)}px;flex:none;">${esc(artist.initials)}</span>`;
   return `<span class="avatar" style="width:${size}px;height:${size}px;font-size:${Math.round(size*0.44)}px;flex:none;background:var(--ink);color:var(--page);">${esc(personInitials(person.name))}</span>`;
 }
 function renderAssigneeChip(p, personId){
@@ -7338,7 +7347,7 @@ function renderAssigneeChip(p, personId){
   return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;${isMe?'font-weight:700;color:var(--accent-ink);':'color:var(--ink-2);'}">${renderPersonAvatar(person,16)}${isMe?'You':esc(person.name)}</span>`;
 }
 function renderTaskAssigneeSelect(p, t){
-  return `<select class="task-assignee-select" data-id="${p.id}" data-taskid="${t.id}" style="font-size:11px;padding:3px 5px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);max-width:120px;color:var(--ink);">
+  return `<select class="task-assignee-select" data-id="${esc(p.id)}" data-taskid="${esc(t.id)}" style="font-size:11px;padding:3px 5px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);max-width:120px;color:var(--ink);">
     <option value="">Unassigned</option>
     ${(p.people||[]).map(person=>`<option value="${esc(person.id)}" ${t.assignedTo===person.id?'selected':''}>${esc(person.name)}</option>`).join('')}
   </select>`;
@@ -7372,18 +7381,18 @@ function renderBoardCard(pid, c){
   const items = c.items||[];
   return `<div class="sticky-card" style="--card-accent:${boardCardColor(c.header)}">
     <div class="sticky-card-head">
-      <input class="blend-input" data-action="set-board-card-header" data-id="${pid}" data-cardid="${c.id}" value="${esc(c.header)}" placeholder="Card title…" ${isAdmin?'':'readonly'}/>
-      ${isAdmin? `<button class="icon-btn" data-action="remove-board-card" data-id="${pid}" data-cardid="${c.id}" title="Remove card" style="width:24px;height:24px;flex:none;" aria-label="Remove card">${ICO.x}</button>`:''}
+      <input class="blend-input" data-action="set-board-card-header" data-id="${pid}" data-cardid="${esc(c.id)}" value="${esc(c.header)}" placeholder="Card title…" ${isAdmin?'':'readonly'}/>
+      ${isAdmin? `<button class="icon-btn" data-action="remove-board-card" data-id="${pid}" data-cardid="${esc(c.id)}" title="Remove card" style="width:24px;height:24px;flex:none;" aria-label="Remove card">${ICO.x}</button>`:''}
     </div>
     <div class="sticky-card-items">
       ${items.length? items.map(it=>`<div class="sticky-card-item">
         <span>${esc(it.text)}</span>
-        ${isAdmin? `<button data-action="remove-board-item" data-id="${pid}" data-cardid="${c.id}" data-itemid="${it.id}" title="Remove">${ICO.x}</button>`:''}
+        ${isAdmin? `<button data-action="remove-board-item" data-id="${pid}" data-cardid="${esc(c.id)}" data-itemid="${esc(it.id)}" title="Remove">${ICO.x}</button>`:''}
       </div>`).join('') : `<p class="sticky-card-empty">Nothing yet.</p>`}
     </div>
     ${isAdmin? `<div style="display:flex;gap:6px;margin-top:8px;">
-      <input class="board-item-input" data-cardid="${c.id}" data-projectid="${pid}" placeholder="Type here…" style="flex:1;min-width:0;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc((S.newBoardItemText||{})[c.id]||'')}"/>
-      <button class="icon-btn" data-action="add-board-item" data-id="${pid}" data-cardid="${c.id}" style="width:28px;height:28px;flex:none;" aria-label="Add item">${ICO.plus}</button>
+      <input class="board-item-input" data-cardid="${esc(c.id)}" data-projectid="${pid}" placeholder="Type here…" style="flex:1;min-width:0;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc((S.newBoardItemText||{})[c.id]||'')}"/>
+      <button class="icon-btn" data-action="add-board-item" data-id="${pid}" data-cardid="${esc(c.id)}" style="width:28px;height:28px;flex:none;" aria-label="Add item">${ICO.plus}</button>
     </div>` : ''}
   </div>`;
 }
@@ -7401,7 +7410,7 @@ function renderProjectDetail(){
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
       <span class="avatar" data-slot="${a?a.slot:0}" style="width:44px;height:44px;flex:none;">${a?esc(a.initials):'—'}</span>
       <div style="min-width:0;flex:1;">
-      ${isAdmin? `<input class="blend-input" data-action="set-project-title" data-id="${p.id}" value="${esc(p.title)}" placeholder="Project name…" style="font-family:var(--font-display);font-size:1.3rem;font-weight:600;padding:0;"/>`
+      ${isAdmin? `<input class="blend-input" data-action="set-project-title" data-id="${esc(p.id)}" value="${esc(p.title)}" placeholder="Project name…" style="font-family:var(--font-display);font-size:1.3rem;font-weight:600;padding:0;"/>`
         : `<strong style="font-family:var(--font-display);font-size:1.3rem;display:block;">${esc(p.title)}</strong>`}
       <span class="pill pill-accent">${a?esc(a.name):'General'}</span></div>
     </div>
@@ -7410,24 +7419,24 @@ function renderProjectDetail(){
           <div class="u-label" style="margin-bottom:10px;">Project Info</div>
           <div style="display:flex;flex-direction:column;gap:10px;font-size:12.5px;">
             <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Artist</span>
-              ${a? `<span style="display:flex;align-items:center;gap:6px;font-weight:600;${isAdmin?'cursor:pointer;':''}" ${isAdmin?`data-action="open-artist" data-id="${a.id}"`:''}><span class="avatar" data-slot="${a.slot}" style="width:20px;height:20px;font-size:8px;">${esc(a.initials)}</span>${esc(a.name)}</span>`
+              ${a? `<span style="display:flex;align-items:center;gap:6px;font-weight:600;${isAdmin?'cursor:pointer;':''}" ${isAdmin?`data-action="open-artist" data-id="${esc(a.id)}"`:''}><span class="avatar" data-slot="${esc(a.slot)}" style="width:20px;height:20px;font-size:8px;">${esc(a.initials)}</span>${esc(a.name)}</span>`
                 : `<span style="color:var(--ink-3);">None — general project</span>`}</div>
             <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Who it's for</span>
-              ${isAdmin? `<input data-action="set-project-subtitle" data-id="${p.id}" value="${esc(p.subtitle||'')}" placeholder="e.g. client / label" style="padding:5px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;text-align:right;max-width:160px;"/>`
+              ${isAdmin? `<input data-action="set-project-subtitle" data-id="${esc(p.id)}" value="${esc(p.subtitle||'')}" placeholder="e.g. client / label" style="padding:5px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;text-align:right;max-width:160px;"/>`
                 : (p.subtitle? `<span>${esc(p.subtitle)}</span>` : `<span style="color:var(--ink-3);">Not set</span>`)}
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Target Date</span>
-              ${isAdmin? `<input type="date" data-action="set-project-due" data-id="${p.id}" value="${esc(p.dueDate||'')}" style="padding:5px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;"/>`
+              ${isAdmin? `<input type="date" data-action="set-project-due" data-id="${esc(p.id)}" value="${esc(p.dueDate||'')}" style="padding:5px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;"/>`
                 : (p.dueDate? `<span style="color:${isPast(p.dueDate)?'var(--crit)':'var(--ink-2)'};">${fmtDateShort(p.dueDate)}</span>` : `<span style="color:var(--ink-3);">Not set</span>`)}
             </div>
             ${recordingEvent? `<div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--ink-2);">Recording Day</span>
-              <span style="cursor:pointer;color:var(--accent);text-decoration:underline;" data-action="open-event" data-id="${recordingEvent.id}">${fmtDateShort(recordingEvent.date)}${recordingSiblings.length? ` · +${recordingSiblings.length} other episode${recordingSiblings.length===1?'':'s'}` : ''}</span></div>` : ''}
+              <span style="cursor:pointer;color:var(--accent);text-decoration:underline;" data-action="open-event" data-id="${esc(recordingEvent.id)}">${fmtDateShort(recordingEvent.date)}${recordingSiblings.length? ` · +${recordingSiblings.length} other episode${recordingSiblings.length===1?'':'s'}` : ''}</span></div>` : ''}
           </div>
 
           <div style="margin-top:16px;">
             <div class="u-label" style="margin-bottom:8px;">Who's Involved</div>
             <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:${isAdmin?'10px':'0'};">
-              ${(p.people||[]).length? p.people.map(person=>`<span class="pill pill-neutral" style="display:inline-flex;align-items:center;gap:6px;">${renderPersonAvatar(person,15)}${esc(person.role)}: ${esc(person.name)}${isAdmin?`<button data-action="remove-person" data-id="${p.id}" data-pid="${person.id}" aria-label="Remove ${esc(person.name)}" style="border:none;background:none;cursor:pointer;color:var(--ink-3);padding:0;display:flex;">${ICO.x}</button>`:''}</span>`).join('') : `<span style="font-size:12px;color:var(--ink-3);">Nobody added yet.</span>`}
+              ${(p.people||[]).length? p.people.map(person=>`<span class="pill pill-neutral" style="display:inline-flex;align-items:center;gap:6px;">${renderPersonAvatar(person,15)}${esc(person.role)}: ${esc(person.name)}${isAdmin?`<button data-action="remove-person" data-id="${esc(p.id)}" data-pid="${esc(person.id)}" aria-label="Remove ${esc(person.name)}" style="border:none;background:none;cursor:pointer;color:var(--ink-3);padding:0;display:flex;">${ICO.x}</button>`:''}</span>`).join('') : `<span style="font-size:12px;color:var(--ink-3);">Nobody added yet.</span>`}
             </div>
             ${isAdmin? `
             <div class="chip-row" style="margin-bottom:8px;">
@@ -7442,14 +7451,14 @@ function renderProjectDetail(){
                 <optgroup label="Artists">${ARTISTS.map(a=>`<option value="${esc(a.id)}" ${S.newPersonForm.refId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</optgroup>
               </select>
               <input data-field="role" placeholder="Role (e.g. Point of Contact)" style="flex:1;min-width:110px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.role||'')}"/>
-              <button class="btn btn-sm" data-action="add-person" data-id="${p.id}">Add</button>
+              <button class="btn btn-sm" data-action="add-person" data-id="${esc(p.id)}">Add</button>
             </div>
             ` : `
             <div data-form="person" style="display:flex;gap:6px;flex-wrap:wrap;">
               <input data-field="name" placeholder="Name" style="flex:1;min-width:100px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.name||'')}"/>
               <input data-field="email" placeholder="Email (optional)" style="flex:1;min-width:130px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.email||'')}"/>
               <input data-field="role" placeholder="Role (e.g. Guest)" style="flex:1;min-width:90px;padding:7px 9px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);font-size:12px;" value="${esc(S.newPersonForm.role||'')}"/>
-              <button class="btn btn-sm" data-action="add-person" data-id="${p.id}">Add</button>
+              <button class="btn btn-sm" data-action="add-person" data-id="${esc(p.id)}">Add</button>
             </div>
             `}
             ` : ''}
@@ -7460,8 +7469,8 @@ function renderProjectDetail(){
           <div class="section-head" style="margin-bottom:12px;"><h2 style="font-size:1rem;">Board</h2></div>
           ${(p.boardCards||[]).length? `<div class="sticky-board">${p.boardCards.map(c=>renderBoardCard(p.id,c)).join('')}</div>` : `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No cards yet — add one below.</p>`}
           ${isAdmin? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;">
-            ${['Contacts','Musicians','Venue','Notes'].map(h=>`<button class="filter-chip" data-action="add-board-card" data-id="${p.id}" data-preset="${esc(h)}">${ICO.plus} ${esc(h)}</button>`).join('')}
-            <button class="btn btn-sm" data-action="add-board-card" data-id="${p.id}">${ICO.plus} Blank Card</button>
+            ${['Contacts','Musicians','Venue','Notes'].map(h=>`<button class="filter-chip" data-action="add-board-card" data-id="${esc(p.id)}" data-preset="${esc(h)}">${ICO.plus} ${esc(h)}</button>`).join('')}
+            <button class="btn btn-sm" data-action="add-board-card" data-id="${esc(p.id)}">${ICO.plus} Blank Card</button>
           </div>` : ''}
         </div>
 
@@ -7488,10 +7497,10 @@ function renderProjectDetail(){
               const assignedPerson = t.assignedTo ? (p.people||[]).find(x=>x.id===t.assignedTo) : null;
               const isMine = assignedPerson && assignedPerson.kind==='internal' && isMeRef(assignedPerson.refId);
               return `<div class="log-item" style="align-items:center;flex-wrap:wrap;gap:8px;${isMine&&!t.done?'background:var(--accent-wash);border-radius:8px;':''}">
-              <input type="checkbox" ${t.done?'checked':''} data-action="toggle-task" data-id="${p.id}" data-taskid="${t.id}" style="width:16px;height:16px;flex:none;"/>
+              <input type="checkbox" ${t.done?'checked':''} data-action="toggle-task" data-id="${esc(p.id)}" data-taskid="${esc(t.id)}" style="width:16px;height:16px;flex:none;"/>
               <span style="flex:1;min-width:120px;${t.done?'text-decoration:line-through;color:var(--ink-3);':''}">${esc(t.text)}</span>
               ${isAdmin? renderTaskAssigneeSelect(p,t) : renderAssigneeChip(p, t.assignedTo)}
-              ${isAdmin?`<button class="icon-btn" data-action="remove-task" data-id="${p.id}" data-taskid="${t.id}" style="width:24px;height:24px;" aria-label="Remove task">${ICO.x}</button>`:''}
+              ${isAdmin?`<button class="icon-btn" data-action="remove-task" data-id="${esc(p.id)}" data-taskid="${esc(t.id)}" style="width:24px;height:24px;" aria-label="Remove task">${ICO.x}</button>`:''}
             </div>`;
             }).join('') || `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">${S.taskAssigneeFilter? 'No tasks match this filter.' : 'No tasks yet.'}</p>`}
           </div>
@@ -7501,7 +7510,7 @@ function renderProjectDetail(){
               <option value="">Unassigned</option>
               ${(p.people||[]).map(person=>`<option value="${esc(person.id)}" ${S.newTaskAssignee===person.id?'selected':''}>${esc(person.name)}</option>`).join('')}
             </select>
-            <button class="btn btn-sm" data-action="add-task" data-id="${p.id}">Add</button>
+            <button class="btn btn-sm" data-action="add-task" data-id="${esc(p.id)}">Add</button>
           </div>`:''}
           <p style="font-size:11.5px;color:var(--ink-3);margin:10px 0 0;">Checking off a task doesn't capture details — post the actual decision (which cities, which venue, etc.) in Conversation.</p>
           ` : ''}
@@ -7515,7 +7524,7 @@ function renderProjectDetail(){
           </div>
           <div data-form="comment" style="display:flex;gap:6px;margin-top:10px;">
             <input data-field="newCommentText" placeholder="Post an update or decision…" style="flex:1;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newCommentText||'')}"/>
-            <button class="btn btn-sm" data-action="add-comment" data-id="${p.id}">Post</button>
+            <button class="btn btn-sm" data-action="add-comment" data-id="${esc(p.id)}">Post</button>
           </div>
           ` : ''}
 
@@ -7523,12 +7532,12 @@ function renderProjectDetail(){
           <div class="u-label" style="margin-bottom:8px;">Images</div>
           <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:22px 12px;border:1.5px dashed var(--border-strong);border-radius:var(--r-md);cursor:pointer;margin-bottom:14px;color:var(--ink-2);">
             ${ICO.plus}<strong style="font-size:13px;">Upload Image</strong><span style="font-size:11px;color:var(--ink-3);">Reference photos, cover art drafts, etc.</span>
-            <input type="file" accept="image/*" data-action="upload-project-image" data-id="${p.id}" multiple style="display:none;"/>
+            <input type="file" accept="image/*" data-action="upload-project-image" data-id="${esc(p.id)}" multiple style="display:none;"/>
           </label>
           ${p.images.length? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px;">
             ${p.images.map(img=>`<div style="position:relative;">
               <a href="${safeDataUrl(img.dataUrl)}" target="_blank" rel="noopener" style="display:block;aspect-ratio:1;border-radius:8px;overflow:hidden;border:1px solid var(--border);"><img src="${safeDataUrl(img.dataUrl)}" alt="${esc(img.name)}" style="width:100%;height:100%;object-fit:cover;"/></a>
-              <button class="icon-btn" data-action="remove-project-image" data-id="${p.id}" data-imgid="${img.id}" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.55);color:#fff;width:22px;height:22px;" aria-label="Remove image">${ICO.x}</button>
+              <button class="icon-btn" data-action="remove-project-image" data-id="${esc(p.id)}" data-imgid="${esc(img.id)}" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.55);color:#fff;width:22px;height:22px;" aria-label="Remove image">${ICO.x}</button>
             </div>`).join('')}
           </div>` : `<p style="font-size:12.5px;color:var(--ink-3);margin:0 0 20px;">No images yet.</p>`}
 
@@ -7537,13 +7546,13 @@ function renderProjectDetail(){
             ${p.links.length? p.links.map(l=>`<div class="log-item" style="align-items:center;">
               <span class="log-ico">${ICO.share}</span>
               <a href="${esc(safeWebUrl(l.url) || '#')}" target="_blank" rel="noopener" style="flex:1;color:var(--accent);text-decoration:none;font-size:12.5px;word-break:break-all;">${esc(l.label||l.url)}</a>
-              <button class="icon-btn" data-action="remove-project-link" data-id="${p.id}" data-linkid="${l.id}" style="width:24px;height:24px;" aria-label="Remove project link">${ICO.x}</button>
+              <button class="icon-btn" data-action="remove-project-link" data-id="${esc(p.id)}" data-linkid="${esc(l.id)}" style="width:24px;height:24px;" aria-label="Remove project link">${ICO.x}</button>
             </div>`).join('') : `<p style="font-size:12.5px;color:var(--ink-3);margin:0;">No links yet.</p>`}
           </div>
           <div data-form="projectlink" style="display:flex;gap:6px;flex-wrap:wrap;">
             <input data-field="label" placeholder="Label (optional)" style="flex:1;min-width:100px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newLinkForm.label||'')}"/>
             <input data-field="url" placeholder="https://…" style="flex:2;min-width:140px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newLinkForm.url||'')}"/>
-            <button class="btn btn-sm" data-action="add-project-link" data-id="${p.id}">Add</button>
+            <button class="btn btn-sm" data-action="add-project-link" data-id="${esc(p.id)}">Add</button>
           </div>
           ` : ''}
 
@@ -7559,26 +7568,26 @@ function renderProjectDetail(){
           <div class="log" style="margin-bottom:10px;">
             ${(p.financials.income||[]).length? p.financials.income.map(i=>`<div class="log-item" style="align-items:center;">
               <span style="flex:1;font-size:12.5px;">${esc(i.label)}</span><strong style="font-size:12.5px;">${money(i.amount)}</strong>
-              ${isAdmin?`<button class="icon-btn" data-action="remove-fin-item" data-id="${p.id}" data-kind="income" data-itemid="${i.id}" style="width:22px;height:22px;" aria-label="Remove fin item">${ICO.x}</button>`:''}
+              ${isAdmin?`<button class="icon-btn" data-action="remove-fin-item" data-id="${esc(p.id)}" data-kind="income" data-itemid="${esc(i.id)}" style="width:22px;height:22px;" aria-label="Remove fin item">${ICO.x}</button>`:''}
             </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0;">No income logged.</p>`}
           </div>
           ${isAdmin? `<div data-form="finincome" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px;">
             <input data-field="newFinIncomeLabel" placeholder="e.g. Sponsor — Continental Ballroom" style="flex:2;min-width:140px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newFinIncomeLabel||'')}"/>
             <input data-field="newFinIncomeAmount" type="number" placeholder="Amount" style="flex:1;min-width:80px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newFinIncomeAmount||'')}"/>
-            <button class="btn btn-sm" data-action="add-fin-item" data-id="${p.id}" data-kind="income">Add</button>
+            <button class="btn btn-sm" data-action="add-fin-item" data-id="${esc(p.id)}" data-kind="income">Add</button>
           </div>`:''}
 
           <div class="u-label" style="margin-bottom:8px;">Expenses</div>
           <div class="log" style="margin-bottom:10px;">
             ${(p.financials.expenses||[]).length? p.financials.expenses.map(i=>`<div class="log-item" style="align-items:center;">
               <span style="flex:1;font-size:12.5px;">${esc(i.label)}</span><strong style="font-size:12.5px;">${money(i.amount)}</strong>
-              ${isAdmin?`<button class="icon-btn" data-action="remove-fin-item" data-id="${p.id}" data-kind="expenses" data-itemid="${i.id}" style="width:22px;height:22px;" aria-label="Remove fin item">${ICO.x}</button>`:''}
+              ${isAdmin?`<button class="icon-btn" data-action="remove-fin-item" data-id="${esc(p.id)}" data-kind="expenses" data-itemid="${esc(i.id)}" style="width:22px;height:22px;" aria-label="Remove fin item">${ICO.x}</button>`:''}
             </div>`).join('') : `<p style="font-size:12px;color:var(--ink-3);margin:0;">No expenses logged.</p>`}
           </div>
           ${isAdmin? `<div data-form="finexpense" style="display:flex;gap:6px;flex-wrap:wrap;">
             <input data-field="newFinExpenseLabel" placeholder="e.g. Studio time" style="flex:2;min-width:140px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newFinExpenseLabel||'')}"/>
             <input data-field="newFinExpenseAmount" type="number" placeholder="Amount" style="flex:1;min-width:80px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);" value="${esc(S.newFinExpenseAmount||'')}"/>
-            <button class="btn btn-sm" data-action="add-fin-item" data-id="${p.id}" data-kind="expenses">Add</button>
+            <button class="btn btn-sm" data-action="add-fin-item" data-id="${esc(p.id)}" data-kind="expenses">Add</button>
           </div>`:''}
           ` : ''}
 
@@ -7601,8 +7610,8 @@ function renderNewProjectModal(){
       <div class="sheet-head"><h2 style="font-size:1.3rem;">${isBatch? 'New Recording Day' : 'New Project'}</h2><button class="icon-btn" data-action="close-new-project" aria-label="Close">${ICO.x}</button></div>
       <div class="sheet-body">
         <div class="field"><label>Artist${isBatch?'':' (optional — leave unset for a general, non-gig project)'}</label>
-          <div class="artist-pick">${ARTISTS.map(a=>`<div class="artist-opt ${f.artistId===a.id?'sel':''}" data-action="pick-project-artist" data-id="${a.id}">
-            <span class="avatar" data-slot="${a.slot}" style="width:34px;height:34px;font-size:12px;">${esc(a.initials)}</span><span>${esc(a.name)}</span></div>`).join('')}
+          <div class="artist-pick">${ARTISTS.map(a=>`<div class="artist-opt ${f.artistId===a.id?'sel':''}" data-action="pick-project-artist" data-id="${esc(a.id)}">
+            <span class="avatar" data-slot="${esc(a.slot)}" style="width:34px;height:34px;font-size:12px;">${esc(a.initials)}</span><span>${esc(a.name)}</span></div>`).join('')}
           ${!isBatch? `<div class="artist-opt ${!f.artistId?'sel':''}" data-action="pick-project-artist" data-id="">
             <span class="avatar" style="width:34px;height:34px;font-size:12px;background:var(--surface-2);color:var(--ink-3);">—</span><span>None</span></div>` : ''}</div>
         </div>
@@ -7638,7 +7647,7 @@ function renderArtistDashboard(artistId){
   ${renderArtistPortalStatus()}
   ${todayGig? `<div class="card card-pad" style="margin-bottom:20px;border-color:var(--accent);background:var(--accent-wash);">
     <div style="display:flex;align-items:center;gap:8px;color:var(--accent-ink);font-weight:700;font-size:13px;margin-bottom:10px;">${MIC_PHOTO_ICON} Today's Gig</div>
-    <div style="font-family:var(--font-display);font-size:1.15rem;font-weight:600;margin-bottom:4px;cursor:pointer;" data-action="open-event" data-id="${todayGig.id}">${esc([todayGig.type && todayGig.type!=='Unknown' ? todayGig.type : '', todayGig.clientName].filter(Boolean).join(' — ') || 'Gig')}</div>
+    <div style="font-family:var(--font-display);font-size:1.15rem;font-weight:600;margin-bottom:4px;cursor:pointer;" data-action="open-event" data-id="${esc(todayGig.id)}">${esc([todayGig.type && todayGig.type!=='Unknown' ? todayGig.type : '', todayGig.clientName].filter(Boolean).join(' — ') || 'Gig')}</div>
     <div style="font-size:13px;color:var(--ink-2);margin-bottom:2px;">${fmtTimeRange(todayGig.time, todayGig.endTime)}</div>
     <div style="font-size:13px;color:${hasLocation(todayGig)?'var(--ink-2)':'var(--ink-3)'};margin-bottom:14px;">${hasLocation(todayGig)? esc(fullLocation(todayGig)) : 'Location TBD'}</div>
     ${renderNavButtons(todayGig)}
@@ -7682,7 +7691,7 @@ function renderArtistTravelCard(evs){
   return `<div class="card card-pad" style="margin-bottom:20px;">
     <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;margin-bottom:10px;">${ICO.suitcase} Your Travel</div>
     ${trips.map(e=>{ const t = travelOf(e); const f0 = t.flights[0] || (e.flightBooked ? e.flight : null);
-      return `<button class="btn btn-block" style="justify-content:space-between;margin-bottom:6px;text-align:left;" data-action="view-itinerary" data-id="${e.id}">
+      return `<button class="btn btn-block" style="justify-content:space-between;margin-bottom:6px;text-align:left;" data-action="view-itinerary" data-id="${esc(e.id)}">
         <span style="min-width:0;"><strong>${esc(fmtDateShort(e.date))} &middot; ${esc(e.city||e.venue||e.type||'')}</strong>${f0? `<br/><span style="font-size:11.5px;color:var(--ink-3);">${esc([f0.airline, f0.flightNumber].filter(Boolean).join(' '))}${t.hotels.length? ` &middot; ${esc(t.hotels[0].name)}` : ''}</span>` : ''}</span>
         <span style="flex:none;color:var(--accent);">Itinerary ›</span></button>`; }).join('')}
   </div>`;
@@ -7829,12 +7838,12 @@ function renderAdditionalArtistsSection(f){
     <label>Additional ASP Artists</label>
     <div class="chip-row">${others.map(a=>{
       const on = selected.some(x=>x.artistId===a.id);
-      return `<button type="button" class="filter-chip ${on?'sel':''}" data-action="toggle-additional-artist" data-id="${a.id}"><span class="avatar" data-slot="${a.slot}" style="width:18px;height:18px;font-size:8px;">${esc(a.initials)}</span>${esc(a.name.split(' ')[0])}</button>`;
+      return `<button type="button" class="filter-chip ${on?'sel':''}" data-action="toggle-additional-artist" data-id="${esc(a.id)}"><span class="avatar" data-slot="${esc(a.slot)}" style="width:18px;height:18px;font-size:8px;">${esc(a.initials)}</span>${esc(a.name.split(' ')[0])}</button>`;
     }).join('')}</div>
     ${selected.length? `<p style="font-size:11.5px;color:var(--ink-3);margin:6px 0 0;">Each additional artist gets their own fee. Only admin sees another artist's numbers on a shared event.</p>
     ${selected.map(x=>{ const a=artistById(x.artistId); return `<div class="field-row" style="margin-top:4px;">
       <div class="field" style="flex:none;width:90px;"><label style="font-size:10px;">${esc(a?a.name.split(' ')[0]:x.artistId)}</label></div>
-      <div class="field"><label>Fee ($)</label><input type="number" data-lead-artist-fee="${x.artistId}" value="${esc(x.feeAmount||'')}" placeholder="0"/></div>
+      <div class="field"><label>Fee ($)</label><input type="number" data-lead-artist-fee="${esc(x.artistId)}" value="${esc(x.feeAmount||'')}" placeholder="0"/></div>
     </div>`; }).join('')}` : ''}
   </div>`;
 }
@@ -8038,7 +8047,7 @@ function renderReminderPreview(){
           ${hasLocation(ev)? `<p style="margin:0 0 8px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:var(--accent);">Open in Maps</a></p>` : ''}
         </div>
         ${isStandardPayment(ev)? renderZelleQrBlock(ev, artist) : ''}
-        <button class="btn btn-primary btn-block" style="margin-top:14px;" data-action="resend-reminder" data-id="${ev.id}" ${S.reminderBusy?'disabled':''}>${S.reminderBusy?'Sending…':'Send'}</button>
+        <button class="btn btn-primary btn-block" style="margin-top:14px;" data-action="resend-reminder" data-id="${esc(ev.id)}" ${S.reminderBusy?'disabled':''}>${S.reminderBusy?'Sending…':'Send'}</button>
         ${ev.lastReminderSent? `<p style="font-size:11px;color:var(--ink-3);text-align:center;margin:8px 0 0;">Last sent ${fmtDateShort(ev.lastReminderSent)}</p>` : ''}
       </div>
     </div>
@@ -8061,7 +8070,7 @@ function renderBookingConfirmationPreview(){
           ${hasLocation(ev)? `<p style="margin:0 0 8px;">Venue: ${esc(fullLocation(ev))} — <a href="${gmapsUrl(ev)}" target="_blank" rel="noopener" style="color:var(--accent);">Open in Maps</a></p>` : ''}
         </div>
         ${isStandardPayment(ev)? renderZelleQrBlock(ev, artist) : ''}
-        <button class="btn btn-primary btn-block" style="margin-top:14px;" data-action="resend-booking-confirmation" data-id="${ev.id}" ${busy?'disabled':''}>${busy?'Sending…':(ev.bookingConfirmationSentAt?'Resend':'Send')}</button>
+        <button class="btn btn-primary btn-block" style="margin-top:14px;" data-action="resend-booking-confirmation" data-id="${esc(ev.id)}" ${busy?'disabled':''}>${busy?'Sending…':(ev.bookingConfirmationSentAt?'Resend':'Send')}</button>
         ${ev.bookingConfirmationSentAt? `<p style="font-size:11px;color:var(--ink-3);text-align:center;margin:8px 0 0;">Sent ${fmtDateShort(ev.bookingConfirmationSentAt.slice(0,10))}</p>` : ''}
       </div>
     </div>
@@ -8106,19 +8115,19 @@ function renderEventSheet(ev){
       ${S.showEventMenu? `<div class="kebab-scrim"></div>`:''}
       <div class="sheet-head">
         <div class="gig-head" style="display:flex;align-items:center;gap:12px;min-width:0;">
-          <span class="avatar" data-slot="${a.slot}" style="width:40px;height:40px;flex:0 0 auto;">${esc(a.initials)}</span>
+          <span class="avatar" data-slot="${esc(a.slot)}" style="width:40px;height:40px;flex:0 0 auto;">${esc(a.initials)}</span>
           <div style="min-width:0;"><strong class="gig-head-name" style="font-family:var(--font-display);font-size:1.2rem;display:block;">${esc(a.name)}</strong>
           <div class="gig-head-status"><span class="pill ${sm.cls}">${esc(sm.label)}</span>
-          ${isAdmin && !ev.unpaid ? `<select class="status-select" data-event-status data-id="${ev.id}" data-testid="gig-status-select" aria-label="Change status" title="Change status">
-            ${EVENT_PIPELINE.map(p=>`<option value="${p.key}" ${p.key===ev.status?'selected':''}>${esc(p.step)}</option>`).join('')}${EVENT_PIPELINE.some(p=>p.key===ev.status)?'':`<option value="${esc(ev.status)}" selected>${esc(sm.label)}</option>`}
+          ${isAdmin && !ev.unpaid ? `<select class="status-select" data-event-status data-id="${esc(ev.id)}" data-testid="gig-status-select" aria-label="Change status" title="Change status">
+            ${EVENT_PIPELINE.map(p=>`<option value="${esc(p.key)}" ${p.key===ev.status?'selected':''}>${esc(p.step)}</option>`).join('')}${EVENT_PIPELINE.some(p=>p.key===ev.status)?'':`<option value="${esc(ev.status)}" selected>${esc(sm.label)}</option>`}
           </select>` : ''}</div></div>
         </div>
         <div class="kebab-menu-wrap" style="display:flex;gap:4px;align-items:center;position:relative;">
           ${isAdmin? `<button class="icon-btn" data-action="open-edit-event" title="Edit details" aria-label="Edit details">${ICO.edit}</button>`:''}
           <button class="icon-btn" data-action="toggle-event-menu" aria-label="Toggle event menu">${ICO.kebab}</button>
           ${S.showEventMenu? `<div class="kebab-dropdown">
-            <button class="kebab-item" data-action="share-event" data-id="${ev.id}">${ICO.share} Share</button>
-            ${canDeleteGigs()? `<button class="kebab-item danger" data-action="delete-event" data-id="${ev.id}">${ICO.trash} Delete ${ev.unpaid?'Internal Day':ev.status==='lead'?'Lead':'Gig'}</button>` : ''}
+            <button class="kebab-item" data-action="share-event" data-id="${esc(ev.id)}">${ICO.share} Share</button>
+            ${canDeleteGigs()? `<button class="kebab-item danger" data-action="delete-event" data-id="${esc(ev.id)}">${ICO.trash} Delete ${ev.unpaid?'Internal Day':ev.status==='lead'?'Lead':'Gig'}</button>` : ''}
           </div>`:''}
           <button class="icon-btn" data-action="close-sheet" aria-label="Close">${ICO.x}</button>
         </div>
@@ -8131,7 +8140,7 @@ function renderEventSheet(ev){
         </div>` : ''}
 
         <div class="card card-pad" style="display:flex;flex-direction:column;gap:9px;">
-          ${!ev.unpaid ? `<div class="kv-row" ${isAdmin?`data-action="open-client-contact" data-id="${ev.id}" style="cursor:pointer;"`:''}><span style="color:var(--ink-2);">${ICO.pin} Client</span><strong${isAdmin?' style="color:var(--accent);"':''}>${esc(ev.clientName)}</strong></div>` : ''}
+          ${!ev.unpaid ? `<div class="kv-row" ${isAdmin?`data-action="open-client-contact" data-id="${esc(ev.id)}" style="cursor:pointer;"`:''}><span style="color:var(--ink-2);">${ICO.pin} Client</span><strong${isAdmin?' style="color:var(--accent);"':''}>${esc(ev.clientName)}</strong></div>` : ''}
           <div class="kv-row"><span style="color:var(--ink-2);">Type</span><strong>${esc(ev.type)}</strong></div>
           ${isWeddingType(ev.type) ? `<div class="kv-row"><span style="color:var(--ink-2);">Band</span><strong style="text-align:right;">${ev.band? esc(ev.band) : `<span style="color:var(--ink-3);font-weight:500;">${isAdmin?'Not set':'TBD'}</span>`}${ev.bandSize?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(String(ev.bandSize))} piece${Number(ev.bandSize)===1?'':'s'}</span>`:''}</strong></div>` : ''}
           <div class="kv-row"><span style="color:var(--ink-2);">${ICO.clock} Date &amp; Time</span><strong class="u-mono">${fmtDate(ev.date)} · ${fmtTimeRange(ev.time, ev.endTime)}</strong></div>
@@ -8153,7 +8162,7 @@ function renderEventSheet(ev){
               ${isAdmin? `<button class="icon-btn" data-action="open-dresscode-form" style="width:20px;height:20px;" title="Edit dress code" aria-label="Edit dress code">${ICO.edit}</button>`:''}
             </span>
           </div>
-          ${isAdmin && !ev.unpaid?`<div class="kv-row" data-action="open-client-contact" data-id="${ev.id}" style="cursor:pointer;"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;color:var(--accent);">${ev.clientEmail||ev.clientPhone? `${esc(ev.clientEmail)}${ev.clientEmail&&ev.clientPhone?'<br/>':''}<span style="font-weight:500;">${esc(ev.clientPhone)}</span>` : '<span style="font-weight:500;">+ Add contact</span>'}</strong></div>`:''}
+          ${isAdmin && !ev.unpaid?`<div class="kv-row" data-action="open-client-contact" data-id="${esc(ev.id)}" style="cursor:pointer;"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;color:var(--accent);">${ev.clientEmail||ev.clientPhone? `${esc(ev.clientEmail)}${ev.clientEmail&&ev.clientPhone?'<br/>':''}<span style="font-weight:500;">${esc(ev.clientPhone)}</span>` : '<span style="font-weight:500;">+ Add contact</span>'}</strong></div>`:''}
           ${!isAdmin && !ev.unpaid && (ev.clientPhone || ev.clientEmail) ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.mail} Contact</span><strong style="text-align:right;">${ev.clientPhone?`<a href="tel:${esc(telHref(ev.clientPhone))}" style="color:var(--accent);text-decoration:none;">${esc(ev.clientPhone)}</a>`:''}${ev.clientPhone&&ev.clientEmail?'<br/>':''}${ev.clientEmail?`<a href="mailto:${esc(ev.clientEmail)}" style="color:var(--accent);text-decoration:none;font-weight:500;">${esc(ev.clientEmail)}</a>`:''}</strong></div>` : ''}
           ${!isAdmin && (ev.coPerformers||[]).length ? `<div class="kv-row"><span style="color:var(--ink-2);">Performing with</span><strong style="text-align:right;">${ev.coPerformers.map(c=>`${esc(c.name)}${c.role?` <span style="font-weight:500;color:var(--ink-2);">(${esc(c.role)})</span>`:''}`).join('<br/>')}</strong></div>` : ''}
           ${!isAdmin && ev.collectMethod ? `<div class="kv-row"><span style="color:var(--ink-2);">${ICO.money} Collect at the event</span><strong style="text-align:right;color:var(--warn-ink);">${ev.collectAmount!=null?`${money(ev.collectAmount)} `:''}${esc(ev.collectMethod==='cash'?'cash (mezumin)':ev.collectMethod==='check'?'by check':'balance')}${ev.collectNote?`<br/><span style="font-weight:500;color:var(--ink-2);">${esc(ev.collectNote)}</span>`:''}</strong></div>` : ''}
@@ -8165,7 +8174,7 @@ function renderEventSheet(ev){
         ${isInternational(ev) && !ev.intlOpportunityDismissed && !isPast(ev.date) ? `<div class="card card-pad" style="border-color:var(--accent);background:var(--accent-wash);">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
             <div style="display:flex;align-items:center;gap:8px;color:var(--accent-ink);font-weight:700;font-size:13px;">${ICO.plane} ${esc(a.name)} will be in ${esc(ev.city)}, ${esc(ev.state)}</div>
-            ${isAdmin?`<button class="icon-btn" data-action="dismiss-intl" data-id="${ev.id}" title="Dismiss" style="width:22px;height:22px;color:var(--accent-ink);flex:none;" aria-label="Dismiss">${ICO.x}</button>`:''}
+            ${isAdmin?`<button class="icon-btn" data-action="dismiss-intl" data-id="${esc(ev.id)}" title="Dismiss" style="width:22px;height:22px;color:var(--accent-ink);flex:none;" aria-label="Dismiss">${ICO.x}</button>`:''}
           </div>
           ${isAdmin? `<p style="font-size:12.5px;color:var(--accent-ink);margin:6px 0 0;">Worth reaching out to contacts nearby — a good window to line up more bookings while ${esc(a.name.split(' ')[0])} is already out there.</p>` : `<p style="font-size:12.5px;color:var(--accent-ink);margin:6px 0 0;">Let the office know if you have contacts nearby — good window to add more bookings on this trip.</p>`}
         </div>` : ''}
@@ -8173,7 +8182,7 @@ function renderEventSheet(ev){
         ${renderGroundTransportBlock(ev, isAdmin)}
         ${isAdmin && (ev.flightNeeded || ev.groundTransportNeeded) ? renderTravelRequestSummary(ev) : ''}
         ${hasItinerary(ev) ? `<div style="display:flex;gap:8px;">
-          <button class="btn" style="flex:1;justify-content:flex-start;" data-action="view-itinerary" data-id="${ev.id}">${ICO.suitcase} View Itinerary</button>
+          <button class="btn" style="flex:1;justify-content:flex-start;" data-action="view-itinerary" data-id="${esc(ev.id)}">${ICO.suitcase} View Itinerary</button>
         </div>` : ''}
         ${isAdmin && !ev.unpaid && ['contract_sent','booked','paid'].includes(ev.status) ? renderGigCrewCard(ev.id, (S.gigCrew||{})[ev.id] || []) : ''}
         ${renderPrepAndGigInfoCard(ev, isAdmin)}
@@ -8202,7 +8211,7 @@ function renderConflictWarning(ev){
   return `<div class="card card-pad" style="border-color:var(--crit);background:var(--crit-wash);">
     <div style="display:flex;align-items:center;gap:8px;color:var(--crit-ink);font-weight:700;font-size:13px;">${ICO.alert} Scheduling conflict</div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">
-      ${conflicts.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--crit-ink);cursor:pointer;" data-action="open-event" data-id="${c.id}">
+      ${conflicts.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--crit-ink);cursor:pointer;" data-action="open-event" data-id="${esc(c.id)}">
         <span>${fmtDateShort(c.date)} · ${esc(fmtTimeRange(c.time, c.endTime))} — ${c.clientName ? `${esc(c.clientName)} (${esc(c.type)})` : esc(c.type)}</span>
         <span style="text-decoration:underline;">View</span>
       </div>`).join('')}
@@ -8211,24 +8220,24 @@ function renderConflictWarning(ev){
 }
 function renderTravelRequestSummary(ev){
   const reqs = travelRequestsForEvent(ev.id);
-  if(!reqs.length) return `<button class="btn btn-sm" style="justify-content:flex-start;" data-action="create-travel-request" data-id="${ev.id}">${ICO.suitcase} Request Travel from Rivky</button>`;
+  if(!reqs.length) return `<button class="btn btn-sm" style="justify-content:flex-start;" data-action="create-travel-request" data-id="${esc(ev.id)}">${ICO.suitcase} Request Travel from Rivky</button>`;
   return `<div style="display:flex;flex-direction:column;gap:6px;">
-    ${reqs.map(tr=>`<button class="btn btn-sm" style="justify-content:space-between;" data-action="open-travel-request" data-id="${tr.id}">
+    ${reqs.map(tr=>`<button class="btn btn-sm" style="justify-content:space-between;" data-action="open-travel-request" data-id="${esc(tr.id)}">
       <span>${ICO.suitcase} Travel Request</span>
       <span class="pill ${tr.status==='draft'?'':'pill-good'}">${esc(travelRequestStatusLabel(tr.status))}</span>
     </button>`).join('')}
   </div>`;
 }
 function renderFlightBlock(ev, isAdmin){
-  if(!ev.flightNeeded) return isAdmin ? `<button class="btn btn-ghost" data-action="toggle-flight" data-id="${ev.id}" style="justify-content:flex-start;color:var(--ink-2);">${ICO.checkSquare} Mark flight needed</button>` : '';
+  if(!ev.flightNeeded) return isAdmin ? `<button class="btn btn-ghost" data-action="toggle-flight" data-id="${esc(ev.id)}" style="justify-content:flex-start;color:var(--ink-2);">${ICO.checkSquare} Mark flight needed</button>` : '';
   if(!ev.flightBooked){
     if(!isAdmin) return '';
     return `<div class="card card-pad" style="border-color:var(--warn);background:var(--warn-wash);">
       <div style="display:flex;align-items:center;gap:8px;color:var(--warn-ink);font-weight:700;font-size:13px;">${ICO.plane} Flight needed — not booked yet</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
-        <button class="btn btn-sm" data-action="open-flight-form" data-id="${ev.id}">Add flight info</button>
-        <button class="btn btn-sm btn-ghost" data-action="unmark-flight" data-id="${ev.id}">Not needed</button>
-        <button class="btn btn-sm" data-action="open-travel-drop" data-id="${ev.id}">Drop in confirmations</button>
+        <button class="btn btn-sm" data-action="open-flight-form" data-id="${esc(ev.id)}">Add flight info</button>
+        <button class="btn btn-sm btn-ghost" data-action="unmark-flight" data-id="${esc(ev.id)}">Not needed</button>
+        <button class="btn btn-sm" data-action="open-travel-drop" data-id="${esc(ev.id)}">Drop in confirmations</button>
       </div>
     </div>`;
   }
@@ -8237,7 +8246,7 @@ function renderFlightBlock(ev, isAdmin){
   const checking = S.checkingFlightId===ev.id;
   return `<div class="card card-pad">
     <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--good-ink);">${ICO.plane} Flight booked
-      ${isAdmin? `<span style="margin-left:auto;display:flex;gap:6px;"><button class="btn btn-sm btn-ghost" data-action="open-travel-drop" data-id="${ev.id}">+ Confirmations</button><button class="btn btn-sm btn-ghost" data-action="unmark-flight" data-id="${ev.id}">Remove flight</button></span>` : ''}</div>
+      ${isAdmin? `<span style="margin-left:auto;display:flex;gap:6px;"><button class="btn btn-sm btn-ghost" data-action="open-travel-drop" data-id="${esc(ev.id)}">+ Confirmations</button><button class="btn btn-sm btn-ghost" data-action="unmark-flight" data-id="${esc(ev.id)}">Remove flight</button></span>` : ''}</div>
     <div class="ledger" style="margin-top:8px;">
       <div class="ledger-row"><span>Airline</span><span class="amt">${esc(f.airline)}</span></div>
       ${f.flightNumber?`<div class="ledger-row"><span>Flight #</span><span class="amt">${esc(f.flightNumber)}</span></div>`:''}
@@ -8252,28 +8261,28 @@ function renderFlightBlock(ev, isAdmin){
           <span class="u-label">Flight Tracking</span>
           ${f.trackingStatus? `<span class="pill pill-good">${esc(f.trackingStatus)}</span>` : `<span class="pill pill-neutral">Not checked yet</span>`}
         </div>
-        ${isAdmin? `<button class="btn btn-sm" data-action="check-flight-status" data-id="${ev.id}" ${checking?'disabled':''} style="min-width:118px;justify-content:center;">${checking? markLoader(12) : 'Check for Update'}</button>` : ''}
+        ${isAdmin? `<button class="btn btn-sm" data-action="check-flight-status" data-id="${esc(ev.id)}" ${checking?'disabled':''} style="min-width:118px;justify-content:center;">${checking? markLoader(12) : 'Check for Update'}</button>` : ''}
       </div>
       ${f.trackingStatusAt? `<div style="font-size:11px;color:var(--ink-3);margin-top:6px;">Last checked ${new Date(f.trackingStatusAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})} — emailed to ${esc(artistById(ev.artistId).name)} in an ASP-branded update.</div>` : ''}
     </div>` : ''}
   </div>`;
 }
 function renderGroundTransportBlock(ev, isAdmin){
-  if(!ev.groundTransportNeeded) return isAdmin ? `<button class="btn btn-ghost" data-action="toggle-ground-transport" data-id="${ev.id}" style="justify-content:flex-start;color:var(--ink-2);">${ICO.checkSquare} Mark ground transport needed</button>` : '';
+  if(!ev.groundTransportNeeded) return isAdmin ? `<button class="btn btn-ghost" data-action="toggle-ground-transport" data-id="${esc(ev.id)}" style="justify-content:flex-start;color:var(--ink-2);">${ICO.checkSquare} Mark ground transport needed</button>` : '';
   if(!ev.groundTransportBooked){
     if(!isAdmin) return '';
     return `<div class="card card-pad" style="border-color:var(--warn);background:var(--warn-wash);">
       <div style="display:flex;align-items:center;gap:8px;color:var(--warn-ink);font-weight:700;font-size:13px;">${ICO.car} Driver needed — not booked yet</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
-        <button class="btn btn-sm" data-action="open-transport-form" data-id="${ev.id}">Add driver info</button>
-        <button class="btn btn-sm btn-ghost" data-action="unmark-ground-transport" data-id="${ev.id}">Not needed</button>
+        <button class="btn btn-sm" data-action="open-transport-form" data-id="${esc(ev.id)}">Add driver info</button>
+        <button class="btn btn-sm btn-ghost" data-action="unmark-ground-transport" data-id="${esc(ev.id)}">Not needed</button>
       </div>
     </div>`;
   }
   const g = ev.groundTransport;
   return `<div class="card card-pad">
     <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--good-ink);">${ICO.car} Driver booked
-      ${isAdmin? `<button class="btn btn-sm btn-ghost" style="margin-left:auto;" data-action="unmark-ground-transport" data-id="${ev.id}">Remove driver</button>` : ''}</div>
+      ${isAdmin? `<button class="btn btn-sm btn-ghost" style="margin-left:auto;" data-action="unmark-ground-transport" data-id="${esc(ev.id)}">Remove driver</button>` : ''}</div>
     <div class="ledger" style="margin-top:8px;">
       <div class="ledger-row"><span>Driver</span><span class="amt">${esc(g.driverName)}</span></div>
       <div class="ledger-row"><span>Phone</span><span class="amt">${esc(g.driverPhone)}</span></div>
@@ -8334,7 +8343,7 @@ function renderClientContactModal(){
           <button class="btn btn-sm btn-ghost" data-action="copy-text" data-value="${esc(ev.clientPhone||'')}">Copy</button>`)}
         ${row('Email', ev.clientEmail, `<a class="btn btn-sm btn-primary" href="mailto:${esc(ev.clientEmail||'')}" data-action="external-link">Email</a>
           <button class="btn btn-sm btn-ghost" data-action="copy-text" data-value="${esc(ev.clientEmail||'')}">Copy</button>`)}
-        <button class="btn btn-block" style="margin-top:12px;" data-action="edit-client-contact" data-id="${ev.id}">${ICO.edit} Edit contact details</button>
+        <button class="btn btn-block" style="margin-top:12px;" data-action="edit-client-contact" data-id="${esc(ev.id)}">${ICO.edit} Edit contact details</button>
       </div>
     </div>
   </div>`;
@@ -8350,15 +8359,15 @@ function renderLedger(ev, opts={}){
   return `<div class="card card-pad" style="${compact?'padding:12px 14px;':''}">
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
       <div class="u-label">Price Breakdown</div>
-      <button class="btn btn-sm btn-ghost" data-action="toggle-add-charge" data-id="${ev.id}" style="padding:2px 6px;">${S.showAddCharge?'Cancel':'+ Additional fee'}</button>
+      <button class="btn btn-sm btn-ghost" data-action="toggle-add-charge" data-id="${esc(ev.id)}" style="padding:2px 6px;">${S.showAddCharge?'Cancel':'+ Additional fee'}</button>
     </div>
     <div class="ledger" style="${compact?'font-size:11.5px;':''}">
       ${S.editFeeEventId===ev.id
         ? `<div class="ledger-row" data-form="gigfee" style="gap:8px;align-items:center;"><span>Performance Fee</span>
             <span style="display:flex;gap:6px;align-items:center;"><input type="number" data-field="price" value="${esc(String(S.gigFeeForm.price ?? (ev.price||'')))}" placeholder="4500" style="width:110px;"/>
-            <button class="btn btn-sm btn-primary" data-action="save-gig-fee" data-id="${ev.id}">Save</button><button class="btn btn-sm btn-ghost" data-action="cancel-gig-fee">Cancel</button></span></div>`
-        : `<div class="ledger-row"><span>Performance Fee</span><span class="amt">${ev.price? money(ev.price) : ''} <button class="btn btn-sm ${ev.price?'btn-ghost':'btn-primary'}" style="padding:2px 8px;margin-left:6px;" data-action="edit-gig-fee" data-id="${ev.id}">${ev.price?'Edit':'Add fee'}</button></span></div>`}
-      ${extras.map(c=>`<div class="ledger-row"><span>${esc(c.label)}${c.addedAfterSigning?` <span class="pill pill-warn" style="padding:1px 6px;font-size:9px;vertical-align:1px;">notify client</span>`:''} <a href="#" data-action="remove-charge" data-id="${ev.id}" data-chargeid="${c.id}" style="color:var(--crit);text-decoration:none;margin-left:4px;">×</a></span><span class="amt">${money(c.amount)}</span></div>`).join('')}
+            <button class="btn btn-sm btn-primary" data-action="save-gig-fee" data-id="${esc(ev.id)}">Save</button><button class="btn btn-sm btn-ghost" data-action="cancel-gig-fee">Cancel</button></span></div>`
+        : `<div class="ledger-row"><span>Performance Fee</span><span class="amt">${ev.price? money(ev.price) : ''} <button class="btn btn-sm ${ev.price?'btn-ghost':'btn-primary'}" style="padding:2px 8px;margin-left:6px;" data-action="edit-gig-fee" data-id="${esc(ev.id)}">${ev.price?'Edit':'Add fee'}</button></span></div>`}
+      ${extras.map(c=>`<div class="ledger-row"><span>${esc(c.label)}${c.addedAfterSigning?` <span class="pill pill-warn" style="padding:1px 6px;font-size:9px;vertical-align:1px;">notify client</span>`:''} <a href="#" data-action="remove-charge" data-id="${esc(ev.id)}" data-chargeid="${esc(c.id)}" style="color:var(--crit);text-decoration:none;margin-left:4px;">×</a></span><span class="amt">${money(c.amount)}</span></div>`).join('')}
       ${S.showAddCharge? renderAddChargeRow(ev) : ''}
       ${others.map(x=>`<div class="ledger-row"><span>${esc((artistById(x.artistId)||{}).name||'Additional artist')}</span><span class="amt">${x.feeAmount!=null && x.feeAmount!=='' ? money(Number(x.feeAmount)||0) : 'fee not set'}</span></div>`).join('')}
       <div class="ledger-row"><span>Total charged to client</span><span class="amt">${money(total)}</span></div>
@@ -8381,7 +8390,7 @@ function renderBalanceOnlineRow(ev){
   }
   if(balancePayBlocker(ev)) return '';
   const link = (S.payLinks||{})[ev.id];
-  return `<div class="ledger-row"><span>Balance online (to the artist)</span><span class="amt"><button class="btn btn-sm btn-ghost" data-action="make-balance-pay-link" data-id="${ev.id}" ${S.payLinkBusy===ev.id?'disabled':''}>${S.payLinkBusy===ev.id?'Making link…':'Balance pay link'}</button></span></div>
+  return `<div class="ledger-row"><span>Balance online (to the artist)</span><span class="amt"><button class="btn btn-sm btn-ghost" data-action="make-balance-pay-link" data-id="${esc(ev.id)}" ${S.payLinkBusy===ev.id?'disabled':''}>${S.payLinkBusy===ev.id?'Making link…':'Balance pay link'}</button></span></div>
     ${link?`<input readonly value="${esc(link)}" data-testid="balance-pay-link" style="width:100%;font-size:12px;" data-select-on-focus/>`:''}`;
 }
 // The artist's own money on a gig: gig amount, ASP fee at this gig's percentage, what they receive.
@@ -8408,7 +8417,7 @@ function renderAddChargeRow(ev){
     </div>
     ${(f.preset||CHARGE_PRESETS[0])==='Other'? `<div class="field" style="flex:1;min-width:100px;"><label>Label</label><input data-field="customLabel" value="${esc(f.customLabel||'')}" placeholder="Describe charge"/></div>`:''}
     <div class="field" style="width:100px;"><label>Amount</label><input type="number" data-field="amount" value="${esc(f.amount||'')}" placeholder="250"/></div>
-    <button class="btn btn-sm btn-primary" data-action="confirm-add-charge" data-id="${ev.id}">Add</button>
+    <button class="btn btn-sm btn-primary" data-action="confirm-add-charge" data-id="${esc(ev.id)}">Add</button>
   </div>`;
 }
 
@@ -8496,9 +8505,9 @@ function renderClientFormBlock(ev, isAdmin){
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12.5px;">
       <span><span class="u-label" style="margin-right:6px;">Client details form</span>${status}</span>
       <span style="display:flex;gap:6px;flex-wrap:wrap;">
-        ${cf && (cf.sections||[]).length? `<button class="btn btn-sm btn-ghost" data-action="clientform-toggle" data-id="${ev.id}" style="padding:2px 6px;">${open? 'Hide answers' : 'See answers'}</button>` : ''}
-        ${isAdmin? `<button class="btn btn-sm btn-ghost" data-action="gigform-copy" data-id="${ev.id}" style="padding:2px 6px;" ${busy?'disabled':''}>Copy link</button>
-        <button class="btn btn-sm btn-ghost" data-action="gigform-send" data-id="${ev.id}" style="padding:2px 6px;" ${busy?'disabled':''}>${busy? 'Sending…' : 'Send to client'}</button>` : ''}
+        ${cf && (cf.sections||[]).length? `<button class="btn btn-sm btn-ghost" data-action="clientform-toggle" data-id="${esc(ev.id)}" style="padding:2px 6px;">${open? 'Hide answers' : 'See answers'}</button>` : ''}
+        ${isAdmin? `<button class="btn btn-sm btn-ghost" data-action="gigform-copy" data-id="${esc(ev.id)}" style="padding:2px 6px;" ${busy?'disabled':''}>Copy link</button>
+        <button class="btn btn-sm btn-ghost" data-action="gigform-send" data-id="${esc(ev.id)}" style="padding:2px 6px;" ${busy?'disabled':''}>${busy? 'Sending…' : 'Send to client'}</button>` : ''}
       </span>
     </div>
     ${open && cf? `<div style="margin-top:8px;font-size:12.5px;">${(cf.sections||[]).map(sec=>`<div class="u-label" style="margin:8px 0 4px;">${esc(sec.title)}</div>${(sec.rows||[]).map(r=>`<div class="kv-row" style="align-items:flex-start;"><span style="color:var(--ink-2);">${esc(r.label)}</span><strong style="text-align:right;white-space:pre-wrap;overflow-wrap:anywhere;">${esc(r.value)}</strong></div>`).join('')}`).join('')}</div>` : ''}
@@ -8540,7 +8549,7 @@ function renderRiderBlock(ev){
   const busy = S.riderSendBusy===ev.id;
   return `<div data-testid="rider-block" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12.5px;">
     <span><span class="u-label" style="margin-right:6px;">Rider</span>${have.map(id=>`<a href="${esc(riderFor(id).url)}" target="_blank" rel="noopener" style="color:var(--accent-ink);">${esc((artistById(id)||{}).name||'')}</a>`).join(', ')}${ev.riderSentAt? ` <span style="color:var(--ink-3);">· sent ${esc(fmtDateShort(ev.riderSentAt.slice(0,10)))}</span>` : ''}</span>
-    <button class="btn btn-sm btn-ghost" data-action="send-rider" data-id="${ev.id}" data-testid="send-rider" style="padding:2px 6px;" ${busy||!ev.clientEmail?'disabled':''} title="${ev.clientEmail?'':'No client email on this gig'}">${busy? 'Sending…' : 'Send rider'}</button>
+    <button class="btn btn-sm btn-ghost" data-action="send-rider" data-id="${esc(ev.id)}" data-testid="send-rider" style="padding:2px 6px;" ${busy||!ev.clientEmail?'disabled':''} title="${ev.clientEmail?'':'No client email on this gig'}">${busy? 'Sending…' : 'Send rider'}</button>
   </div>`;
 }
 async function doSendRider(id){
@@ -8598,8 +8607,8 @@ function renderPrepAndGigInfoCard(ev, isAdmin){
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
       <div class="u-label">Gig Info</div>
       ${isAdmin? (canNote
-        ? `<button class="btn btn-sm btn-ghost" data-action="open-giginfo-form" data-id="${ev.id}" style="padding:2px 6px;">${hasNotes||files.length?'Edit / upload docs':'+ Upload docs'}</button>`
-        : `<label class="btn btn-sm btn-ghost" style="cursor:pointer;display:inline-flex;padding:2px 6px;">+ Upload docs<input type="file" data-action="upload-prep" data-id="${ev.id}" multiple style="display:none;"/></label>`) : ''}
+        ? `<button class="btn btn-sm btn-ghost" data-action="open-giginfo-form" data-id="${esc(ev.id)}" style="padding:2px 6px;">${hasNotes||files.length?'Edit / upload docs':'+ Upload docs'}</button>`
+        : `<label class="btn btn-sm btn-ghost" style="cursor:pointer;display:inline-flex;padding:2px 6px;">+ Upload docs<input type="file" data-action="upload-prep" data-id="${esc(ev.id)}" multiple style="display:none;"/></label>`) : ''}
     </div>
     ${renderClientFormBlock(ev, isAdmin)}
     ${isAdmin ? renderRiderBlock(ev) : ''}
@@ -8614,9 +8623,9 @@ function renderPrepAndGigInfoCard(ev, isAdmin){
         <span class="log-ico">${ICO.leads}</span>
         <span style="flex:1;min-width:0;overflow-wrap:anywhere;">${esc(f.name)}<div class="log-time">Added ${fmtDateShort(f.uploadedAt)}</div></span>
         <a href="${safeDataUrl(f.dataUrl)}" target="_blank" rel="noopener" class="btn btn-sm">View</a>
-        ${isAdmin?`<button class="icon-btn" data-action="remove-prep" data-id="${ev.id}" data-prepid="${f.id}" title="Remove" aria-label="Remove ${esc(f.name)}">${ICO.x}</button>`:''}
+        ${isAdmin?`<button class="icon-btn" data-action="remove-prep" data-id="${esc(ev.id)}" data-prepid="${esc(f.id)}" title="Remove" aria-label="Remove ${esc(f.name)}">${ICO.x}</button>`:''}
       </div>`).join('')}</div>` : ''}
-    ${hasNotes? `<button class="btn btn-sm" data-action="view-giginfo" data-id="${ev.id}">${ICO.leads} View / Print</button>
+    ${hasNotes? `<button class="btn btn-sm" data-action="view-giginfo" data-id="${esc(ev.id)}">${ICO.leads} View / Print</button>
       ${sheet.updatedAt? `<span style="font-size:10.5px;color:var(--ink-3);margin-left:8px;">Updated ${fmtDateShort(sheet.updatedAt)}</span>`:''}` : ''}
   </div>`;
 }
@@ -8658,17 +8667,17 @@ function renderGigInfoFormOverlay(){
           ${contacts.length? `<div style="margin-bottom:8px;">${contacts.map(c=>`
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12.5px;padding:4px 0;">
               <span>${esc(c.name)}${c.role?` · ${esc(c.role)}`:''} ${c.phone?`— ${esc(c.phone)}`:''} ${c.email?`— ${esc(c.email)}`:''}</span>
-              <button class="icon-btn" data-action="remove-gig-contact" data-id="${ev.id}" data-contactid="${c.id}" title="Remove" style="width:20px;height:20px;" aria-label="Remove">${ICO.x}</button>
+              <button class="icon-btn" data-action="remove-gig-contact" data-id="${esc(ev.id)}" data-contactid="${esc(c.id)}" title="Remove" style="width:20px;height:20px;" aria-label="Remove">${ICO.x}</button>
             </div>`).join('')}</div>` : ''}
           <div data-form="gigcontact" style="display:flex; gap:6px; padding:8px 0; border-top:1px dashed var(--border); align-items:flex-end; flex-wrap:wrap;">
             <div class="field" style="flex:1;min-width:100px;"><label style="font-size:10px;">Name</label><input data-field="name" value="${esc(cf.name||'')}" placeholder="Venue coordinator"/></div>
             <div class="field" style="flex:1;min-width:100px;"><label style="font-size:10px;">Role</label><input data-field="role" value="${esc(cf.role||'')}" placeholder="Optional"/></div>
             <div class="field" style="flex:1;min-width:110px;"><label style="font-size:10px;">Phone</label><input data-field="phone" value="${esc(cf.phone||'')}" placeholder="(555) 555-5555"/></div>
             <div class="field" style="flex:1;min-width:130px;"><label style="font-size:10px;">Email</label><input data-field="email" value="${esc(cf.email||'')}" placeholder="name@example.com"/></div>
-            <button class="btn btn-sm" data-action="add-gig-contact" data-id="${ev.id}">+ Add</button>
+            <button class="btn btn-sm" data-action="add-gig-contact" data-id="${esc(ev.id)}">+ Add</button>
           </div>
         </div>
-        <button class="btn btn-primary btn-block" data-action="save-giginfo" data-id="${ev.id}" style="margin-top:6px;">Save</button>
+        <button class="btn btn-primary btn-block" data-action="save-giginfo" data-id="${esc(ev.id)}" style="margin-top:6px;">Save</button>
       </div>
     </div>
   </div>`;
@@ -8763,11 +8772,11 @@ function renderAdminActions(ev){
     // currently a new lead as an admin"): it becomes Booked; the deposit is still owed and tracked.
     // Owner 2026-11-05: the usual next step, Create Contract (in the Contracts card), is the main button; booking
     // without a contract is this small link.
-    buttons.push(`<button class="btn btn-sm btn-ghost btn-block" data-action="confirm-lead" data-id="${ev.id}" data-testid="confirm-lead" style="color:var(--ink-2);">Book without a contract</button>`);
+    buttons.push(`<button class="btn btn-sm btn-ghost btn-block" data-action="confirm-lead" data-id="${esc(ev.id)}" data-testid="confirm-lead" style="color:var(--ink-2);">Book without a contract</button>`);
   }
   if(ev.status==='contract_sent'){
     // One way to record a deposit that didn't come in online (owner 2026-11-05): it asks how the money came in.
-    buttons.push(`<button class="btn btn-primary btn-block" data-action="open-verify-deposit" data-id="${ev.id}" data-testid="record-deposit">${ICO.check} Record deposit</button>`);
+    buttons.push(`<button class="btn btn-primary btn-block" data-action="open-verify-deposit" data-id="${esc(ev.id)}" data-testid="record-deposit">${ICO.check} Record deposit</button>`);
   }
   if(ev.status==='booked' && !ev.balanceReceived){
     const standard = isStandardPayment(ev);
@@ -8775,17 +8784,17 @@ function renderAdminActions(ev){
       <div class="u-label">Balance ${standard?'Reminders — Email + Text':`— ${esc(paymentMethodLabel(ev))}`}</div>
       ${standard? `<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;">
         <span>Remind every</span>
-        <select data-action="set-reminder-interval" data-id="${ev.id}" style="padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);">
+        <select data-action="set-reminder-interval" data-id="${esc(ev.id)}" style="padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);">
           ${[3,5,7,10,14].map(n=>`<option value="${esc(n)}" ${ev.reminderIntervalDays===n?'selected':''}>${n} days</option>`).join('')}
         </select>
       </div>
       <div style="font-size:12px;color:var(--ink-2);">Last sent: ${ev.lastReminderSent? fmtDateShort(ev.lastReminderSent): 'never'}</div>` : `
       <div style="font-size:12px;color:var(--warn-ink);">Alternative payment method — no automated reminder. Follow up directly; this booking also shows under Payment Follow-Up on the Daily Digest.</div>`}
       <div style="display:flex;gap:8px;">
-        ${standard? `<button class="btn btn-sm" data-action="send-reminder" data-id="${ev.id}" style="flex:1;min-width:0;white-space:normal;">Send reminder now</button>` : ''}
-        <button class="btn btn-sm btn-primary" data-action="mark-balance" data-id="${ev.id}" style="flex:1;min-width:0;white-space:normal;">${ICO.check} Mark Balance Received</button>
+        ${standard? `<button class="btn btn-sm" data-action="send-reminder" data-id="${esc(ev.id)}" style="flex:1;min-width:0;white-space:normal;">Send reminder now</button>` : ''}
+        <button class="btn btn-sm btn-primary" data-action="mark-balance" data-id="${esc(ev.id)}" style="flex:1;min-width:0;white-space:normal;">${ICO.check} Mark Balance Received</button>
       </div>
-      ${standard? `<button class="btn btn-sm btn-ghost" data-action="preview-reminder" data-id="${ev.id}" style="color:var(--ink-2);">${ICO.sms} Preview reminder email (Zelle QR)</button>` : ''}
+      ${standard? `<button class="btn btn-sm btn-ghost" data-action="preview-reminder" data-id="${esc(ev.id)}" style="color:var(--ink-2);">${ICO.sms} Preview reminder email (Zelle QR)</button>` : ''}
     </div>`);
   }
   return buttons.length? `<div style="display:flex;flex-direction:column;gap:10px;">${buttons.join('')}</div>` : '';
@@ -8833,7 +8842,7 @@ function renderFlightFormOverlay(){
           <div class="field"><label>Date</label><input type="date" data-field="arriveDate" value="${esc(f.arriveDate||'')}"/></div>
           <div class="field"><label>Time</label><input type="time" data-field="arriveTime" value="${esc(f.arriveTime||'')}"/></div>
         </div>
-        <button class="btn btn-primary btn-block" data-action="save-flight" data-id="${ev.id}">Save</button>
+        <button class="btn btn-primary btn-block" data-action="save-flight" data-id="${esc(ev.id)}">Save</button>
       </div>
     </div>
   </div>`;
@@ -8861,7 +8870,7 @@ function renderTransportFormOverlay(){
         </div>
         <div class="field"><label>Drop-off Location</label><input data-field="dropoffLocation" value="${esc(f.dropoffLocation||'')}" placeholder="Venue"/></div>
         <div class="field"><label>Notes</label><input data-field="notes" value="${esc(f.notes||'')}" placeholder="Sedan, one-way"/></div>
-        <button class="btn btn-primary btn-block" data-action="save-transport" data-id="${ev.id}">Save</button>
+        <button class="btn btn-primary btn-block" data-action="save-transport" data-id="${esc(ev.id)}">Save</button>
       </div>
     </div>
   </div>`;
@@ -8876,7 +8885,7 @@ function renderDressCodeFormOverlay(){
       <div class="sheet-body">
         <div class="field"><label>Dress Code</label><input data-field="dressCode" value="${esc(f.dressCode||'')}" placeholder="e.g. Black tie, all black"/></div>
         <div class="chip-row">${DRESS_CODES.map(d=>`<button class="filter-chip" data-action="pick-dresscode" data-value="${esc(d)}">${esc(d)}</button>`).join('')}</div>
-        <button class="btn btn-primary btn-block" data-action="save-dresscode" data-id="${ev.id}" style="margin-top:6px;">Save</button>
+        <button class="btn btn-primary btn-block" data-action="save-dresscode" data-id="${esc(ev.id)}" style="margin-top:6px;">Save</button>
       </div>
     </div>
   </div>`;
@@ -8928,7 +8937,7 @@ function renderEditEventFormOverlay(){
           <p style="font-size:11px;color:var(--warn-ink);margin:4px 0 0;">Alternative payment method — no automated QuickBooks invoice or Zelle reminder for this booking. It'll show up under Payment Follow-Up until marked paid.</p>
         </div>` : ''}`;
         })() : ''}
-        <button class="btn btn-primary btn-block" data-action="save-edit-event" data-id="${ev.id}" style="margin-top:6px;">Save Changes</button>
+        <button class="btn btn-primary btn-block" data-action="save-edit-event" data-id="${esc(ev.id)}" style="margin-top:6px;">Save Changes</button>
       </div>
     </div>
   </div>`;
@@ -8947,6 +8956,7 @@ function renderNewInvoiceModal(){
           <div class="field"><label>Bill To</label><input data-field="clientName" value="${esc(f.clientName||'')}" placeholder="Client or company name"/></div>
           <div class="field"><label>Email</label><input data-field="clientEmail" value="${esc(f.clientEmail||'')}" placeholder="name@example.com"/></div>
         </div>
+        <div class="field" style="max-width:220px;"><label>Client's state</label><input data-field="clientState" value="${esc(f.clientState||'')}" placeholder="e.g. NY" data-testid="invoice-client-state"/></div>
         <div class="field">
           <label>Line Items</label>
           ${items.length? `<div class="ledger" style="margin-bottom:8px;">${items.map((it,i)=>`<div class="ledger-row"><span>${esc(it.label)} <a href="#" data-action="remove-invoice-item" data-idx="${i}" style="color:var(--crit);text-decoration:none;margin-left:4px;">×</a></span><span class="amt">${money(it.amount)}</span></div>`).join('')}</div>` : ''}
@@ -8959,7 +8969,7 @@ function renderNewInvoiceModal(){
         <div class="field"><label>Notes (optional)</label><input data-field="notes" value="${esc(f.notes||'')}" placeholder="Reference / memo"/></div>
         <div class="ledger" style="margin:4px 0 0;"><div class="ledger-row total"><span>Total</span><span class="amt">${moneyCents(total)}</span></div></div>
         ${stripeReady() ? `<p style="font-size:11.5px;color:var(--ink-3);margin:8px 0 0;">The email includes a <strong>Pay online</strong> button (card or bank transfer).</p>
-          ${cardFeePercentSetting() ? `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:6px;"><input type="checkbox" data-action="toggle-invoice-no-card-fee" ${f.noCardFee?'checked':''}/> No credit card fee on this invoice (required if the client is in CT or MA)</label>` : ''}` : ''}
+          ${cardFeePercentSetting() ? `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:6px;"><input type="checkbox" data-action="toggle-invoice-no-card-fee" ${f.noCardFee?'checked':''}/> No credit card fee on this invoice (automatic for clients in CT or MA)</label>` : ''}` : ''}
         <button class="btn btn-primary btn-block" data-action="submit-invoice" style="margin-top:6px;" ${S.invoiceSendBusy?'disabled':''}>${S.invoiceSendBusy?'Sending…':'Send Invoice'}</button>
       </div>
     </div>
@@ -9177,7 +9187,7 @@ function renderInvoiceDoc(){
           <div style="background:#fff;color:#17171A;border-radius:var(--r-md);padding:2px 12px 12px;">${paymentOptionsEmailBlock({ kind:'invoice', amount:total, memo:inv.id, zelle:depositZelle() })}</div>
           ${invoiceOnlinePayment(inv) ? `<p style="margin:8px 0 0;"><span class="pill pill-wrap pill-good" data-testid="invoice-online-payment">${invoiceOnlinePayment(inv).pay_status==='processing' ? 'Bank transfer processing' : `Paid online — ${esc(paidOnlineText(invoiceOnlinePayment(inv)))}`}</span></p>`
             : inv.status!=='paid' && stripeReady() ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
-              <button class="btn btn-sm btn-ghost" data-action="make-invoice-pay-link" data-id="${inv.id}" ${S.payLinkBusy===inv.id?'disabled':''}>${S.payLinkBusy===inv.id?'Making link…':'Pay link'}</button>
+              <button class="btn btn-sm btn-ghost" data-action="make-invoice-pay-link" data-id="${esc(inv.id)}" ${S.payLinkBusy===inv.id?'disabled':''}>${S.payLinkBusy===inv.id?'Making link…':'Pay link'}</button>
               ${S.payLinks && S.payLinks[inv.id] ? `<input readonly data-testid="pay-link-url" aria-label="Payment link" value="${esc(S.payLinks[inv.id])}" style="flex:1 1 220px;min-width:0;"/>` : ''}</div>` : ''}
         </div>
 
@@ -9196,12 +9206,12 @@ function renderLeadContractsCard(ev){
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <h3 style="font-size:14px;margin:0;">Contracts</h3>
-      ${live && live.status==='draft' ? `<button class="btn btn-sm btn-primary" data-action="open-contract-questions" data-id="${live.id}" data-testid="send-contract">${ICO.mail} Send contract</button>`
-        : live ? `<button class="btn btn-sm btn-primary" data-action="open-contract-doc" data-id="${live.id}">${ICO.leads} View Contract</button>`
-        : `<button class="btn btn-sm btn-primary" data-action="create-contract" data-id="${ev.id}">${ICO.plus} Create Contract</button>`}
+      ${live && live.status==='draft' ? `<button class="btn btn-sm btn-primary" data-action="open-contract-questions" data-id="${esc(live.id)}" data-testid="send-contract">${ICO.mail} Send contract</button>`
+        : live ? `<button class="btn btn-sm btn-primary" data-action="open-contract-doc" data-id="${esc(live.id)}">${ICO.leads} View Contract</button>`
+        : `<button class="btn btn-sm btn-primary" data-action="create-contract" data-id="${esc(ev.id)}">${ICO.plus} Create Contract</button>`}
     </div>
     ${contracts.length? `<div class="log">${contracts.map(c=>`
-      <div class="log-item" style="cursor:pointer;align-items:center;" data-action="open-contract-builder" data-id="${c.id}">
+      <div class="log-item" style="cursor:pointer;align-items:center;" data-action="open-contract-builder" data-id="${esc(c.id)}">
         <div class="log-ico">${ICO.leads}</div>
         <div style="flex:1;min-width:0;"><strong style="font-size:12.5px;">${esc(contractTemplateLabel(c.template))}</strong><br/><span class="log-time">${c.createdAt? `Created ${fmtDateShort(String(c.createdAt).slice(0,10))}` : ''}</span></div>
         <span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span>
@@ -9231,7 +9241,7 @@ function renderFlightSegmentsSection(tr){
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <h3 style="font-size:12.5px;margin:0;color:var(--ink-2);">Confirmed Flights</h3>
-      <button class="btn btn-sm btn-ghost" data-action="add-flight-segment" data-id="${tr.id}">${ICO.plus} Add</button>
+      <button class="btn btn-sm btn-ghost" data-action="add-flight-segment" data-id="${esc(tr.id)}">${ICO.plus} Add</button>
     </div>
     ${segs.length===0? `<p style="font-size:11.5px;color:var(--ink-3);margin:0;">Nothing entered yet -- add a flight once Rivky confirms one, from any channel.</p>` : ''}
     ${segs.map(seg=>`<div style="display:flex;flex-direction:column;gap:6px;padding:10px;background:var(--surface-2);border-radius:8px;">
@@ -9245,8 +9255,8 @@ function renderFlightSegmentsSection(tr){
         </div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-        <button class="btn btn-sm" data-action="check-segment-flight-status" data-id="${tr.id}" data-seg="${seg.id}" ${S.flightStatusBusy===seg.id?'disabled':''}>${S.flightStatusBusy===seg.id?'Checking…':'Check Status'}</button>
-        <button class="icon-btn" data-action="remove-flight-segment" data-id="${tr.id}" data-seg="${seg.id}" title="Remove" aria-label="Remove">${ICO.x}</button>
+        <button class="btn btn-sm" data-action="check-segment-flight-status" data-id="${esc(tr.id)}" data-seg="${esc(seg.id)}" ${S.flightStatusBusy===seg.id?'disabled':''}>${S.flightStatusBusy===seg.id?'Checking…':'Check Status'}</button>
+        <button class="icon-btn" data-action="remove-flight-segment" data-id="${esc(tr.id)}" data-seg="${esc(seg.id)}" title="Remove" aria-label="Remove">${ICO.x}</button>
       </div>
       ${seg.lastStatus? `<p style="font-size:11px;color:var(--ink-2);margin:0;">Last checked: <strong>${esc(seg.lastStatus)}</strong>${seg.lastStatusAt? ` (${fmtDateShort(seg.lastStatusAt.slice(0,10))})` : ''}</p>` : ''}
     </div>`).join('')}
@@ -9263,7 +9273,7 @@ function renderTravelRequestDetailSheet(){
       <div class="sheet-head">
         <div><h2 style="font-size:1.2rem;margin-bottom:4px;">Travel Request</h2><span class="pill ${tr.status==='draft'?'':'pill-good'}">${esc(travelRequestStatusLabel(tr.status))}</span></div>
         <div style="display:flex;gap:6px;">
-          <button class="icon-btn" data-action="delete-travel-request" data-id="${tr.id}" title="Delete" aria-label="Delete">${ICO.trash}</button>
+          <button class="icon-btn" data-action="delete-travel-request" data-id="${esc(tr.id)}" title="Delete" aria-label="Delete">${ICO.trash}</button>
           <button class="icon-btn" data-action="close-travel-request-detail" aria-label="Close">${ICO.x}</button>
         </div>
       </div>
@@ -9294,11 +9304,11 @@ function renderTravelRequestDetailSheet(){
         ${d.groundTransportNeeded? `<div class="field"><label>Ground Transport Notes</label><input data-travel-field="details.groundTransportNotes" value="${esc(d.groundTransportNotes||'')}" ${busy?'disabled':''}/></div>` : ''}
         <div class="field"><label>Notes</label><textarea data-travel-field="details.notes" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);" ${busy?'disabled':''}>${esc(d.notes||'')}</textarea></div>
         ${renderFlightSegmentsSection(tr)}
-        ${tr.status==='draft'? `<button class="btn btn-primary btn-block" data-action="send-travel-request" data-id="${tr.id}" ${canSend&&!busy?'':'disabled'}>${busy?'Sending…':'Send to Rivky'}</button>`
+        ${tr.status==='draft'? `<button class="btn btn-primary btn-block" data-action="send-travel-request" data-id="${esc(tr.id)}" ${canSend&&!busy?'':'disabled'}>${busy?'Sending…':'Send to Rivky'}</button>`
         : `<div class="chip-row">
-            ${['sent','awaiting_reply','answered','completed'].map(s=>`<button class="filter-chip ${tr.status===s?'sel':''}" data-action="set-travel-request-status" data-id="${tr.id}" data-status="${s}">${esc(travelRequestStatusLabel(s))}</button>`).join('')}
+            ${['sent','awaiting_reply','answered','completed'].map(s=>`<button class="filter-chip ${tr.status===s?'sel':''}" data-action="set-travel-request-status" data-id="${esc(tr.id)}" data-status="${s}">${esc(travelRequestStatusLabel(s))}</button>`).join('')}
           </div>
-          <button class="btn btn-sm" data-action="send-travel-request" data-id="${tr.id}" ${busy?'disabled':''}>${busy?'Sending…':'Resend Follow-up'}</button>
+          <button class="btn btn-sm" data-action="send-travel-request" data-id="${esc(tr.id)}" ${busy?'disabled':''}>${busy?'Sending…':'Resend Follow-up'}</button>
           ${tr.sentAt? `<p style="font-size:11px;color:var(--ink-3);margin:0;">Sent ${fmtDateShort(tr.sentAt.slice(0,10))}</p>` : ''}`}
       </div>
     </div>
@@ -9369,7 +9379,7 @@ function renderVerifyDepositModal(){
           </select>
         </div>
         <div class="field"><label>Note (optional)</label><textarea data-field="note" rows="2" placeholder="e.g. Zelle 11/5, $2,500">${esc(f.note||'')}</textarea></div>
-        <button class="btn btn-primary btn-block" data-action="confirm-verify-deposit" data-id="${ev.id}" data-testid="confirm-record-deposit">Record deposit &amp; book</button>
+        <button class="btn btn-primary btn-block" data-action="confirm-verify-deposit" data-id="${esc(ev.id)}" data-testid="confirm-record-deposit">Record deposit &amp; book</button>
       </div>
     </div>
   </div>`;
@@ -9386,7 +9396,7 @@ function renderContractBuilderModal(){
           <span class="pill ${contractStatusPillClass(c.status)}">${esc(contractStatusLabel(c.status))}</span>
         </div>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;min-width:0;">
-          ${c.status!=='void' && c.status!=='signed'? `<button class="btn btn-sm btn-primary" data-action="review-and-send-contract" data-id="${c.id}" data-testid="review-and-send">${ICO.mail} Review &amp; send</button>` : ''}
+          ${c.status!=='void' && c.status!=='signed'? `<button class="btn btn-sm btn-primary" data-action="review-and-send-contract" data-id="${esc(c.id)}" data-testid="review-and-send">${ICO.mail} Review &amp; send</button>` : ''}
           <button class="icon-btn" data-action="view-contract-builder-doc" title="Preview &amp; Print" aria-label="Preview &amp; Print">${ICO.leads}</button>
           <button class="icon-btn" data-action="delete-contract" title="Delete" aria-label="Delete">${ICO.trash}</button>
           <button class="icon-btn" data-action="close-contract-builder" aria-label="Close">${ICO.x}</button>
@@ -9405,23 +9415,23 @@ function renderContractBuilderModal(){
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--surface-2);">
           ${isContractApproved(c)
             ? `<span class="pill pill-wrap pill-good">Approved for sending — ${esc(adminById(c.approvedBy)?adminById(c.approvedBy).name:'admin')}, ${fmtDateShort(c.approvedAt.slice(0,10))}</span>
-               <button class="btn btn-sm btn-ghost" data-action="revoke-contract-approval" data-id="${c.id}">Revoke</button>`
+               <button class="btn btn-sm btn-ghost" data-action="revoke-contract-approval" data-id="${esc(c.id)}">Revoke</button>`
             : c.approvedAt
             ? `<span class="pill pill-wrap pill-warn">Money/terms changed since approval — re-approve before sending</span>
-               <button class="btn btn-sm" data-action="approve-contract-for-sending" data-id="${c.id}">Re-approve</button>`
+               <button class="btn btn-sm" data-action="approve-contract-for-sending" data-id="${esc(c.id)}">Re-approve</button>`
             : `<span class="pill pill-wrap pill-neutral">Not yet approved — money/terms must be approved before this contract can be sent</span>
-               <button class="btn btn-sm" data-action="approve-contract-for-sending" data-id="${c.id}">Approve for Sending</button>`}
+               <button class="btn btn-sm" data-action="approve-contract-for-sending" data-id="${esc(c.id)}">Approve for Sending</button>`}
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:8px 10px;border-radius:8px;background:var(--surface-2);">
           ${c.clientSignature ? `<span class="pill pill-wrap ${signedTermsChanged(c) ? 'pill-warn' : 'pill-good'}">Signed online by ${esc(c.clientSignature.name)} — ${fmtDateShort(String(c.clientSignature.at).slice(0,10))}${signedTermsChanged(c) ? ' (terms changed since)' : ''}</span>` : ''}
           ${contractPaymentPill(c)}
           ${c.clientSignature && !signedTermsChanged(c) ? '' : `${!c.clientSignature && earlierClientSignature(c) ? `<span class="pill pill-wrap pill-warn" style="flex:1 1 100%;">${esc(earlierClientSignature(c).name)} signed an earlier version online (${fmtDateShort(String(earlierClientSignature(c).at).slice(0,10))}) — the terms have changed since, so it isn't marked Signed. Send the current version to sign.</span>` : ''}<span style="font-size:12px;color:var(--ink-2);flex:1 1 220px;min-width:0;">Clients sign online: emailing the contract adds the link, or make one to send yourself.</span>
-               <button class="btn btn-sm btn-ghost" style="flex:none;" data-action="make-sign-link" data-id="${c.id}" ${S.signLinkBusy===c.id?'disabled':''}>${S.signLinkBusy===c.id?'Making link…':'Signing link'}</button>
+               <button class="btn btn-sm btn-ghost" style="flex:none;" data-action="make-sign-link" data-id="${esc(c.id)}" ${S.signLinkBusy===c.id?'disabled':''}>${S.signLinkBusy===c.id?'Making link…':'Signing link'}</button>
                ${S.signLinks && S.signLinks[c.id] ? `<input readonly data-testid="sign-link-url" aria-label="Signing link" value="${esc(S.signLinks[c.id])}" style="flex:1 1 100%;min-width:0;"/>` : ''}`}
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
           <p style="font-size:11.5px;color:var(--ink-3);margin:0;">Autofilled from the lead — editing here does not change the lead.</p>
-          <button class="btn btn-sm btn-ghost" style="flex:none;" data-action="contract-refresh-from-lead" data-id="${c.id}">Refresh from Lead</button>
+          <button class="btn btn-sm btn-ghost" style="flex:none;" data-action="contract-refresh-from-lead" data-id="${esc(c.id)}">Refresh from Lead</button>
         </div>
         <div class="field-row">
           <div class="field"><label>${isCreative?'Client / Organization':'Client Name'}</label><input data-contract-field="snapshot.clientName" value="${esc(c.snapshot.clientName||'')}"/></div>
@@ -9470,7 +9480,7 @@ function renderContractPerformerSection(c){
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     <h3 style="font-size:13.5px;margin:0;">Performer</h3>
     <div class="field"><label>Performer (Artist Roster)</label>
-      <select class="contract-performer-select" data-id="${c.id}">
+      <select class="contract-performer-select" data-id="${esc(c.id)}">
         <option value="" ${!c.performerArtistId?'selected':''}>— Type manually below —</option>
         ${ARTISTS.map(a=>`<option value="${esc(a.id)}" ${c.performerArtistId===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}
       </select>
@@ -9605,9 +9615,9 @@ function renderContractCancellationSection(c){
         <span style="font-size:12px;color:var(--ink-3);">days:</span>
         <input type="number" data-contract-field="tier.${t.id}.percent" value="${esc(String(t.percent??''))}" style="width:70px;"/>
         <span style="font-size:12px;color:var(--ink-3);">%</span>
-        <button class="icon-btn" data-action="remove-cancellation-tier" data-id="${t.id}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
+        <button class="icon-btn" data-action="remove-cancellation-tier" data-id="${esc(t.id)}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
       </div>`).join('')}
-      <button class="btn btn-sm" data-action="add-cancellation-tier" data-id="${c.id}">${ICO.plus} Add Tier</button>
+      <button class="btn btn-sm" data-action="add-cancellation-tier" data-id="${esc(c.id)}">${ICO.plus} Add Tier</button>
     </div>` : ''}
     <p style="font-size:11px;color:var(--ink-3);margin:0;">Preview: ${esc(contractCancellationText(c))}</p>
   </div>`;
@@ -9648,8 +9658,8 @@ function renderContractProvidesSection(c){
     <h3 style="font-size:13.5px;margin:10px 0 0;">Client Shall Provide</h3>
     <div class="chip-row" style="align-items:center;">
       <span class="filter-chip sel">Payment</span>
-      ${c.clientProvides.map((label,idx)=>`<span class="filter-chip sel" style="display:flex;align-items:center;gap:6px;">${esc(label)} <button data-action="remove-client-provides" data-id="${c.id}" data-idx="${idx}" aria-label="Remove ${esc(label)}" style="background:none;border:none;cursor:pointer;color:inherit;padding:0;display:flex;">${ICO.x}</button></span>`).join('')}
-      ${left.length? `<select class="contract-add-provides-select" data-id="${c.id}" style="width:auto;max-width:100%;min-width:0;"><option value="">+ Add…</option>${left.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('')}</select>` : ''}
+      ${c.clientProvides.map((label,idx)=>`<span class="filter-chip sel" style="display:flex;align-items:center;gap:6px;">${esc(label)} <button data-action="remove-client-provides" data-id="${esc(c.id)}" data-idx="${idx}" aria-label="Remove ${esc(label)}" style="background:none;border:none;cursor:pointer;color:inherit;padding:0;display:flex;">${ICO.x}</button></span>`).join('')}
+      ${left.length? `<select class="contract-add-provides-select" data-id="${esc(c.id)}" style="width:auto;max-width:100%;min-width:0;"><option value="">+ Add…</option>${left.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('')}</select>` : ''}
     </div>
   </div>`;
 }
@@ -9666,7 +9676,7 @@ function renderContractLineItemsSection(c){
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <h3 style="font-size:13.5px;margin:0;">Line Items (Performers)</h3>
-      <button class="btn btn-sm" data-action="add-line-item" data-id="${c.id}">${ICO.plus} Add Line Item</button>
+      <button class="btn btn-sm" data-action="add-line-item" data-id="${esc(c.id)}">${ICO.plus} Add Line Item</button>
     </div>
     ${c.lineItems.map(li=>{ const tc = li.travelClause||blankTravelClause(); const sentence = contractTravelSentence(tc); return `<div style="display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--surface-2);border-radius:8px;">
       <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
@@ -9674,7 +9684,7 @@ function renderContractLineItemsSection(c){
         <div class="field" style="width:130px;"><label>Fee ($)</label><input type="number" data-contract-field="lineitem.${li.id}.fee" data-focus-key="lineitem.${li.id}.fee" data-live value="${esc(li.fee||0)}"/></div>
         <div class="field" style="width:170px;"><label>Overtime Rate</label><input data-contract-field="lineitem.${li.id}.overtimeRate" value="${esc(li.overtimeRate||'')}" placeholder="e.g. $150/musician/half hr"/></div>
         <div class="field" style="width:150px;"><label>Date (optional)</label><input type="date" data-contract-field="lineitem.${li.id}.date" value="${esc(li.date||'')}"/></div>
-        <button class="icon-btn" data-action="remove-line-item" data-id="${li.id}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
+        <button class="icon-btn" data-action="remove-line-item" data-id="${esc(li.id)}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
       </div>
       <textarea data-contract-field="lineitem.${li.id}.notes" rows="2" placeholder="Notes for this night/set (e.g. who opens, set length, timing)" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(li.notes||'')}</textarea>
       <details>
@@ -9682,7 +9692,7 @@ function renderContractLineItemsSection(c){
         <div class="field-row" style="margin-top:6px;">
           <div class="field" style="width:90px;"><label>Flights</label><input type="number" min="0" data-contract-field="lineitemtravel.${li.id}.flightsCount" data-focus-key="lineitemtravel.${li.id}.flightsCount" data-live value="${esc(tc.flightsCount||0)}"/></div>
           <div class="field"><label>Class</label>
-            <div class="chip-row">${['economy','business','first'].map(cl=>`<button class="filter-chip ${tc.flightsClass===cl?'sel':''}" data-action="pick-lineitem-travel-flight-class" data-id="${li.id}" data-value="${esc(cl)}">${cl.charAt(0).toUpperCase()+cl.slice(1)}</button>`).join('')}</div>
+            <div class="chip-row">${['economy','business','first'].map(cl=>`<button class="filter-chip ${tc.flightsClass===cl?'sel':''}" data-action="pick-lineitem-travel-flight-class" data-id="${esc(li.id)}" data-value="${esc(cl)}">${cl.charAt(0).toUpperCase()+cl.slice(1)}</button>`).join('')}</div>
           </div>
         </div>
         <div class="field-row">
@@ -9699,12 +9709,12 @@ function renderContractLineItemsSection(c){
     </div>`; }).join('')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
       <h3 style="font-size:13.5px;margin:0;">Add-Ons</h3>
-      <button class="btn btn-sm" data-action="add-add-on" data-id="${c.id}">${ICO.plus} Add Add-On</button>
+      <button class="btn btn-sm" data-action="add-add-on" data-id="${esc(c.id)}">${ICO.plus} Add Add-On</button>
     </div>
     ${c.addOns.map(a=>`<div class="field-row" style="align-items:flex-end;">
       <div class="field"><label>Label</label><input data-contract-field="addon.${a.id}.label" data-focus-key="addon.${a.id}.label" value="${esc(a.label||'')}" placeholder="e.g. Custom Bandstands"/></div>
       <div class="field" style="width:130px;"><label>Amount ($)</label><input type="number" data-contract-field="addon.${a.id}.amount" data-focus-key="addon.${a.id}.amount" data-live value="${esc(a.amount||0)}"/></div>
-      <button class="icon-btn" data-action="remove-add-on" data-id="${a.id}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
+      <button class="icon-btn" data-action="remove-add-on" data-id="${esc(a.id)}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
     </div>`).join('')}
   </div>`;
 }
@@ -9712,12 +9722,12 @@ function renderContractCustomClausesSection(c){
   return `<div class="card card-pad" style="display:flex;flex-direction:column;gap:10px;">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <h3 style="font-size:13.5px;margin:0;">Custom Clauses</h3>
-      <button class="btn btn-sm" data-action="add-custom-clause" data-id="${c.id}">${ICO.plus} Add Clause</button>
+      <button class="btn btn-sm" data-action="add-custom-clause" data-id="${esc(c.id)}">${ICO.plus} Add Clause</button>
     </div>
     ${c.customClauses.map(cc=>`<div style="display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--surface-2);border-radius:8px;">
       <div style="display:flex;gap:6px;align-items:center;">
         <input data-contract-field="customclause.${cc.id}.title" value="${esc(cc.title||'')}" placeholder="Clause title" style="flex:1;font-weight:700;font-size:12.5px;padding:6px 8px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);"/>
-        <button class="icon-btn" data-action="remove-custom-clause" data-id="${cc.id}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
+        <button class="icon-btn" data-action="remove-custom-clause" data-id="${esc(cc.id)}" title="Remove" style="flex:none;" aria-label="Remove">${ICO.trash}</button>
       </div>
       <textarea data-contract-field="customclause.${cc.id}.body" rows="2" placeholder="Body text" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface);font-size:12.5px;font-family:var(--font-body);color:var(--ink);">${esc(cc.body||'')}</textarea>
     </div>`).join('')}
@@ -9731,8 +9741,8 @@ function docChrome(innerHtml, c){
       <div class="sheet-head">
         <h2 style="font-size:1.1rem;">Contract Preview</h2>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
-          ${c ? `<button class="btn btn-sm btn-primary" data-action="open-send-contract" data-id="${c.id}">${ICO.mail} Send to client</button>
-          <button class="btn btn-sm" data-action="edit-contract-from-doc" data-id="${c.id}">${ICO.edit} Edit</button>` : ''}
+          ${c ? `<button class="btn btn-sm btn-primary" data-action="open-send-contract" data-id="${esc(c.id)}">${ICO.mail} Send to client</button>
+          <button class="btn btn-sm" data-action="edit-contract-from-doc" data-id="${esc(c.id)}">${ICO.edit} Edit</button>` : ''}
           <button class="icon-btn" data-action="print-contract-builder" title="Print / Save as PDF" aria-label="Print / Save as PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7"/></svg></button>
           <button class="icon-btn" data-action="close-contract-builder-doc" aria-label="Close">${ICO.x}</button>
         </div>
@@ -10104,8 +10114,8 @@ function renderPayeeProfilesCard(){
         <div><h4>${esc(p.entityName)}</h4><p>${artist? `Default for ${esc(artist.name)}` : 'House profile (no specific artist)'}${stripePayeeActive(stripePayeeOf(p.id))?' · Online payouts active':''}</p></div>
       </div>
       <div style="display:flex;gap:4px;">
-        <button class="icon-btn" data-action="open-payee-profile-form" data-id="${p.id}" title="Edit" aria-label="Edit">${ICO.edit}</button>
-        <button class="icon-btn" data-action="delete-payee-profile" data-id="${p.id}" title="Delete" aria-label="Delete">${ICO.trash}</button>
+        <button class="icon-btn" data-action="open-payee-profile-form" data-id="${esc(p.id)}" title="Edit" aria-label="Edit">${ICO.edit}</button>
+        <button class="icon-btn" data-action="delete-payee-profile" data-id="${esc(p.id)}" title="Delete" aria-label="Delete">${ICO.trash}</button>
       </div>
     </div>`; }).join('')}
   </div>`;
@@ -10273,7 +10283,7 @@ function renderCalendarMappingSection(){
         </div>
         ${ARTISTS.map(a=>`<div class="field-row" style="align-items:center;">
           <div class="field" style="flex:none;width:120px;"><label style="font-size:10px;">${esc(a.name.split(' ')[0])}</label></div>
-          <div class="field"><input data-calendar-mapping="${a.id}" value="${esc((mapFor(a.id)||{}).config?.calendar_id||'')}" placeholder="calendar id or email"/></div>
+          <div class="field"><input data-calendar-mapping="${esc(a.id)}" value="${esc((mapFor(a.id)||{}).config?.calendar_id||'')}" placeholder="calendar id or email"/></div>
         </div>`).join('')}
         <button class="btn btn-sm btn-ghost" style="align-self:flex-start;" data-action="check-calendar-mappings">Refresh</button>
       </div>`}
@@ -10573,7 +10583,7 @@ function renderTravelDropModal(){
           ${(x.hotels||[]).map(h=>line(`Hotel: ${esc(h.name)}`, `${esc(h.checkIn)}${h.checkOut?` → ${esc(h.checkOut)}`:''}${h.confirmation?` &middot; Conf. ${esc(h.confirmation)}`:''}${h.address?`<br/>${esc(h.address)}`:''}`)).join('')}
           ${(x.ground||[]).map(g=>line(`${ICO.car} ${esc(g.company||g.driver||'Car')}`, `${g.pickupAt?esc(fmtFlightDateTime(travelDT(g.pickupAt))):''}${g.pickupLocation?` &middot; ${esc(g.pickupLocation)}`:''}${g.dropoffLocation?` → ${esc(g.dropoffLocation)}`:''}${g.phone?` &middot; ${esc(g.phone)}`:''}`)).join('')}
           ${x.notes? `<p style="font-size:12px;color:var(--ink-2);margin:8px 0 0;">${esc(x.notes)}</p>` : ''}
-          <button class="btn btn-primary btn-block" style="margin-top:10px;" data-action="save-travel-docs" data-id="${ev.id}">Save to itinerary</button>
+          <button class="btn btn-primary btn-block" style="margin-top:10px;" data-action="save-travel-docs" data-id="${esc(ev.id)}">Save to itinerary</button>
         </div>` : ''}
       </div>
     </div>
@@ -10659,7 +10669,7 @@ function renderItineraryDoc(){
       </div>
       ${itineraryFlights(ev).length? `<div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
         <span style="font-size:12px;color:var(--ink-2);margin-right:4px;">Track in Flighty: add each flight to your calendar</span>
-        ${itineraryFlights(ev).map((fl,i)=>`<button class="btn btn-sm" data-action="flight-ics" data-id="${ev.id}" data-idx="${i}">${ICO.plane} ${esc(String(fl.flightNumber||'Flight').replace(/\s+/g,''))}</button>`).join('')}
+        ${itineraryFlights(ev).map((fl,i)=>`<button class="btn btn-sm" data-action="flight-ics" data-id="${esc(ev.id)}" data-idx="${i}">${ICO.plane} ${esc(String(fl.flightNumber||'Flight').replace(/\s+/g,''))}</button>`).join('')}
       </div>` : ''}
       <div class="doc-body">${itineraryDocHtml(ev)}</div>
     </div>
@@ -10949,7 +10959,10 @@ async function doSubmitInvoice(){
   if(clientEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clientEmail)){ toast('That email address doesn\'t look right.', 'error'); return; }
   if(S.invoiceSendBusy) return;
   const inv = makeInvoice(clientName, clientEmail, items, (f.notes||'').trim(), 'open', 0);
-  if(f.noCardFee) inv.noCardFee = true;
+  // CT and MA ban card surcharges (2026-11-12 audit #10.1, owner confirmed): a client there never gets one,
+  // whatever the checkbox says. The server refuses a fee on such an invoice's link too (client-pay).
+  inv.clientState = normalizeState(f.clientState);
+  if(f.noCardFee || NO_CARD_FEE_STATES.includes(inv.clientState)) inv.noCardFee = true;
   CUSTOM_INVOICES.unshift(inv);
   saveCustomInvoices();
   S.showNewInvoice=false; S.newInvoiceForm={};
