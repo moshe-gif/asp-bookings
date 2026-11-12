@@ -375,7 +375,7 @@ Deno.serve(async (req) => {
     // Then the office's own record of every other payment a gig is marked as having received (audit #4,
     // 0096): Record deposit, Mark balance received, a bank's email alert. A bank or Stripe record of the same
     // payment replaces it later (record_ledger_row), so nothing is counted twice.
-    found.push(...await officePayments());
+    found.push(...await officePayments().catch((e) => { console.error("office payments", String(e)); return []; }));
     let n = 0;
     for (const f of found) {
       if (!(f.cents > 0) || !f.on || String(f.gig).startsWith("EV-TEST-")) continue;
@@ -389,7 +389,15 @@ Deno.serve(async (req) => {
       const office = (before || []).filter((x: Any) => x.ledger?.source === "office" && x.ledger?.kind === f.kind);
       const replaces = f.source !== "office" && !office.some((x: Any) => x.payout_id);
       const counted = (before || []).filter((x: Any) => !(replaces && x.ledger?.source === "office" && x.ledger?.kind === f.kind));
-      const had = (key: string) => counted.filter((x: Any) => x.payee_key === key).reduce((t: number, x: Any) => t + Number(x.cents || 0), 0);
+      // A deposit the gig received that no ledger row records (it came in before LEDGER_FROM) already paid ASP's
+      // commission first and then the singers: count it as paid, or the balance would take the commission again.
+      const pre = new Map<string, number>();
+      let preDeposit = 0;
+      if (f.kind === "balance" && ev.depositReceived) {
+        const { data: depRows } = await sb.from("money_ledger").select("id").eq("event_legacy_id", f.gig).eq("kind", "deposit").limit(1);
+        if (!depRows?.length) preDeposit = depositCentsOf(ev, await gigContracts(sb, f.gig));
+      }
+      const had = (key: string) => (pre.get(key) || 0) + counted.filter((x: Any) => x.payee_key === key).reduce((t: number, x: Any) => t + Number(x.cents || 0), 0);
       let parts: Any[] = [], review: string | null = f.review || null, note: string | null = f.note || null;
       if (review) {
         // Saved for a look; nothing is paid out from it until it's fixed and re-split.
@@ -404,6 +412,11 @@ Deno.serve(async (req) => {
         const shares = await artistShares(sb, f.gig, ev);
         const extras = (Array.isArray(ev.additionalArtists) ? ev.additionalArtists : []).filter((x: Any) => x && x.artistId);
         const commissionTotal = Math.round(((Number(ev.commission) || 0) + extras.reduce((t: number, x: Any) => t + (Number(x.aspCut) || 0), 0)) * 100);
+        if (Number.isFinite(preDeposit) && preDeposit > 0) {
+          let d = preDeposit;
+          const c = Math.min(d, commissionTotal); pre.set("commission", c); d -= c;
+          for (const x of shares || []) { const g = Math.min(d, x.cents); if (g > 0) { pre.set(x.payeeProfileId, (pre.get(x.payeeProfileId) || 0) + g); d -= g; } }
+        }
         let left = f.cents;
         const toAsp = Math.min(left, Math.max(0, commissionTotal - had("commission")));
         left -= toAsp;
@@ -455,14 +468,18 @@ Deno.serve(async (req) => {
       if (!wants.length) continue;
       const cts = await gigContracts(sb, gig);
       for (const kind of wants) {
-        const ver = kind === "deposit" ? (ev.depositVerification || {}) : {};
-        if (kind === "deposit" && (ver.method === "stripe" || ver.paymentRequestId)) continue;
+        // How it was recorded on the gig; a payment made online is ledgered from Stripe itself, never from here.
+        const ver = (kind === "deposit" ? ev.depositVerification : ev.balanceVerification) || {};
+        if (ver.method === "stripe" || ver.paymentRequestId) continue;
+        // A balance recorded with no deposit before it was the whole price: a deposit marked afterwards is that same money.
+        if (kind === "deposit" && have.has(`${gig}|balance`)) continue;
         const dep = depositCentsOf(ev, cts);
         // A balance paid with no deposit before it is the whole price.
         const cents = kind === "deposit" ? dep : clientOwedCentsOf(ev, cts) + (ev.depositReceived ? 0 : dep);
-        const cash = kind === "deposit" ? ver.method === "cash" : ev.paymentMethod === "cash";
+        // Cash by how it actually came in, else the gig's planned method (the client hands cash to the singer).
+        const cash = (ver.method || (kind === "balance" ? ev.paymentMethod : "")) === "cash";
         const on = String(kind === "deposit" ? ev.depositReceivedDate : ev.balanceReceivedDate).slice(0, 10);
-        const how = kind === "deposit" ? (ver.note || ver.method || "recorded by the office") : (ev.paymentMethod || "standard");
+        const how = ver.note || ver.method || (kind === "balance" ? ev.paymentMethod || "standard" : "recorded by the office");
         out.push({ source: "office", source_id: `${gig}|${kind}`, gig, kind, on, ev,
           cents: Number.isFinite(cents) && cents > 0 ? cents : 0,
           went_to: cash ? "singer_cash" : "asp",
