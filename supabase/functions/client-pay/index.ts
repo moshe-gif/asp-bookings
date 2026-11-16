@@ -9,6 +9,8 @@
 //   POST { action: "pay",    token, confirmationTokenId, totalCents }  -> charges it (totalCents must be
 //                                                                         the total the client was shown)
 //   POST { action: "refresh", token }                                  -> re-reads the charge after 3-D Secure
+//   POST { action: "report", token, steps }                           -> the page couldn't take a payment: what it saw
+//                                                                         (0098; no card data, at most 30 per link)
 //   POST { action: "zelle_sent", token }                               -> the client says they sent it by Zelle:
 //                                                                         noted on the gig + email/WhatsApp to the office
 //                                                                         (the office still confirms it arrived)
@@ -225,6 +227,17 @@ Deno.serve(async (req) => {
     }
     const { data: fresh } = await sb.from("payment_requests").select("*").eq("id", r.id).single();
     return json({ ok: true, payment: await viewOf(sb, fresh, tokenHash) });
+  }
+
+  if (body.action === "report") {
+    const raw = (body as { steps?: unknown }).steps;
+    const steps = (Array.isArray(raw) ? raw : []).slice(-40).map((x) => String(x ?? "").slice(0, 300));
+    const { count } = await sb.from("pay_page_reports").select("id", { count: "exact", head: true }).eq("payment_request_id", r.id);
+    if ((count ?? 0) >= 30) return json({ ok: true });
+    const { error: repErr } = await sb.from("pay_page_reports").insert({ payment_request_id: r.id, steps,
+      user_agent: (req.headers.get("user-agent") || "").slice(0, 400) });
+    if (repErr) console.error("client-pay report", repErr.message);
+    return json({ ok: true });
   }
 
   if (body.action === "zelle_sent") {

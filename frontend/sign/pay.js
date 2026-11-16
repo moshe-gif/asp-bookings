@@ -143,13 +143,25 @@
     wireZelle();
     const step = el.querySelector('#pay-step');
     let stripe = null, elements = null;
+    // What this page did, for the office when a payment can't go through (0098). Never card data.
+    const t0 = Date.now(), steps = [];
+    const note = m => { steps.push(`${((Date.now()-t0)/1000).toFixed(1)}s ${m}`); if(steps.length>40) steps.shift(); };
+    let lastReport = 0;
+    const report = ()=>{ if(Date.now()-lastReport < 3000) return; lastReport = Date.now();
+      call(token, { action:'report', steps: steps.concat([`screen ${innerWidth}x${innerHeight}`]) }); };
 
     async function showForm(message){
       step.innerHTML = `<div id="pay-element"><p class="pay-note">Loading secure payment form…</p></div>
-        <button class="btn btn-primary" id="pay-continue" type="button" disabled>Continue</button>
+        <button class="btn btn-primary" id="pay-continue" type="button">Continue</button>
         <p class="err" id="pay-err" role="alert">${esc(message||'')}</p>`;
       const btn = step.querySelector('#pay-continue'), err = step.querySelector('#pay-err');
-      try{ await loadStripe(); }catch(e){ err.textContent = 'The payment form couldn’t load. Check your connection and reload the page.'; return; }
+      // Continue is never a dead grey button (owner 2026-11-16: "it did not let me hit" it): pressed before the
+      // card box is ready, it says so; and anything that stops a payment is reported with what the page saw.
+      let ready = false;
+      btn.onclick = ()=>{ note('pressed before ready'); err.textContent = 'The secure card form is still loading — one moment, then press Continue again.'; report(); };
+      note('form start');
+      try{ await loadStripe(); }catch(e){ note('stripe.js failed'); report(); err.textContent = 'The payment form couldn’t load. Check your connection and reload the page.'; return; }
+      note('stripe.js loaded');
       stripe = stripe || window.Stripe(p.publishableKey);
       elements = stripe.elements({
         mode:'payment', amount:p.amountCents, currency:'usd',
@@ -162,24 +174,24 @@
       const pe = elements.create('payment', { layout:'tabs', wallets:{ applePay:'never', googlePay:'never', link:'never' }, defaultValues:{ billingDetails:{ name:p.clientName||'' } } });
       // If Stripe's card box can't draw (a content blocker, a lost connection), say so instead of leaving a blank
       // box and a grey Continue (owner's phone, 2026-11-12) -- with Stripe's own reason, Reload, and Zelle below.
-      let ready = false;
-      const stuck = why => { if(ready) return; err.innerHTML = `The card form didn’t load${why?` (${esc(why)})`:''}. <button class="pay-link" type="button" id="pay-retry" style="margin:0;">Reload</button> — or pay with Zelle below.`;
+      const stuck = why => { if(ready) return; note('stuck: '+(why||'')); report(); err.innerHTML = `The card form didn’t load${why?` (${esc(why)})`:''}. <button class="pay-link" type="button" id="pay-retry" style="margin:0;">Reload</button> — or pay with Zelle below.`;
         const r = step.querySelector('#pay-retry'); if(r) r.onclick = ()=>location.reload(); };
-      pe.on('ready', ()=>{ ready = true; btn.disabled = false; err.textContent = ''; });
+      pe.on('ready', ()=>{ ready = true; note('form ready'); btn.disabled = false; btn.onclick = go; err.textContent = ''; });
       pe.on('loaderror', e=>stuck(e && e.error && e.error.message));
       setTimeout(()=>stuck('it took too long — a content blocker can stop it'), 20000);
       pe.mount(step.querySelector('#pay-element'));
-      btn.onclick = async ()=>{
-        err.textContent = ''; btn.disabled = true; btn.textContent = 'Checking…';
+      async function go(){
+        err.textContent = ''; btn.disabled = true; btn.textContent = 'Checking…'; note('continue');
         const reset = msg=>{ btn.disabled = false; btn.textContent = 'Continue'; err.textContent = msg; };
-        const sub = await elements.submit();
-        if(sub.error){ reset(sub.error.message); return; }
-        const made = await stripe.createConfirmationToken({ elements, params:{ return_url: location.href } });
-        if(made.error){ reset(made.error.message); return; }
+        let sub, made;
+        try{ sub = await elements.submit(); }catch(e){ note('submit threw: '+e); report(); reset('Something went wrong — please try again.'); return; }
+        if(sub.error){ note('details: '+(sub.error.type||'')+' '+(sub.error.code||'')); if(sub.error.type!=='validation_error') report(); reset(sub.error.message); return; }
+        try{ made = await stripe.createConfirmationToken({ elements, params:{ return_url: location.href } }); }catch(e){ note('token threw: '+e); report(); reset('Something went wrong — please try again.'); return; }
+        if(made.error){ note('token: '+(made.error.type||'')+' '+(made.error.code||'')+' '+(made.error.decline_code||'')+' '+made.error.message); report(); reset(made.error.message); return; }
         const res = await call(token, { action:'quote', confirmationTokenId: made.confirmationToken.id });
-        if(!res.ok){ if(ERR[res.error]) reset(ERR[res.error]); else reload(); return; }
+        if(!res.ok){ note('quote: '+res.error); report(); if(ERR[res.error]) reset(ERR[res.error]); else reload(); return; }
         showReview(res.quote, made.confirmationToken.id);
-      };
+      }
     }
 
     function showReview(q, ctId, message){
@@ -199,6 +211,7 @@
         const res = await call(token, { action:'pay', confirmationTokenId: ctId, totalCents: q.totalCents });
         if(!res.ok){
           if(res.error==='quote_changed' && res.quote){ showReview(res.quote, ctId, 'The total changed — please review it and press Pay again.'); return; }
+          note('pay: '+res.error+' '+(res.message||'')); report();
           if(res.error==='declined'){ showForm(res.message || 'The payment didn’t go through.'); return; }
           if(res.error==='unknown'){ step.innerHTML = `<p class="err" role="alert">${esc(ERR.unknown)}</p>`; return; }
           if(ERR[res.error]){ btn.disabled = false; btn.textContent = `Pay ${money(q.totalCents)}`; err.textContent = ERR[res.error]; return; }
@@ -206,7 +219,7 @@
         }
         if(res.status==='requires_action' && res.clientSecret){
           const act = await stripe.handleNextAction({ clientSecret: res.clientSecret });
-          if(act.error){ await call(token, { action:'refresh' }); showForm(act.error.message); return; }
+          if(act.error){ note('3ds: '+(act.error.code||'')+' '+act.error.message); report(); await call(token, { action:'refresh' }); showForm(act.error.message); return; }
         }
         reload();
       };
