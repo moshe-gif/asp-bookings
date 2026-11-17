@@ -18,7 +18,7 @@ import { clientOwedCentsOf, depositCentsOf } from "../_shared/connect.ts";
 // Pinned here, not in _shared/deps.ts, so only the functions that call Claude load the SDK.
 import Anthropic from "npm:@anthropic-ai/sdk@0.130.0";
 import { timeout } from "../_shared/timeout.ts";
-import { aiRecord, aiTake } from "../_shared/ai.ts";
+import { aiRecord, aiRefund, aiTake } from "../_shared/ai.ts";
 
 const MAX_PER_RUN = 20;   // per mailbox
 const FIRST_RUN_DAYS = 2;
@@ -224,7 +224,9 @@ Deno.serve(async (req) => {
         // A daily cap on AI use (0100): at the cap, stop this run and keep the read position (retried tomorrow).
         const allowance = await aiTake(sb, "inbox-scan");
         if (!allowance.ok) { readFailed = true; throw new Error(allowance.error); }
-        const resp = await client.beta.messages.create({
+        let resp: Anthropic.Beta.BetaMessage;
+        try {
+        resp = await client.beta.messages.create({
           model: "claude-opus-5-5", max_tokens: 6000,
           betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
           output_config: { effort: "low", format: { type: "json_schema", schema } },
@@ -235,6 +237,7 @@ Deno.serve(async (req) => {
             "Use only what the email and attachments say. Put the extracted details, as a JSON object, in extracted_json; for a payment give amount as a plain number of dollars.",
           messages: [{ role: "user", content }],
         });
+        } catch (err) { await aiRefund(sb, "inbox-scan"); throw err; }
         await aiRecord(sb, "inbox-scan", resp.usage);
         if (resp.stop_reason === "refusal") throw new Error("declined");
         const block = resp.content.find((b) => b.type === "text");

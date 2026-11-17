@@ -31,3 +31,9 @@ export async function aiRecord(sb: Sb, feature: string, usage: any): Promise<voi
   const { error } = await sb.rpc("ai_record", { p_feature: feature, p_in: inTok, p_out: Number(usage.output_tokens) || 0 });
   if (error) console.error("ai_record", feature, error.message);
 }
+
+// The call failed before the model answered (no credit, busy, network): give its place back (0101).
+export async function aiRefund(sb: Sb, feature: string): Promise<void> {
+  const { error } = await sb.rpc("ai_refund", { p_feature: feature });
+  if (error) console.error("ai_refund", feature, error.message);
+}

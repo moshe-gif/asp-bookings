@@ -7,7 +7,7 @@ import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin } from "../_shared/auth.ts";
 import Anthropic from "npm:@anthropic-ai/sdk@0.130.0";
 import { serviceClient } from "../_shared/auth.ts";
-import { aiRecord, aiTake } from "../_shared/ai.ts";
+import { aiRecord, aiRefund, aiTake } from "../_shared/ai.ts";
 
 const FIELDS = {
   found: "yes when one specific real venue clearly matches, else no",
@@ -56,6 +56,7 @@ Deno.serve(async (req) => {
       messages: [{ role: "user", content: `Venue: ${venue}${hint ? `\nCity (may be empty or rough): ${hint}` : ""}` }],
     });
   } catch (err) {
+    await aiRefund(aiDb, "venue-lookup");
     const status = err instanceof Anthropic.APIError ? err.status : 0;
     return json({ ok: false, error: status === 429 ? "Busy, try again in a minute." : "Lookup failed: " + String((err as Error)?.message || err) }, 502);
   }

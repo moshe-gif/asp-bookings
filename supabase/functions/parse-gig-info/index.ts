@@ -7,7 +7,7 @@ import { requireAdmin } from "../_shared/auth.ts";
 // Pinned here, not in _shared/deps.ts, so only the functions that call Claude load the SDK.
 import Anthropic from "npm:@anthropic-ai/sdk@0.130.0";
 import { serviceClient } from "../_shared/auth.ts";
-import { aiRecord, aiTake } from "../_shared/ai.ts";
+import { aiRecord, aiRefund, aiTake } from "../_shared/ai.ts";
 
 const MAX_TEXT = 20000;
 const MAX_FILE_B64 = 7_000_000; // ~5 MB file
@@ -73,6 +73,7 @@ Deno.serve(async (req) => {
       messages: [{ role: "user", content }],
     });
   } catch (err) {
+    await aiRefund(aiDb, "parse-gig-info");
     const status = err instanceof Anthropic.APIError ? err.status : 0;
     return json({ ok: false, error: status === 429 ? "AI is busy, try again in a minute." : "Reading the gig info failed: " + String((err as Error)?.message || err) }, 502);
   }

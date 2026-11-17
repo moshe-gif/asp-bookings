@@ -8,7 +8,7 @@ import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 // Pinned here, not in _shared/deps.ts, so only this function loads the SDK.
 import Anthropic from "npm:@anthropic-ai/sdk@0.130.0";
-import { aiRecord, aiTake } from "../_shared/ai.ts";
+import { aiRecord, aiRefund, aiTake } from "../_shared/ai.ts";
 
 const MAX_TEXT = 6000;
 
@@ -75,6 +75,7 @@ Deno.serve(async (req) => {
       messages: [{ role: "user", content: `<message>\n${text}\n</message>` }],
     });
   } catch (err) {
+    await aiRefund(aiDb, "parse-lead");
     const status = err instanceof Anthropic.APIError ? err.status : 0;
     return json({ ok: false, error: status === 429 ? "AI is busy, try again in a minute." : "AI auto-fill failed: " + String((err as Error)?.message || err) }, 502);
   }
