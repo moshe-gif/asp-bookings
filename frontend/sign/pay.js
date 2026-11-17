@@ -21,6 +21,11 @@
     .pay-card h2{ margin:0 0 4px; font-size:1.15rem; font-weight:600; }
     .pay-amount{ font-size:1.6rem; font-weight:700; margin:2px 0 6px; font-variant-numeric:tabular-nums; }
     .pay-note{ color:var(--ink-2); font-size:13.5px; margin:0 0 14px; }
+    .pay-fees{ list-style:none; margin:0 0 16px; padding:0; border:1px solid var(--line, #E1E1E6); border-radius:10px; overflow:hidden; font-size:14px; }
+    .pay-fees li{ display:flex; justify-content:space-between; gap:12px; padding:9px 14px; }
+    .pay-fees li + li{ border-top:1px solid var(--line, #E1E1E6); }
+    .pay-fees span{ color:var(--ink-2); }
+    .pay-fees strong{ font-weight:600; text-align:right; }
     .pay-test{ background:#FFF6DB; color:#7A5B00; border-radius:8px; padding:8px 12px; font-size:12.5px; margin:0 0 14px; }
     .pay-lines{ width:100%; border-collapse:collapse; margin:4px 0 14px; font-variant-numeric:tabular-nums; }
     .pay-lines td{ padding:8px 0; border-top:1px solid var(--border); }
@@ -129,12 +134,20 @@
     if(p.blocked){ card(`<h2>Online payment closed</h2><p class="pay-note" style="margin:0;">This payment link is no longer active.${contact || ' Please contact us.'}</p>`); return; }
     if(!p.available || !p.publishableKey){ card(`<h2>${title}</h2><div class="pay-amount">${money(p.amountCents)}</div>${zelleBox()}<p class="pay-foot">* To pay by check or cash, please call our office${p.officePhone?` at ${esc(p.officePhone)}`:''}.</p>`); wireZelle(); return; }
 
+    // The fees, said plainly before the client picks how to pay (owner 2026-11-17): bank and debit free, credit
+    // cards the card fee (never more than 3%, and none in CT/MA). The exact total is shown again before Pay.
     const feeNote = p.cardFeeBps>0
-      ? `No fee for bank transfer or debit cards. Credit cards have a ${pct(p.cardFeeBps)} card fee — you’ll see the total before you pay.`
+      ? 'You’ll see the exact total before you pay.'
       : 'Pay by card or bank transfer. No fees.';
+    const feeList = p.cardFeeBps>0 ? `<ul class="pay-fees" data-testid="pay-fees">
+        <li><span>Bank transfer</span><strong>No fee</strong></li>
+        <li><span>Debit card</span><strong>No fee</strong></li>
+        <li><span>Credit card</span><strong>${pct(p.cardFeeBps)} fee (${money(Math.round(p.amountCents*p.cardFeeBps/10000))})</strong></li>
+      </ul>` : '';
     card(`<h2>${title}</h2>
       <div class="pay-amount">${money(p.amountCents)}</div>
       <p class="pay-note">${esc(p.description)} · ${feeNote}</p>
+      ${feeList}
       ${p.testMode?'<p class="pay-test">Test mode — no real money moves. Test card: 4242 4242 4242 4242, any future date, any CVC.</p>':''}
       ${p.failureMessage?`<p class="err" style="margin:0 0 12px;">Last attempt: ${esc(p.failureMessage)}</p>`:''}
       <div id="pay-step"></div>
