@@ -66,8 +66,21 @@ def test_lock_screen_offers_email_code(live_server, page):
     btn = page.locator('[data-testid="faceid-email-code"]')
     btn.wait_for(state="visible", timeout=10000)
     btn.click()
+    gate.wait_for(state="detached", timeout=10000)   # the email address is on the lock screen too: wait for it to go
     page.get_by_text(EMAIL).first.wait_for(state="visible", timeout=10000)
+    page.wait_for_timeout(300)
     assert any(c.startswith("otp") for c in calls), f"no code was requested: {calls}"
-    assert page.locator('[data-testid="faceid-gate"]').count() == 0
     real = [e for e in errors if "401" not in e and "Failed to load resource" not in e]
     assert not real, f"console errors: {real}"
+
+
+def test_server_refusing_face_id_shows_the_reason(live_server, page):
+    # 0102: if the server doesn't count this Face ID sign-in (a passkey nobody approved on the account), the app
+    # shows the lock screen with the reason and the emailed-code button -- not an empty app.
+    calls = []
+    _stub_supabase(page, calls)
+    page.route("**/rest/v1/rpc/strong_auth", lambda r: r.fulfill(status=200, content_type="application/json", body="false"))
+    _open_with_session(page, live_server, _session(int(time.time()) - 5, method="passkey"))
+    page.locator('[data-testid="faceid-gate"]').wait_for(state="visible", timeout=15000)
+    page.get_by_text("isn't accepted for this account").wait_for(state="visible", timeout=10000)
+    assert page.locator('[data-testid="faceid-email-code"]').count() == 1

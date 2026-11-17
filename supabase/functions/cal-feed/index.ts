@@ -41,6 +41,9 @@ async function artistFor(req: Request): Promise<any | null> {
   });
   const { data: { user } } = await caller.auth.getUser();
   if (!user) return null;
+  // A passkey or emailed-code sign-in in the last 24 hours, like every RLS check (0102).
+  const { data: fresh } = await caller.rpc("strong_auth");
+  if (fresh !== true) return null;
   const { data } = await serviceClient().from("artists").select("id, name").eq("user_id", user.id).maybeSingle();
   return data || null;
 }

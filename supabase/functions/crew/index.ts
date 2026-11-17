@@ -23,6 +23,9 @@ Deno.serve(async (req) => {
   });
   const { data: { user } } = await caller.auth.getUser();
   if (!user) return json({ ok: false, error: "not authenticated" }, 401);
+  // A passkey or emailed-code sign-in in the last 24 hours, like every RLS check (0102).
+  const { data: fresh } = await caller.rpc("strong_auth");
+  if (fresh !== true) return json({ ok: false, error: "Please sign in again." }, 401);
   const sb = serviceClient();
   const [{ data: admin }, { data: me }] = await Promise.all([
     sb.from("admin_users").select("id, name").eq("user_id", user.id).maybeSingle(),
