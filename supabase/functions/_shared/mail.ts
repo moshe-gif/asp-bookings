@@ -53,8 +53,27 @@ export function emailTestMode(): { on: boolean; to: string; allow: string[] } {
   return { on: Deno.env.get("EMAIL_LIVE") !== "yes", to: Deno.env.get("TEST_EMAIL_TO") || "moshe@aspmgmt.com", allow };
 }
 
-export async function sendRelayEmail(sb: Sb, original: { to: string; subject: string; html: string; brand?: string }): Promise<{ ok: boolean; error?: string; brandKey?: string; id?: string }> {
+type SendResult = { ok: boolean; error?: string; brandKey?: string; id?: string; via?: string };
+
+// Every server email goes through here, and each one is written to email_log (0099): who it was for, where it
+// really went, the subject, the sender and the result -- never the body. A failed log write never fails the send.
+export async function sendRelayEmail(sb: Sb, original: { to: string; subject: string; html: string; brand?: string }): Promise<SendResult> {
   const test = emailTestMode();
+  const redirected = test.on && original.to.toLowerCase() !== test.to.toLowerCase() && !test.allow.includes(original.to.toLowerCase());
+  let out: SendResult;
+  try { out = await sendOne(sb, original, test); } catch (err) { out = { ok: false, error: String((err as Error)?.message || err) }; }
+  try {
+    const { error } = await sb.from("email_log").insert({
+      intended_to: String(original.to).slice(0, 320), sent_to: (redirected ? test.to : String(original.to)).slice(0, 320),
+      subject: String(original.subject || "").slice(0, 300), via: out.via || null, ok: !!out.ok,
+      error: out.error ? String(out.error).slice(0, 500) : null, provider_id: out.id ? String(out.id).slice(0, 200) : null,
+    });
+    if (error) console.error("email_log", error.message);
+  } catch (err) { console.error("email_log", String(err)); }
+  return out;
+}
+
+async function sendOne(sb: Sb, original: { to: string; subject: string; html: string; brand?: string }, test: { on: boolean; to: string; allow: string[] }): Promise<SendResult> {
   const msg = !test.on || original.to.toLowerCase() === test.to.toLowerCase() || test.allow.includes(original.to.toLowerCase()) ? original : {
     ...original, to: test.to,
     subject: `[TEST → ${original.to}] ${original.subject}`,
@@ -82,10 +101,10 @@ export async function sendRelayEmail(sb: Sb, original: { to: string; subject: st
       });
     } catch (err) {
       // No answer: it may have gone out, so don't try another sender (that could send it twice).
-      return { ok: false, error: "Gmail didn't answer: " + String(err) };
+      return { ok: false, error: "Gmail didn't answer: " + String(err), via: "gmail" };
     }
     const out = await resp.json().catch(() => ({}));
-    if (resp.ok) return { ok: true, brandKey: brand.key, id: out.id };
+    if (resp.ok) return { ok: true, brandKey: brand.key, id: out.id, via: "gmail" };
     console.error("Gmail send failed; trying the next sender", out.error?.message || resp.status);
   }
   const resendKey = Deno.env.get("RESEND_API_KEY");
@@ -103,8 +122,8 @@ export async function sendRelayEmail(sb: Sb, original: { to: string; subject: st
       return { ok: false, error: "could not reach Resend: " + String(err) };
     }
     const out = await resp.json().catch(() => ({}));
-    if (!resp.ok) return { ok: false, error: `Resend: ${out.message || out.name || resp.status}` };
-    return { ok: true, brandKey: brand.key, id: out.id };
+    if (!resp.ok) return { ok: false, error: `Resend: ${out.message || out.name || resp.status}`, via: "resend" };
+    return { ok: true, brandKey: brand.key, id: out.id, via: "resend" };
   }
   const relayUrl = Deno.env.get("RELAY_URL");
   const relaySecret = Deno.env.get("RELAY_SECRET");
@@ -121,6 +140,6 @@ export async function sendRelayEmail(sb: Sb, original: { to: string; subject: st
     return { ok: false, error: "could not reach mail relay: " + String(err) };
   }
   const out = await resp.json().catch(() => ({ ok: false, error: "bad relay response" }));
-  if (!resp.ok || !out.ok) return { ok: false, error: out.error || "relay failed" };
-  return { ok: true, brandKey: brand.key };
+  if (!resp.ok || !out.ok) return { ok: false, error: out.error || "relay failed", via: "relay" };
+  return { ok: true, brandKey: brand.key, via: "relay" };
 }

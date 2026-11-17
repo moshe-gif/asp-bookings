@@ -11,6 +11,7 @@
 import { serviceClient } from "../_shared/auth.ts";
 import { appUrl as configuredAppUrl } from "../_shared/config.ts";
 import { consumeOAuthState } from "../_shared/oauth.ts";
+import { timeout } from "../_shared/timeout.ts";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
@@ -36,7 +37,7 @@ Deno.serve(async (req) => {
 
   let tokenResp: Response;
   try {
-    tokenResp = await fetch(GOOGLE_TOKEN_URL, {
+    tokenResp = await fetch(GOOGLE_TOKEN_URL, { signal: timeout(30_000),
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -61,7 +62,7 @@ Deno.serve(async (req) => {
 
   let email: string | null = null;
   try {
-    const userResp = await fetch(GOOGLE_USERINFO_URL, {
+    const userResp = await fetch(GOOGLE_USERINFO_URL, { signal: timeout(30_000),
       headers: { "Authorization": `Bearer ${tokens.access_token}` },
     });
     if (userResp.ok) email = (await userResp.json()).email || null;

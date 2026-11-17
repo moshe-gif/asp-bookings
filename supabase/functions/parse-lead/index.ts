@@ -8,6 +8,7 @@ import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin, serviceClient } from "../_shared/auth.ts";
 // Pinned here, not in _shared/deps.ts, so only this function loads the SDK.
 import Anthropic from "npm:@anthropic-ai/sdk@0.130.0";
+import { aiRecord, aiTake } from "../_shared/ai.ts";
 
 const MAX_TEXT = 6000;
 
@@ -54,6 +55,10 @@ Deno.serve(async (req) => {
   const { data: roster } = await serviceClient().from("artists").select("name").order("name");
   const artistNames = (roster || []).map((r: { name: string }) => r.name);
 
+  // A daily cap on AI use (0100).
+  const aiDb = serviceClient();
+  const allowance = await aiTake(aiDb, "parse-lead");
+  if (!allowance.ok) return json({ ok: false, error: allowance.error }, 429);
   const client = new Anthropic({ apiKey });
   let response;
   try {
@@ -73,6 +78,7 @@ Deno.serve(async (req) => {
     const status = err instanceof Anthropic.APIError ? err.status : 0;
     return json({ ok: false, error: status === 429 ? "AI is busy, try again in a minute." : "AI auto-fill failed: " + String((err as Error)?.message || err) }, 502);
   }
+  await aiRecord(aiDb, "parse-lead", response.usage);
   if (response.stop_reason === "refusal") return json({ ok: false, error: "The AI declined to read that message." }, 422);
   const block = response.content.find((b) => b.type === "text");
   let fields: Record<string, string>;

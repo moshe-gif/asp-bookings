@@ -11,6 +11,7 @@
 // returns a clear "not configured" error rather than a confusing upstream failure.
 import { jsonFor, preflight } from "../_shared/http.ts";
 import { requireAdmin } from "../_shared/auth.ts";
+import { timeout } from "../_shared/timeout.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return preflight(req);
@@ -32,7 +33,7 @@ Deno.serve(async (req) => {
   const ident = (body.ident || "").trim();
   if (!ident) return json({ ok: false, error: "missing flight ident (e.g. AA123)" }, 400);
 
-  const resp = await fetch(`https://aeroapi.flightaware.com/aeroapi/flights/${encodeURIComponent(ident)}`, {
+  const resp = await fetch(`https://aeroapi.flightaware.com/aeroapi/flights/${encodeURIComponent(ident)}`, { signal: timeout(30_000),
     headers: { "x-apikey": apiKey },
   });
   const data = await resp.json().catch(() => null);

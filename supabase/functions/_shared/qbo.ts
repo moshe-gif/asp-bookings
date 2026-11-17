@@ -2,6 +2,7 @@
 // (qbo_connection, one row), refreshing its access token when it is about to expire.
 // Secrets: QBO_CLIENT_ID, QBO_CLIENT_SECRET, QBO_ENVIRONMENT ("sandbox" | production by default).
 import { serviceClient } from "./auth.ts";
+import { timeout } from "./timeout.ts";
 
 export const QBO_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 
@@ -20,7 +21,7 @@ export async function qboAccessToken(): Promise<{ accessToken: string; realmId: 
     return { accessToken: row.access_token, realmId: row.realm_id };
   }
   const basicAuth = btoa(`${Deno.env.get("QBO_CLIENT_ID")!}:${Deno.env.get("QBO_CLIENT_SECRET")!}`);
-  const resp = await fetch(QBO_TOKEN_URL, {
+  const resp = await fetch(QBO_TOKEN_URL, { signal: timeout(30_000),
     method: "POST",
     headers: { "Authorization": `Basic ${basicAuth}`, "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
     body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: row.refresh_token }),

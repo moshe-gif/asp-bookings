@@ -6,6 +6,8 @@
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin } from "../_shared/auth.ts";
 import Anthropic from "npm:@anthropic-ai/sdk@0.130.0";
+import { serviceClient } from "../_shared/auth.ts";
+import { aiRecord, aiTake } from "../_shared/ai.ts";
 
 const FIELDS = {
   found: "yes when one specific real venue clearly matches, else no",
@@ -33,6 +35,10 @@ Deno.serve(async (req) => {
   const hint = String(b?.city || "").trim().slice(0, 80);
   if (venue.length < 3) return json({ ok: false, error: "Type the venue's name first." }, 400);
 
+  // A daily cap on AI use (0100).
+  const aiDb = serviceClient();
+  const allowance = await aiTake(aiDb, "venue-lookup");
+  if (!allowance.ok) return json({ ok: false, error: allowance.error }, 429);
   const client = new Anthropic({ apiKey });
   let response;
   try {
@@ -53,6 +59,7 @@ Deno.serve(async (req) => {
     const status = err instanceof Anthropic.APIError ? err.status : 0;
     return json({ ok: false, error: status === 429 ? "Busy, try again in a minute." : "Lookup failed: " + String((err as Error)?.message || err) }, 502);
   }
+  await aiRecord(aiDb, "venue-lookup", response.usage);
   const texts = response.content.filter((x) => x.type === "text");
   const last = texts[texts.length - 1];
   let f: Record<string, string>;

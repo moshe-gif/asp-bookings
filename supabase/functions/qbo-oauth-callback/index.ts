@@ -10,6 +10,7 @@
 import { serviceClient } from "../_shared/auth.ts";
 import { appUrl as configuredAppUrl } from "../_shared/config.ts";
 import { consumeOAuthState } from "../_shared/oauth.ts";
+import { timeout } from "../_shared/timeout.ts";
 
 const QBO_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 
@@ -36,7 +37,7 @@ Deno.serve(async (req) => {
 
   let tokenResp: Response;
   try {
-    tokenResp = await fetch(QBO_TOKEN_URL, {
+    tokenResp = await fetch(QBO_TOKEN_URL, { signal: timeout(30_000),
       method: "POST",
       headers: {
         "Authorization": `Basic ${basicAuth}`,

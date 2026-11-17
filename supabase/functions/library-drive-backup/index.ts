@@ -11,6 +11,7 @@
 import { createClient } from "../_shared/deps.ts";
 import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { serviceClient } from "../_shared/auth.ts";
+import { timeout } from "../_shared/timeout.ts";
 
 const BUCKET = "library";
 const ROOT_NAME = "ASP Media Library";
@@ -103,7 +104,7 @@ async function run(sb: Any) {
 
 async function accessToken(sb: Any, cfg: Any): Promise<string> {
   if (cfg.access_token && cfg.access_token_expires_at && new Date(cfg.access_token_expires_at).getTime() > Date.now() + 5 * 60_000) return cfg.access_token;
-  const r = await fetch("https://oauth2.googleapis.com/token", {
+  const r = await fetch("https://oauth2.googleapis.com/token", { signal: timeout(30_000),
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ client_id: Deno.env.get("GMAIL_CLIENT_ID")!, client_secret: Deno.env.get("GMAIL_CLIENT_SECRET")!, refresh_token: cfg.refresh_token, grant_type: "refresh_token" }),
   });
@@ -114,7 +115,7 @@ async function accessToken(sb: Any, cfg: Any): Promise<string> {
 }
 
 async function drive(token: string, path: string, init: RequestInit = {}): Promise<Any> {
-  const r = await fetch(`https://www.googleapis.com/drive/v3/${path}`, { ...init, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(init.headers || {}) } });
+  const r = await fetch(`https://www.googleapis.com/drive/v3/${path}`, { signal: timeout(30_000), ...init, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(init.headers || {}) } });
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`Google Drive ${r.status}: ${body?.error?.message || "error"}`);
   return body;
@@ -157,7 +158,7 @@ async function uploadVideo(sb: Any, token: string, folder: string, v: Any, prev:
   const src = signed.signedUrl;
   let total = Number(v.size_bytes) || 0;
   if (!total) {
-    const h = await fetch(src, { method: "HEAD" });
+    const h = await fetch(src, { signal: timeout(30_000), method: "HEAD" });
     total = Number(h.headers.get("content-length")) || 0;
     if (!total) throw new Error("could not read the file's size");
   }
@@ -167,7 +168,7 @@ async function uploadVideo(sb: Any, token: string, folder: string, v: Any, prev:
   if (session) offset = await confirmedOffset(session, total);   // -1: the link expired, start over
   if (!session || offset < 0) {
     const name = v.file_name || `${v.title}.mp4`;
-    const r = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id", {
+    const r = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id", { signal: timeout(120_000),
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": v.mime || "video/mp4", "X-Upload-Content-Length": String(total) },
       body: JSON.stringify({ name, parents: [folder], description: [v.title, v.songs, v.recorded_on].filter(Boolean).join(" · ") }),
@@ -184,11 +185,11 @@ async function uploadVideo(sb: Any, token: string, folder: string, v: Any, prev:
   while (offset < total) {
     if (Date.now() - started > BUDGET_MS) return false;
     const end = Math.min(offset + CHUNK, total) - 1;
-    const part = await fetch(src, { headers: { Range: `bytes=${offset}-${end}` } });
+    const part = await fetch(src, { signal: timeout(120_000), headers: { Range: `bytes=${offset}-${end}` } });
     if (part.status !== 206 && !(part.status === 200 && offset === 0 && end === total - 1)) throw new Error(`could not read the file (${part.status})`);
     const bytes = new Uint8Array(await part.arrayBuffer());
     if (bytes.length !== end - offset + 1) throw new Error("the file read came back short");
-    const put = await fetch(session, { method: "PUT", headers: { "Content-Range": `bytes ${offset}-${end}/${total}` }, body: bytes });
+    const put = await fetch(session, { signal: timeout(120_000), method: "PUT", headers: { "Content-Range": `bytes ${offset}-${end}/${total}` }, body: bytes });
     if (put.status === 200 || put.status === 201) {
       const f = await put.json().catch(() => ({}));
       await save({ drive_file_id: f.id || null, upload_url: null, uploaded_bytes: total, backed_up_at: new Date().toISOString(), error: null });
@@ -203,7 +204,7 @@ async function uploadVideo(sb: Any, token: string, folder: string, v: Any, prev:
 }
 // Asks Google how much of an unfinished upload it has. -1 when the upload link is no longer valid.
 async function confirmedOffset(session: string, total: number): Promise<number> {
-  const r = await fetch(session, { method: "PUT", headers: { "Content-Range": `bytes */${total}` } });
+  const r = await fetch(session, { signal: timeout(120_000), method: "PUT", headers: { "Content-Range": `bytes */${total}` } });
   await r.body?.cancel();
   if (r.status === 308) { const range = r.headers.get("range"); return range ? Number(range.split("-")[1]) + 1 : 0; }
   if (r.status === 200 || r.status === 201) return total;

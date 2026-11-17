@@ -11,6 +11,7 @@
 import { serviceClient } from "../_shared/auth.ts";
 import { appUrl as configuredAppUrl } from "../_shared/config.ts";
 import { consumeOAuthState } from "../_shared/oauth.ts";
+import { timeout } from "../_shared/timeout.ts";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
@@ -41,7 +42,7 @@ Deno.serve(async (req) => {
 
   let tokenResp: Response;
   try {
-    tokenResp = await fetch(GOOGLE_TOKEN_URL, {
+    tokenResp = await fetch(GOOGLE_TOKEN_URL, { signal: timeout(30_000),
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -70,7 +71,7 @@ Deno.serve(async (req) => {
   }
   // The Google account that consented must BE the mailbox being connected -- otherwise someone
   // could attach a different inbox to an artist's payment-matching mailbox.
-  const profResp = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+  const profResp = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", { signal: timeout(30_000), headers: { Authorization: `Bearer ${tokens.access_token}` } });
   const profile = profResp.ok ? await profResp.json() : null;
   if (!profile?.emailAddress || String(profile.emailAddress).toLowerCase() !== String(mailbox.email || "").toLowerCase()) {
     console.error("Gmail OAuth callback: signed-in Google account does not match the mailbox", profile?.emailAddress, mailbox.email);
@@ -99,14 +100,14 @@ Deno.serve(async (req) => {
 // deno-lint-ignore no-explicit-any
 async function connectDrive(sb: any, code: string, appUrl: string): Promise<Response> {
   const back = (r: string) => Response.redirect(`${appUrl}/?gdrive=${r}#/videos`, 302);
-  const r = await fetch(GOOGLE_TOKEN_URL, {
+  const r = await fetch(GOOGLE_TOKEN_URL, { signal: timeout(30_000),
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ code, client_id: Deno.env.get("GMAIL_CLIENT_ID")!, client_secret: Deno.env.get("GMAIL_CLIENT_SECRET")!,
       redirect_uri: Deno.env.get("GMAIL_REDIRECT_URI")!, grant_type: "authorization_code" }),
   }).catch(() => null);
   if (!r || !r.ok) { console.error("Drive token exchange failed", r && await r.text()); return back("error"); }
   const tokens = await r.json();
-  const who = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+  const who = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", { signal: timeout(30_000), headers: { Authorization: `Bearer ${tokens.access_token}` } });
   const email = who.ok ? String((await who.json()).email || "").toLowerCase() : "";
   const { data: cfg } = await sb.from("drive_backup").select("account_email").eq("id", 1).maybeSingle();
   if (!email || email !== String(cfg?.account_email || "").toLowerCase()) { console.error("Drive: wrong account", email); return back("mismatch"); }

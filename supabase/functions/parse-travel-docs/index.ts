@@ -6,6 +6,8 @@ import { jsonFor, preflight, readJson } from "../_shared/http.ts";
 import { requireAdmin } from "../_shared/auth.ts";
 // Pinned here, not in _shared/deps.ts, so only the functions that call Claude load the SDK.
 import Anthropic from "npm:@anthropic-ai/sdk@0.130.0";
+import { serviceClient } from "../_shared/auth.ts";
+import { aiRecord, aiTake } from "../_shared/ai.ts";
 
 const MAX_TEXT = 30000;
 const MAX_FILES = 6;
@@ -66,6 +68,10 @@ Deno.serve(async (req) => {
   }
   content.push({ type: "text", text: text ? `<confirmations>\n${text}\n</confirmations>` : "The travel confirmations are attached." });
 
+  // A daily cap on AI use (0100).
+  const aiDb = serviceClient();
+  const allowance = await aiTake(aiDb, "parse-travel-docs");
+  if (!allowance.ok) return json({ ok: false, error: allowance.error }, 429);
   const client = new Anthropic({ apiKey });
   let response;
   try {
@@ -83,6 +89,7 @@ Deno.serve(async (req) => {
     const status = err instanceof Anthropic.APIError ? err.status : 0;
     return json({ ok: false, error: status === 429 ? "AI is busy, try again in a minute." : "Reading the confirmations failed: " + String((err as Error)?.message || err) }, 502);
   }
+  await aiRecord(aiDb, "parse-travel-docs", response.usage);
   if (response.stop_reason === "refusal") return json({ ok: false, error: "The AI declined to read those files." }, 422);
   const block = response.content.find((b) => b.type === "text");
   try {

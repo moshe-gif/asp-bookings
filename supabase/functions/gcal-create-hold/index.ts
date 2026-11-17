@@ -13,6 +13,7 @@
 // GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET (to refresh the stored access token).
 import { jsonFor, preflight } from "../_shared/http.ts";
 import { requireAdmin, serviceClient } from "../_shared/auth.ts";
+import { timeout } from "../_shared/timeout.ts";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
@@ -26,7 +27,7 @@ async function getValidAccessToken(): Promise<string> {
 
   const clientId = Deno.env.get("GOOGLE_CALENDAR_CLIENT_ID")!;
   const clientSecret = Deno.env.get("GOOGLE_CALENDAR_CLIENT_SECRET")!;
-  const resp = await fetch(GOOGLE_TOKEN_URL, {
+  const resp = await fetch(GOOGLE_TOKEN_URL, { signal: timeout(30_000),
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -111,13 +112,13 @@ Deno.serve(async (req) => {
       const apiBase = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
       let resp: Response;
       if (existingLink) {
-        resp = await fetch(`${apiBase}/${existingLink.google_event_id}`, {
+        resp = await fetch(`${apiBase}/${existingLink.google_event_id}`, { signal: timeout(30_000),
           method: "PATCH",
           headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
           body: JSON.stringify(eventBody),
         });
       } else {
-        resp = await fetch(apiBase, {
+        resp = await fetch(apiBase, { signal: timeout(30_000),
           method: "POST",
           headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
           body: JSON.stringify(eventBody),
